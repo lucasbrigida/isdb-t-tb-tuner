@@ -9,6 +9,9 @@ int main() {
 
     std::ifstream file("tests/data/channel30_exact_isdbt_rate.raw", std::ios::binary);
     if (!file.is_open()) {
+        file.open("../tests/data/channel30_exact_isdbt_rate.raw", std::ios::binary);
+    }
+    if (!file.is_open()) {
         std::cerr << "  [ERRO] Nao foi possivel abrir tests/data/channel30_exact_isdbt_rate.raw\n";
         return 1;
     }

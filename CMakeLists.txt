@@ -83,6 +83,14 @@ target_link_libraries(test_ofdm_sync PRIVATE
     volk
 )
 
+# CTest Integration
+enable_testing()
+add_test(NAME ReedSolomon COMMAND test_reed_solomon)
+add_test(NAME Descrambler COMMAND test_descrambler)
+add_test(NAME Viterbi COMMAND test_viterbi)
+add_test(NAME FecPipeline COMMAND test_fec_pipeline)
+add_test(NAME OfdmSync COMMAND test_ofdm_sync)
+
 if(WIN32)
     target_link_libraries(isdbtb_rx PRIVATE ws2_32)
     target_compile_definitions(isdbtb_rx PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX)
