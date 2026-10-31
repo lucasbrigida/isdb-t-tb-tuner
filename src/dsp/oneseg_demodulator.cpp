@@ -93,8 +93,30 @@ size_t OneSegDemodulator::process_symbol(const std::complex<float>* symbol_time_
     }
 
     // 3. Estimacao de canal nos Pilotos Dispersos (SP)
-    // Posicoes de SP: l % 12 == 3 * (symbol_count_ % 4)
-    size_t sym_mod4 = symbol_count_ % 4;
+    // Deteccao dinamica da fase do simbolo (0..3) medindo a coerencia entre pilotos SP adjacentes
+    size_t sym_mod4 = 0;
+    float max_coh = -1.0f;
+    for (size_t p = 0; p < 4; ++p) {
+        std::complex<float> num(0.0f, 0.0f);
+        float den = 0.0f;
+        std::complex<float> prev(0.0f, 0.0f);
+        bool has_prev = false;
+        for (size_t l = 3 * p; l < 432; l += 12) {
+            std::complex<float> h_val = seg_carriers[l] / prbs_pilots_[l];
+            if (has_prev) {
+                num += h_val * std::conj(prev);
+                den += std::norm(h_val) * std::norm(prev);
+            }
+            prev = h_val;
+            has_prev = true;
+        }
+        float coh = (den > 1e-12f) ? (std::abs(num) / std::sqrt(den)) : 0.0f;
+        if (coh > max_coh) {
+            max_coh = coh;
+            sym_mod4 = p;
+        }
+    }
+
     std::vector<std::complex<float>> h(432, std::complex<float>(1.0f, 0.0f));
     std::vector<size_t> sp_indices;
 

@@ -24,6 +24,7 @@ public:
     bool load();
     bool save();
 
+    void clear() { channels_.clear(); }
     void add_or_update(const ChannelInfo& ch);
     const std::vector<ChannelInfo>& get_channels() const { return channels_; }
 

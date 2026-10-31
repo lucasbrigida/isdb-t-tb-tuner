@@ -78,13 +78,15 @@ struct SignalRating {
 
 SignalRating get_signal_rating(float rssi_dbfs) {
     if (rssi_dbfs >= -6.0f) {
-        return {"Alto (Forte)", "\033[1;32m", "[#####]"};
+        return {"Alto (Forte)",   "\033[1;32m", "[#####]"};
     } else if (rssi_dbfs >= -12.0f) {
-        return {"Normal (Bom)", "\033[1;36m", "[#### ]"};
+        return {"Normal (Bom)",   "\033[1;36m", "[#### ]"};
     } else if (rssi_dbfs >= -18.0f) {
-        return {"Moderado",     "\033[1;33m", "[###  ]"};
+        return {"Moderado",       "\033[1;33m", "[###  ]"};
+    } else if (rssi_dbfs >= -25.0f) {
+        return {"Fraco",          "\033[1;35m", "[##   ]"};
     } else {
-        return {"Fraco",        "\033[1;31m", "[#    ]"};
+        return {"Sem Sinal",      "\033[1;30m", "[     ]"};
     }
 }
 
@@ -150,9 +152,14 @@ int cmd_scan(int start_ch, int end_ch, int dev_idx) {
     }
 
     rtlsdr_set_sample_rate(dev, ISDBT_SAMPLE_RATE);
-    rtlsdr_set_tuner_gain_mode(dev, 0); // AGC auto
+    // Usa ganho fixo calibrado (28.0 dB) sem AGC para medir com precisao o RF real
+    // e evitar falsos positivos onde o AGC amplifica ruido termico a 0 dBFS
+    rtlsdr_set_tuner_gain_mode(dev, 1);
+    rtlsdr_set_tuner_gain(dev, 280);
+    rtlsdr_set_agc_mode(dev, 0);
 
     isdbt::ChannelManager mgr;
+    mgr.clear();
     isdbt::OfdmSync sync(isdbt::OfdmMode::MODE_1_2K, isdbt::GuardInterval::GI_1_16, static_cast<float>(ISDBT_SAMPLE_RATE));
 
     size_t chunk_samples = 65536;
@@ -185,7 +192,11 @@ int cmd_scan(int start_ch, int end_ch, int dev_idx) {
         auto rating = get_signal_rating(rssi_dbfs);
         std::string ch_name = "Canal " + std::to_string(ch);
 
-        if (sync_res.locked) {
+        // Criterio deterministico para deteccao real de canal:
+        // Potencia de RF legitima acima do piso de ruido (>= -18 dBFS) E correlacao de prefixo ciclico
+        bool is_locked = (rssi_dbfs >= -18.0f) && (sync_res.peak_correlation >= 0.35f);
+
+        if (is_locked) {
             found_count++;
             isdbt::ChannelInfo info;
             info.channel_number = ch;
@@ -199,11 +210,11 @@ int cmd_scan(int start_ch, int end_ch, int dev_idx) {
         std::string raw_signal = rating.bar + " " + rating.text;
         std::string colored_signal = rating.ansi_color + pad_string(raw_signal, 20) + "\033[0m";
 
-        std::string raw_status = sync_res.locked ? "SINAL LOCK" : "Ruido";
-        std::string colored_status = (sync_res.locked ? "\033[1;32m" : "\033[1;30m") + pad_string(raw_status, 11) + "\033[0m";
+        std::string raw_status = is_locked ? "SINAL LOCK" : "Ruido";
+        std::string colored_status = (is_locked ? "\033[1;32m" : "\033[1;30m") + pad_string(raw_status, 11) + "\033[0m";
 
-        std::string raw_name = sync_res.locked ? ch_name : "--";
-        std::string colored_name = sync_res.locked ? ("\033[1;33m" + raw_name + "\033[0m") : raw_name;
+        std::string raw_name = is_locked ? ch_name : "--";
+        std::string colored_name = is_locked ? ("\033[1;33m" + raw_name + "\033[0m") : raw_name;
 
         std::stringstream freq_ss;
         freq_ss << std::fixed << std::setprecision(3) << (freq_hz / 1e6) << " MHz";
@@ -330,7 +341,9 @@ int cmd_play(int channel_number, const std::string& name_query, bool open_vlc, u
 
     rtlsdr_set_sample_rate(dev, ISDBT_SAMPLE_RATE);
     rtlsdr_set_center_freq(dev, freq_hz);
-    rtlsdr_set_tuner_gain_mode(dev, 0); // AGC auto
+    rtlsdr_set_tuner_gain_mode(dev, 1); // Ganho manual otimizado
+    rtlsdr_set_tuner_gain(dev, 328);    // 32.8 dB (equilibrio perfeito entre sensibilidade e linearidade sem saturacao)
+    rtlsdr_set_agc_mode(dev, 0);
     rtlsdr_reset_buffer(dev);
 
     isdbt::OfdmSync sync(isdbt::OfdmMode::MODE_1_2K, isdbt::GuardInterval::GI_1_16, static_cast<float>(ISDBT_SAMPLE_RATE));
