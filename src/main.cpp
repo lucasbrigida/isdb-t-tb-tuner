@@ -24,6 +24,7 @@
 #include "dsp/descrambler.hpp"
 #include "dsp/viterbi_decoder.hpp"
 #include "dsp/ofdm_sync.hpp"
+#include "dsp/oneseg_demodulator.hpp"
 #include "streaming/udp_streamer.hpp"
 #include "mpegts/psi_parser.hpp"
 #include "mpegts/ts_generator.hpp"
@@ -274,7 +275,7 @@ int cmd_export(const std::string& out_path, uint16_t port) {
     }
 }
 
-int cmd_play(int channel_number, const std::string& name_query, bool open_vlc, uint16_t udp_port, int dev_idx) {
+int cmd_play(int channel_number, const std::string& name_query, bool open_vlc, uint16_t udp_port, int dev_idx, bool test_pattern = false) {
     isdbt::ChannelManager mgr;
     const isdbt::ChannelInfo* target = nullptr;
 
@@ -333,11 +334,8 @@ int cmd_play(int channel_number, const std::string& name_query, bool open_vlc, u
     rtlsdr_reset_buffer(dev);
 
     isdbt::OfdmSync sync(isdbt::OfdmMode::MODE_1_2K, isdbt::GuardInterval::GI_1_16, static_cast<float>(ISDBT_SAMPLE_RATE));
-    isdbt::ViterbiDecoder viterbi(isdbt::CodeRate::RATE_1_2);
-    isdbt::Descrambler descrambler;
-    isdbt::ReedSolomon rs;
+    isdbt::OneSegDemodulator demod(isdbt::OfdmMode::MODE_1_2K, isdbt::GuardInterval::GI_1_16);
     isdbt::PsiParser psi;
-    isdbt::TsGenerator ts_gen;
 
     size_t chunk_samples = 32768;
     std::vector<uint8_t> raw_buf(chunk_samples * 2);
@@ -345,7 +343,6 @@ int cmd_play(int channel_number, const std::string& name_query, bool open_vlc, u
 
     uint64_t total_packets = 0;
     auto last_time = std::chrono::steady_clock::now();
-    uint8_t pkt_buf[188];
 
     while (g_running) {
         int n_read = 0;
@@ -362,25 +359,51 @@ int cmd_play(int channel_number, const std::string& name_query, bool open_vlc, u
         float rssi_dbfs = 10.0f * std::log10((pwr_sum / chunk_samples) + 1e-12f);
 
         auto sync_res = sync.find_symbol_boundary(iq_buf.data(), iq_buf.size());
+        std::vector<std::vector<uint8_t>> decoded_pkts;
+
         if (sync_res.locked) {
             sync.correct_frequency_offset(iq_buf.data(), iq_buf.size(), sync_res.ffo_hz);
+
+            // Simbolo util (2048) + GI (128) = 2176 amostras
+            const size_t sym_len = 2048 + 128;
+            size_t offset = static_cast<size_t>(std::max(0, sync_res.symbol_offset));
+            while (offset + 2048 <= chunk_samples) {
+                // symbol_offset ja aponta exatamente para o inicio do periodo util do simbolo
+                const std::complex<float>* sym_data = &iq_buf[offset];
+                demod.process_symbol(sym_data, decoded_pkts);
+                offset += sym_len;
+            }
+
+            // Envia todos os pacotes MPEG-TS reais decodificados do ar para o VLC
+            for (const auto& pkt : decoded_pkts) {
+                streamer.send_ts_packet(pkt.data());
+                psi.parse_packet(pkt.data());
+                total_packets++;
+            }
         }
 
-        // Transmite o fluxo MPEG-TS broadcast (video H.264 + PCR + PAT/PMT/SDT)
-        // Cada leitura de 32768 amostras dura ~16.1ms, correspondendo a ~28 pacotes TS (4 datagramas de 1316B)
-        for (int p = 0; p < 28; ++p) {
-            ts_gen.get_next_packet(pkt_buf);
-            streamer.send_ts_packet(pkt_buf);
-            total_packets++;
+        if (test_pattern) {
+            static isdbt::TsGenerator test_gen;
+            static uint8_t pat_cc = 0, pmt_cc = 0;
+            uint8_t tpkt[188];
+            for (int b = 0; b < 7; ++b) {
+                test_gen.get_pat_packet(tpkt, pat_cc++);
+                streamer.send_ts_packet(tpkt);
+                test_gen.get_pmt_packet(tpkt, pmt_cc++);
+                streamer.send_ts_packet(tpkt);
+                total_packets += 2;
+            }
         }
 
         auto now = std::chrono::steady_clock::now();
         if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_time).count() >= 500) {
+            std::string s_name = psi.get_primary_service_name();
             std::cout << "\r[Status] RSSI: " << std::fixed << std::setprecision(1) << rssi_dbfs << " dBFS | "
                       << "OFDM: " << (sync_res.locked ? "\033[1;32mLOCKED\033[0m" : "\033[1;31mSEARCH\033[0m")
                       << " (Pico " << std::setprecision(2) << sync_res.peak_correlation << ") | "
                       << "FFO: " << std::setprecision(0) << sync_res.ffo_hz << " Hz | "
-                      << "TS Enviados: " << total_packets << " pkts   " << std::flush;
+                      << "TS do Ar: " << total_packets << " pkts"
+                      << (!s_name.empty() ? (" | " + s_name) : "") << "   " << std::flush;
             last_time = now;
         }
     }
@@ -423,11 +446,13 @@ int main(int argc, char** argv) {
     std::string play_name;
     bool open_vlc = false;
     uint16_t udp_port = 1234;
+    bool test_pattern = false;
     auto sc_play = app.add_subcommand("play", "Sintoniza um canal e transmite via UDP para o player VLC");
     sc_play->add_option("-c,--channel", play_ch, "Numero do canal (ex: 14, 28, 30)");
     sc_play->add_option("-n,--name", play_name, "Nome da emissora (ex: GLOBO, RECORD)");
     sc_play->add_option("-p,--port", udp_port, "Porta UDP para transmissao (padrao 1234)");
     sc_play->add_flag("--vlc", open_vlc, "Abre o reprodutor VLC automaticamente com a URL do canal");
+    sc_play->add_flag("-t,--test-pattern", test_pattern, "Transmite padrao de teste para diagnostico de rede");
     sc_play->add_option("-d,--device", dev_idx, "Indice do dongle RTL-SDR (padrao 0)");
 
     app.require_subcommand(1); // Exige ao menos um subcomando
@@ -443,7 +468,7 @@ int main(int argc, char** argv) {
     } else if (sc_export->parsed()) {
         return cmd_export(export_path, export_port);
     } else if (sc_play->parsed()) {
-        return cmd_play(play_ch, play_name, open_vlc, udp_port, dev_idx);
+        return cmd_play(play_ch, play_name, open_vlc, udp_port, dev_idx, test_pattern);
     }
 
     return 0;

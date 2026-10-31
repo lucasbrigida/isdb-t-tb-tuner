@@ -200,7 +200,7 @@ def main():
 
     start_t = time.time()
     proc = subprocess.Popen(
-        [exe_main, "play", "-c", "30", "-p", str(test_port)],
+        [exe_main, "play", "-c", "30", "-p", str(test_port), "-t"],
         cwd=PROJECT_ROOT,
         env=clean_env,
         stdout=subprocess.PIPE,

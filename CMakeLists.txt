@@ -36,6 +36,7 @@ set(SOURCES
     src/dsp/descrambler.cpp
     src/dsp/viterbi_decoder.cpp
     src/dsp/ofdm_sync.cpp
+    src/dsp/oneseg_demodulator.cpp
     src/streaming/udp_streamer.cpp
     src/mpegts/psi_parser.cpp
     src/mpegts/ts_generator.cpp
