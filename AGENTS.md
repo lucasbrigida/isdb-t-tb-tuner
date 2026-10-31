@@ -131,6 +131,16 @@ Durante a auditoria e desenvolvimento do decodificador contra a implementação 
   2. **Comportamento visual da barra de título do VLC:** Ao abrir a URL `udp://@127.0.0.1:1234`, o módulo de rede do VLC recebe e utiliza o `@` para fazer o `bind()` de escuta local na porta. Contudo, o formatador de interface gráfica do VLC (Qt) intencionalmente remove o `@` ao compor o título da janela, mostrando visualmente apenas `udp://127.0.0.1:1234 - VLC media player`. Isso é o comportamento nativo do VLC e **não** significa que o `@` foi perdido pelo socket de rede.
 - ✅ **Como é o correto (`main.cpp`):** Utilizar a API nativa do Win32 `ShellExecuteA(NULL, "open", vlc_bin, streamer.url().c_str(), NULL, SW_SHOWNORMAL)` passando a URL `udp://@127.0.0.1:1234` diretamente ao executável do VLC em Arquivos de Programas, contornando qualquer falha de parsing do `cmd.exe`.
 
+### Erro 14: Colisão de Endpoints USB (Erro -9 / `LIBUSB_ERROR_PIPE`) e Falsos Positivos na Varredura (`scan`)
+- ❌ **O que estava errado:**
+  1. Durante a varredura (`cmd_scan`), chamadas repetidas a `rtlsdr_read_sync` seguidas imediatamente de `rtlsdr_set_center_freq` sem descarregar requisições pendentes causavam colisão no barramento USB. O endpoint de controle 0 do RTL2832U travava com erro `rtlsdr_demod_write_reg failed with -9` (`LIBUSB_ERROR_PIPE`), impossibilitando novas escritas I2C nos registradores do chip R820T e deixando o tuner congelado no Canal 14 pelo resto da varredura.
+  2. O limiar de detecção era excessivamente permissivo (`RSSI >= -18.0 dBFS` e correlação de CP `>= 0.35`). Como o ruído térmico ambiente da antena de RF UHF oscila tipicamente entre `-17.0` e `-17.9 dBFS` e ruído gaussiano puro atinge 0.35 de correlação estatisticamente, todos os canais vazios (14 a 44) eram classificados falsamente como "SINAL LOCK".
+- ✅ **Como é o correto (`main.cpp`):**
+  1. Utilizar a função auxiliar `safe_set_freq(dev, freq_hz)` que chama `rtlsdr_reset_buffer(dev)` antes e depois de `rtlsdr_set_center_freq(dev, freq_hz)`, garantindo ainda uma pausa de 80ms para estabilização do PLL do tuner sem travar o endpoint USB.
+  2. Arquitetura de Varredura em Dois Passos (Two-Pass Scan):
+     - **Passo 1 (Triagem Rápida de RF, ~35ms por canal):** Exige limiar mais rigoroso (`RSSI >= -13.0 dBFS` e pico de correlação de CP `>= 0.60`). Canais com apenas ruído são descartados instantaneamente em ~35ms.
+     - **Passo 2 (Resolução Profunda de Nome via SDT):** Apenas os canais candidatos reais que passaram no Passo 1 são sintonizados com thread dedicada de captura (`reader_thread`) e decodificação OFDM/MPEG-TS. O parser de PSI/SI monitora a tabela SDT (PID `0x0011`) com timeout máximo de 3.0s, interrompendo antecipadamente assim que o nome da emissora é obtido.
+
 ---
 
 ## 🧪 4. Suíte de Testes e Validações Realizadas
@@ -169,6 +179,7 @@ Qualquer modelo de IA que receber tarefas neste projeto deve seguir rigorosament
 6. **NUNCA reduza o limiar de IFO para menos de 0.60 sem histerese:** Lóbulos secundários de pilotos dispersos possuem coerência ~0.35 e prendem o receptor em frequências falsas.
 7. **NUNCA reinicie o Trellis do Viterbi a cada símbolo OFDM:** O fluxo de dados convolucional é contínuo ao longo de todo o quadro e transmissão.
 8. **NUNCA remova o delay de 100 ms após sintonizar frequência:** O PLL do R820T precisa desse tempo para travar sem gerar `[R82XX] PLL not locked!`.
+9. **NUNCA altere a frequência do tuner no RTL-SDR sem limpar os buffers USB (`rtlsdr_reset_buffer`) e aguardar estabilização do PLL:** Chamar `rtlsdr_set_center_freq` logo após leituras USB sem reset de buffer gera colisão nos endpoints de controle USB (`LIBUSB_ERROR_PIPE -9`) e trava o chip I2C R820T.
 
 ---
 

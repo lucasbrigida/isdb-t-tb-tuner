@@ -145,6 +145,26 @@ int cmd_probe() {
     return 0;
 }
 
+// Sintoniza com seguranca a frequencia central no RTL-SDR sem colidir endpoints USB (LIBUSB_ERROR_PIPE -9)
+// e aguarda a estabilizacao do sintetizador PLL do tuner Rafael Micro R820T/R828D.
+static bool safe_set_freq(rtlsdr_dev_t* dev, uint32_t freq_hz) {
+    rtlsdr_reset_buffer(dev);
+    int r = rtlsdr_set_center_freq(dev, freq_hz);
+    std::this_thread::sleep_for(std::chrono::milliseconds(80)); // Estabilizacao do PLL do tuner R820T
+    rtlsdr_reset_buffer(dev);
+    return (r == 0);
+}
+
+struct CandidateChannel {
+    int ch = 0;
+    uint32_t freq_hz = 0;
+    float rssi_dbfs = 0.0f;
+    float peak_corr = 0.0f;
+    isdbt::GuardInterval detected_gi = isdbt::GuardInterval::GI_1_16;
+    std::string name;
+    uint16_t service_id = 0;
+};
+
 int cmd_scan(int start_ch, int end_ch, int dev_idx) {
     std::cout << "\033[1;36m========================================================\033[0m\n";
     std::cout << "\033[1;36m  VARREDURA PROFUNDA DE FREQUENCIAS ISDB-T / ISDB-Tb    \033[0m\n";
@@ -172,15 +192,15 @@ int cmd_scan(int start_ch, int end_ch, int dev_idx) {
     std::vector<uint8_t> raw_buf(chunk_samples * 2);
     std::vector<std::complex<float>> iq_buf(chunk_samples);
 
-    int found_count = 0;
+    std::vector<CandidateChannel> candidates;
 
-    std::cout << " Canal |  Frequencia  |    Forca do Sinal    |  Potencia  | Status OFDM | Emissora / Servico\n";
+    std::cout << "\033[1;36m[Passo 1/2] Triagem rapida de sinal de RF nos canais UHF...\033[0m\n";
+    std::cout << " Canal |  Frequencia  |    Forca do Sinal    |  Potencia  | Status OFDM | Status\n";
     std::cout << "-------+--------------+----------------------+------------+-------------+--------------------\n";
 
     for (int ch = start_ch; ch <= end_ch && g_running; ++ch) {
         uint32_t freq_hz = get_channel_freq(ch);
-        rtlsdr_set_center_freq(dev, freq_hz);
-        rtlsdr_reset_buffer(dev);
+        safe_set_freq(dev, freq_hz);
 
         int n_read = 0;
         rtlsdr_read_sync(dev, raw_buf.data(), static_cast<int>(raw_buf.size()), &n_read);
@@ -196,113 +216,30 @@ int cmd_scan(int start_ch, int end_ch, int dev_idx) {
 
         auto sync_res = sync.find_symbol_boundary(iq_buf.data(), iq_buf.size());
         auto rating = get_signal_rating(rssi_dbfs);
-        std::string ch_name = "Canal " + std::to_string(ch);
 
-        // Criterio deterministico para deteccao real de canal:
-        // Potencia de RF legitima acima do piso de ruido (>= -18 dBFS) E correlacao de prefixo ciclico
-        bool is_locked = (rssi_dbfs >= -18.0f) && (sync_res.peak_correlation >= 0.35f);
+        // Criterio deterministico e imune a ruido ambiente (-17 dBFS):
+        // Potencia de RF legitima acima do piso (>= -13 dBFS) E correlacao de prefixo ciclico (>= 0.60)
+        bool is_locked = (rssi_dbfs >= -13.0f) && (sync_res.peak_correlation >= 0.60f);
 
         if (is_locked) {
-            found_count++;
-            // Tenta decodificar o nome real da emissora via SDT (PID 0x0011) por ate 3.0 segundos
-            constexpr size_t FFT_LEN = 2048;
-            size_t GI_LEN = 256;
-            if (sync_res.detected_gi == isdbt::GuardInterval::GI_1_4) GI_LEN = 512;
-            else if (sync_res.detected_gi == isdbt::GuardInterval::GI_1_8) GI_LEN = 256;
-            else if (sync_res.detected_gi == isdbt::GuardInterval::GI_1_16) GI_LEN = 128;
-            else if (sync_res.detected_gi == isdbt::GuardInterval::GI_1_32) GI_LEN = 64;
-            size_t SYM_LEN = FFT_LEN + GI_LEN;
-
-            isdbt::OneSegDemodulator scan_demod(isdbt::OfdmMode::MODE_1_2K, sync_res.detected_gi);
-            isdbt::PsiParser scan_psi;
-            isdbt::OfdmSync scan_sync(isdbt::OfdmMode::MODE_1_2K, sync_res.detected_gi, static_cast<float>(ISDBT_SAMPLE_RATE));
-            std::vector<std::complex<float>> scan_iq_buf;
-            float scan_tracked_ffo = sync_res.ffo_hz;
-            float scan_frac_pos = static_cast<float>(sync_res.symbol_offset);
-
-            auto scan_start = std::chrono::steady_clock::now();
-            while (g_running) {
-                auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::steady_clock::now() - scan_start).count();
-                if (elapsed_ms >= 3000) break;
-
-                int scan_n_read = 0;
-                rtlsdr_read_sync(dev, raw_buf.data(), static_cast<int>(raw_buf.size()), &scan_n_read);
-                if (scan_n_read < static_cast<int>(raw_buf.size())) break;
-
-                for (size_t i = 0; i < chunk_samples; ++i) {
-                    float iv = (static_cast<float>(raw_buf[2 * i + 0]) - 127.5f) / 127.5f;
-                    float qv = (static_cast<float>(raw_buf[2 * i + 1]) - 127.5f) / 127.5f;
-                    iq_buf[i] = std::complex<float>(iv, qv);
-                }
-
-                auto cur_sync = scan_sync.find_symbol_boundary(iq_buf.data(), iq_buf.size());
-                if (cur_sync.peak_correlation >= 0.35f) {
-                    const float spacing = static_cast<float>(ISDBT_SAMPLE_RATE) / static_cast<float>(FFT_LEN);
-                    float residual = cur_sync.ffo_hz - scan_tracked_ffo;
-                    residual -= spacing * std::round(residual / spacing);
-                    scan_tracked_ffo += 0.1f * residual;
-                }
-
-                scan_sync.correct_frequency_offset(iq_buf.data(), iq_buf.size(), scan_tracked_ffo);
-                scan_iq_buf.insert(scan_iq_buf.end(), iq_buf.begin(), iq_buf.end());
-
-                std::vector<std::vector<uint8_t>> scan_pkts;
-                while (static_cast<size_t>(std::lround(scan_frac_pos)) + SYM_LEN + 8 <= scan_iq_buf.size()) {
-                    int base_pos = static_cast<int>(std::lround(scan_frac_pos));
-                    int max_neg = (base_pos >= 4) ? 4 : base_pos;
-                    int best_sh = 0;
-                    float best_mag = -1.0f;
-                    for (int sh = -max_neg; sh <= 4; ++sh) {
-                        std::complex<float> g(0.0f, 0.0f);
-                        for (size_t m = 0; m < GI_LEN; ++m) {
-                            g += scan_iq_buf[base_pos + sh + m] * std::conj(scan_iq_buf[base_pos + sh + m + FFT_LEN]);
-                        }
-                        float mag = std::norm(g);
-                        if (mag > best_mag) { best_mag = mag; best_sh = sh; }
-                    }
-                    scan_frac_pos += 0.25f * static_cast<float>(best_sh);
-                    int sym_d = std::max(0, static_cast<int>(std::lround(scan_frac_pos)));
-                    if (static_cast<size_t>(sym_d) + SYM_LEN > scan_iq_buf.size()) break;
-
-                    scan_demod.process_symbol(&scan_iq_buf[sym_d + GI_LEN], scan_pkts);
-                    scan_frac_pos += static_cast<float>(SYM_LEN);
-                }
-
-                int consume_i = static_cast<int>(std::floor(scan_frac_pos)) - 8;
-                if (consume_i > 0 && static_cast<size_t>(consume_i) <= scan_iq_buf.size()) {
-                    scan_iq_buf.erase(scan_iq_buf.begin(), scan_iq_buf.begin() + consume_i);
-                    scan_frac_pos -= static_cast<float>(consume_i);
-                }
-
-                for (const auto& pkt : scan_pkts) {
-                    scan_psi.parse_packet(pkt.data());
-                }
-
-                std::string s_name = scan_psi.get_primary_service_name();
-                if (!s_name.empty()) {
-                    ch_name = s_name;
-                    break;
-                }
-            }
-
-            isdbt::ChannelInfo info;
-            info.channel_number = ch;
-            info.frequency_hz = freq_hz;
-            info.rssi_dbfs = rssi_dbfs;
-            info.name = ch_name;
-            mgr.add_or_update(info);
+            CandidateChannel cand;
+            cand.ch = ch;
+            cand.freq_hz = freq_hz;
+            cand.rssi_dbfs = rssi_dbfs;
+            cand.peak_corr = sync_res.peak_correlation;
+            cand.detected_gi = sync_res.detected_gi;
+            cand.name = "Canal " + std::to_string(ch);
+            candidates.push_back(cand);
         }
 
-        // Formatacao com largura visual exata (sem quebra por codigos de escape ANSI)
         std::string raw_signal = rating.bar + " " + rating.text;
         std::string colored_signal = rating.ansi_color + pad_string(raw_signal, 20) + "\033[0m";
 
         std::string raw_status = is_locked ? "SINAL LOCK" : "Ruido";
         std::string colored_status = (is_locked ? "\033[1;32m" : "\033[1;30m") + pad_string(raw_status, 11) + "\033[0m";
 
-        std::string raw_name = is_locked ? ch_name : "--";
-        std::string colored_name = is_locked ? ("\033[1;33m" + raw_name + "\033[0m") : raw_name;
+        std::string raw_action = is_locked ? "Candidato (SDT pendente)" : "--";
+        std::string colored_action = is_locked ? ("\033[1;33m" + raw_action + "\033[0m") : raw_action;
 
         std::stringstream freq_ss;
         freq_ss << std::fixed << std::setprecision(3) << (freq_hz / 1e6) << " MHz";
@@ -315,14 +252,216 @@ int cmd_scan(int start_ch, int end_ch, int dev_idx) {
                   << colored_signal << " | "
                   << std::setw(10) << pwr_ss.str() << " | "
                   << colored_status << " | "
-                  << colored_name << "\n";
+                  << colored_action << "\n";
+    }
+
+    if (candidates.empty() || !g_running) {
+        rtlsdr_close(dev);
+        if (candidates.empty()) {
+            std::cout << "\n\033[1;33mNenhum sinal digital de TV detectado na faixa de canais UHF " << start_ch << " a " << end_ch << ".\033[0m\n";
+            std::cout << "Dica: Verifique se a antena UHF esta conectada e bem posicionada.\n\n";
+        }
+        return 0;
+    }
+
+    // PASSO 2: Resolucao profunda de nome de emissora via SDT/PSI
+    std::cout << "\n\033[1;36m[Passo 2/2] Resolvendo nomes de emissoras e servicos via SDT/PSI (PID 0x0011)...\033[0m\n";
+
+    for (auto& cand : candidates) {
+        if (!g_running) break;
+
+        std::stringstream freq_ss;
+        freq_ss << std::fixed << std::setprecision(3) << (cand.freq_hz / 1e6) << " MHz";
+        std::cout << "  -> Canal " << std::setw(2) << cand.ch << " (" << freq_ss.str() << "): sintonizando e lendo SDT (max 3.0s)... " << std::flush;
+
+        safe_set_freq(dev, cand.freq_hz);
+
+        const size_t step_chunk_samples = 32768;
+        const size_t step_chunk_bytes = step_chunk_samples * 2;
+        std::mutex q_mtx;
+        std::condition_variable q_cv;
+        std::queue<std::vector<uint8_t>> raw_queue;
+        std::atomic<bool> pass2_worker_running{true};
+
+        std::thread reader_thread([&]() {
+            while (pass2_worker_running && g_running) {
+                std::vector<uint8_t> buf(step_chunk_bytes);
+                int n_read = 0;
+                int r = rtlsdr_read_sync(dev, buf.data(), static_cast<int>(buf.size()), &n_read);
+                if (r < 0 || n_read != static_cast<int>(step_chunk_bytes)) continue;
+                {
+                    std::lock_guard<std::mutex> lock(q_mtx);
+                    if (raw_queue.size() < 64) {
+                        raw_queue.push(std::move(buf));
+                    }
+                }
+                q_cv.notify_one();
+            }
+        });
+
+        constexpr size_t FFT_LEN = 2048;
+        size_t GI_LEN = 256;
+        if (cand.detected_gi == isdbt::GuardInterval::GI_1_4) GI_LEN = 512;
+        else if (cand.detected_gi == isdbt::GuardInterval::GI_1_8) GI_LEN = 256;
+        else if (cand.detected_gi == isdbt::GuardInterval::GI_1_16) GI_LEN = 128;
+        else if (cand.detected_gi == isdbt::GuardInterval::GI_1_32) GI_LEN = 64;
+        size_t SYM_LEN = FFT_LEN + GI_LEN;
+
+        isdbt::OfdmSync scan_sync(isdbt::OfdmMode::MODE_1_2K, cand.detected_gi, static_cast<float>(ISDBT_SAMPLE_RATE));
+        isdbt::OneSegDemodulator scan_demod(isdbt::OfdmMode::MODE_1_2K, cand.detected_gi);
+        isdbt::PsiParser scan_psi;
+
+        std::vector<std::complex<float>> cand_iq_buf(step_chunk_samples);
+        std::vector<std::complex<float>> stream_iq_buf;
+        stream_iq_buf.reserve(step_chunk_samples * 2);
+
+        float frac_pos = 0.0f;
+        float tracked_ffo_hz = 0.0f;
+        bool initial_symbol_found = false;
+        std::string detected_name;
+        uint16_t detected_service_id = 0;
+
+        auto start_time = std::chrono::steady_clock::now();
+        while (g_running) {
+            auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - start_time).count();
+            if (elapsed_ms >= 3000) break;
+
+            std::vector<uint8_t> raw_chunk;
+            {
+                std::unique_lock<std::mutex> lock(q_mtx);
+                q_cv.wait_for(lock, std::chrono::milliseconds(50), [&]() { return !raw_queue.empty() || !g_running; });
+                if (!g_running) break;
+                if (raw_queue.empty()) continue;
+                raw_chunk = std::move(raw_queue.front());
+                raw_queue.pop();
+            }
+
+            for (size_t i = 0; i < step_chunk_samples; ++i) {
+                float iv = (static_cast<float>(raw_chunk[2 * i + 0]) - 127.5f) / 127.5f;
+                float qv = (static_cast<float>(raw_chunk[2 * i + 1]) - 127.5f) / 127.5f;
+                cand_iq_buf[i] = std::complex<float>(iv, qv);
+            }
+
+            auto sync_res = scan_sync.find_symbol_boundary(cand_iq_buf.data(), step_chunk_samples);
+            if (!initial_symbol_found) {
+                if (sync_res.locked) {
+                    initial_symbol_found = true;
+                    GI_LEN = static_cast<size_t>(scan_sync.gi_size());
+                    SYM_LEN = FFT_LEN + GI_LEN;
+                    frac_pos = static_cast<float>(sync_res.symbol_offset);
+                    tracked_ffo_hz = sync_res.ffo_hz;
+                }
+            } else {
+                if (sync_res.peak_correlation >= 0.40f) {
+                    const float spacing = static_cast<float>(ISDBT_SAMPLE_RATE) / static_cast<float>(FFT_LEN);
+                    float residual = sync_res.ffo_hz - tracked_ffo_hz;
+                    residual -= spacing * std::round(residual / spacing);
+                    tracked_ffo_hz += 0.05f * residual;
+                }
+            }
+
+            scan_sync.correct_frequency_offset(cand_iq_buf.data(), step_chunk_samples, tracked_ffo_hz);
+            stream_iq_buf.insert(stream_iq_buf.end(), cand_iq_buf.begin(), cand_iq_buf.end());
+
+            if (initial_symbol_found) {
+                std::vector<std::vector<uint8_t>> scan_pkts;
+                while (static_cast<size_t>(std::lround(frac_pos)) + SYM_LEN + 8 <= stream_iq_buf.size()) {
+                    int base_pos = static_cast<int>(std::lround(frac_pos));
+                    int max_neg = (base_pos >= 4) ? 4 : base_pos;
+                    int best_sh = 0;
+                    float best_mag = -1.0f;
+                    for (int sh = -max_neg; sh <= 4; ++sh) {
+                        std::complex<float> g(0.0f, 0.0f);
+                        for (size_t m = 0; m < GI_LEN; ++m) {
+                            g += stream_iq_buf[base_pos + sh + m] * std::conj(stream_iq_buf[base_pos + sh + m + FFT_LEN]);
+                        }
+                        float mag = std::norm(g);
+                        if (mag > best_mag) { best_mag = mag; best_sh = sh; }
+                    }
+                    frac_pos += 0.25f * static_cast<float>(best_sh);
+                    int sym_d = std::max(0, static_cast<int>(std::lround(frac_pos)));
+                    if (static_cast<size_t>(sym_d) + SYM_LEN > stream_iq_buf.size()) break;
+
+                    scan_demod.process_symbol(&stream_iq_buf[sym_d + GI_LEN], scan_pkts);
+                    frac_pos += static_cast<float>(SYM_LEN);
+                }
+
+                int consume_i = static_cast<int>(std::floor(frac_pos)) - 8;
+                if (consume_i > 0 && static_cast<size_t>(consume_i) <= stream_iq_buf.size()) {
+                    stream_iq_buf.erase(stream_iq_buf.begin(), stream_iq_buf.begin() + consume_i);
+                    frac_pos -= static_cast<float>(consume_i);
+                }
+
+                for (const auto& pkt : scan_pkts) {
+                    scan_psi.parse_packet(pkt.data());
+                }
+
+                std::string s_name = scan_psi.get_primary_service_name();
+                if (!s_name.empty()) {
+                    detected_name = s_name;
+                    if (!scan_psi.get_services().empty()) {
+                        detected_service_id = scan_psi.get_services().begin()->first;
+                    }
+                    break;
+                }
+            }
+        }
+
+        pass2_worker_running = false;
+        q_cv.notify_all();
+        if (reader_thread.joinable()) {
+            reader_thread.join();
+        }
+        rtlsdr_reset_buffer(dev);
+
+        auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - start_time).count();
+
+        if (!detected_name.empty()) {
+            cand.name = detected_name;
+            cand.service_id = detected_service_id;
+            std::cout << "\033[1;32m[OK] " << cand.name << "\033[0m (" << std::fixed << std::setprecision(1) << (elapsed_ms / 1000.0f) << "s)\n";
+        } else {
+            std::cout << "\033[1;33m[TIMEOUT] " << cand.name << "\033[0m (" << std::fixed << std::setprecision(1) << (elapsed_ms / 1000.0f) << "s)\n";
+        }
+
+        isdbt::ChannelInfo info;
+        info.channel_number = cand.ch;
+        info.frequency_hz = cand.freq_hz;
+        info.rssi_dbfs = cand.rssi_dbfs;
+        info.name = cand.name;
+        info.service_id = cand.service_id;
+        mgr.add_or_update(info);
     }
 
     rtlsdr_close(dev);
     mgr.save();
 
-    std::cout << "\n\033[1;32mVarredura concluida: " << found_count << " canais detectados e salvos!\033[0m\n";
+    std::cout << "\n\033[1;32mVarredura concluida: " << candidates.size() << " canais detectados e salvos!\033[0m\n";
     std::cout << "Arquivo de configuracao: " << isdbt::ChannelManager::get_default_config_path() << "\n\n";
+
+    std::cout << " Canal |  Frequencia  |    Forca do Sinal    |  Potencia  | Emissora / Servico\n";
+    std::cout << "-------+--------------+----------------------+------------+--------------------\n";
+    for (const auto& cand : candidates) {
+        auto rating = get_signal_rating(cand.rssi_dbfs);
+        std::string raw_signal = rating.bar + " " + rating.text;
+        std::string colored_signal = rating.ansi_color + pad_string(raw_signal, 20) + "\033[0m";
+
+        std::stringstream freq_ss;
+        freq_ss << std::fixed << std::setprecision(3) << (cand.freq_hz / 1e6) << " MHz";
+
+        std::stringstream pwr_ss;
+        pwr_ss << std::fixed << std::setprecision(1) << cand.rssi_dbfs << " dBFS";
+
+        std::cout << " " << std::setw(5) << cand.ch << " | "
+                  << std::setw(12) << freq_ss.str() << " | "
+                  << colored_signal << " | "
+                  << std::setw(10) << pwr_ss.str() << " | \033[1;32m"
+                  << cand.name << "\033[0m\n";
+    }
+    std::cout << "\n";
+
     return 0;
 }
 
@@ -429,8 +568,7 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
     }
 
     rtlsdr_set_sample_rate(dev, ISDBT_SAMPLE_RATE);
-    rtlsdr_set_center_freq(dev, freq_hz);
-    std::this_thread::sleep_for(std::chrono::milliseconds(100)); // Aguarda estabilizacao do PLL do tuner R820T
+    safe_set_freq(dev, freq_hz);
     rtlsdr_set_tuner_gain_mode(dev, 1); // Ganho manual otimizado
     int gain_tenths = static_cast<int>(std::round(gain_db * 10.0));
     rtlsdr_set_tuner_gain(dev, gain_tenths);
