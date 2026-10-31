@@ -45,12 +45,13 @@ set(SOURCES
 
 add_executable(isdbtb_rx ${SOURCES})
 
-# Target libraries
-target_link_libraries(isdbtb_rx PRIVATE
-    rtlsdr
-    fftw3f-3
-    volk
-)
+# Target libraries (link external DLLs if deps/ directory is populated; otherwise use bundled headers/dynamic loader)
+if(EXISTS "${FFTW3_ROOT}/libfftw3f-3.dll")
+    set(DSP_EXTERNAL_LIBS fftw3f-3 volk)
+    target_link_libraries(isdbtb_rx PRIVATE rtlsdr ${DSP_EXTERNAL_LIBS})
+else()
+    set(DSP_EXTERNAL_LIBS "")
+endif()
 
 # Testes Unitarios
 add_executable(test_reed_solomon
@@ -80,10 +81,18 @@ add_executable(test_ofdm_sync
     src/dsp/ofdm_sync.cpp
 )
 
-target_link_libraries(test_ofdm_sync PRIVATE
-    fftw3f-3
-    volk
+target_link_libraries(test_ofdm_sync PRIVATE ${DSP_EXTERNAL_LIBS})
+
+add_executable(test_oneseg_e2e
+    tests/test_oneseg_e2e.cpp
+    src/dsp/reed_solomon.cpp
+    src/dsp/descrambler.cpp
+    src/dsp/viterbi_decoder.cpp
+    src/dsp/ofdm_sync.cpp
+    src/dsp/oneseg_demodulator.cpp
 )
+
+target_link_libraries(test_oneseg_e2e PRIVATE ${DSP_EXTERNAL_LIBS})
 
 # CTest Integration
 enable_testing()
@@ -92,18 +101,22 @@ add_test(NAME Descrambler COMMAND test_descrambler)
 add_test(NAME Viterbi COMMAND test_viterbi)
 add_test(NAME FecPipeline COMMAND test_fec_pipeline)
 add_test(NAME OfdmSync COMMAND test_ofdm_sync)
+add_test(NAME OneSegE2E COMMAND test_oneseg_e2e)
 
 if(WIN32)
     target_link_libraries(isdbtb_rx PRIVATE ws2_32)
     target_compile_definitions(isdbtb_rx PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX)
 endif()
 
-# Copy runtime DLLs to output directory for instant execution
+# Copy runtime DLLs to output directory
 if(WIN32)
-    set(DLLS_TO_COPY
-        "${FFTW3_ROOT}/libfftw3f-3.dll"
-        "${VOLK_ROOT}/bin/libvolk.dll"
-    )
+    set(DLLS_TO_COPY "")
+    if(EXISTS "${FFTW3_ROOT}/libfftw3f-3.dll")
+        list(APPEND DLLS_TO_COPY
+            "${FFTW3_ROOT}/libfftw3f-3.dll"
+            "${VOLK_ROOT}/bin/libvolk.dll"
+        )
+    endif()
 
     if(EXISTS "${SETUP_DIR}/librtlsdr.dll")
         list(APPEND DLLS_TO_COPY
@@ -111,7 +124,7 @@ if(WIN32)
             "${SETUP_DIR}/libusb-1.0.dll"
             "${SETUP_DIR}/libwinpthread-1.dll"
         )
-    else()
+    elseif(EXISTS "${RTLSDR_ROOT}/x64/rtlsdr.dll")
         list(APPEND DLLS_TO_COPY
             "${RTLSDR_ROOT}/x64/rtlsdr.dll"
             "${RTLSDR_ROOT}/x64/pthreadVC2.dll"
@@ -119,10 +132,11 @@ if(WIN32)
         )
     endif()
 
-    add_custom_command(TARGET isdbtb_rx POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            ${DLLS_TO_COPY}
-            $<TARGET_FILE_DIR:isdbtb_rx>
-    )
+    if(DLLS_TO_COPY)
+        add_custom_command(TARGET isdbtb_rx POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${DLLS_TO_COPY}
+                $<TARGET_FILE_DIR:isdbtb_rx>
+        )
+    endif()
 endif()
-

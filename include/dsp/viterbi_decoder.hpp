@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <cstddef>
 #include <vector>
+#include <deque>
+#include <array>
 
 namespace isdbt {
 
@@ -22,8 +24,8 @@ enum class CodeRate {
  * 
  * Implementa a decodificacao de Maxima Verossimilhanca (Maximum Likelihood Sequence Estimation)
  * sobre a Trellis de 64 estados gerada pelo codigo convolucional de restricao K=7:
- *   G1 = 171 octal = 0b1111001 (x^6 + x^5 + x^4 + x^3 + 1)
- *   G2 = 133 octal = 0b1011011 (x^6 + x^4 + x^3 + x + 1)
+ *   G1 = 171 octal -> 0x4F (POLYA em gr-isdbt para registrador LSB-first)
+ *   G2 = 133 octal -> 0x6D (POLYB em gr-isdbt para registrador LSB-first)
  * 
  * Aceita entradas soft quantizadas [0..255] onde 128 representa simbolo puncionado/apagamento.
  */
@@ -45,7 +47,7 @@ public:
     CodeRate code_rate() const { return rate_; }
 
     /**
-     * @brief Reseta as metricas de estado acumuladas na Trellis.
+     * @brief Reseta as metricas de estado acumuladas na Trellis continua.
      */
     void reset();
 
@@ -57,11 +59,17 @@ public:
     void encode(const std::vector<uint8_t>& in_bits, std::vector<uint8_t>& out_symbols);
 
     /**
-     * @brief Decodifica uma sequencia de simbolos soft-decision para bytes de dados.
+     * @brief Decodifica um bloco finito de simbolos soft-decision para bytes de dados.
      * @param soft_in Metricas soft de entrada (0 = bit 0 seguro, 255 = bit 1 seguro, 128 = puncionado).
      * @param out_bytes Bytes de dados decodificados (MSB first).
      */
     void decode(const std::vector<uint8_t>& soft_in, std::vector<uint8_t>& out_bytes);
+
+    /**
+     * @brief Decodifica continuamente um fluxo de simbolos soft-decision (mantendo estado entre simbolos OFDM),
+     * conforme implementado em gr-isdbt (viterbi_decoder_impl.cc).
+     */
+    void decode_continuous(const std::vector<uint8_t>& soft_in, std::vector<uint8_t>& out_bytes);
 
 private:
     void init_trellis();
@@ -73,7 +81,12 @@ private:
     uint8_t next_state_[NUM_STATES][2];
     uint8_t prev_state_[NUM_STATES][2];
     uint8_t output_parity_[NUM_STATES][2]; // 2 bits de paridade gerados por transicao: G1 e G2
+
+    // Estado continuo para streaming entre simbolos OFDM
+    std::array<uint32_t, NUM_STATES> cont_metric_{};
+    std::deque<uint64_t> cont_history_;
+    std::vector<uint8_t> cont_soft_rem_;
+    std::vector<uint8_t> cont_bit_buf_;
 };
 
 } // namespace isdbt
-

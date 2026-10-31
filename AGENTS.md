@@ -47,7 +47,79 @@ Qualquer agente que editar o código-fonte deve respeitar estritamente as seguin
 
 ---
 
-## 🛠️ 3. Como Compilar e Rodar os Testes
+## 🛡️ 3. Histórico de Erros Corrigidos e Regras de Conformidade com `git-artes/gr-isdbt` ("NÃO REPITA ESTES ERROS")
+
+Durante a auditoria de conformidade com a implementação de referência [`git-artes/gr-isdbt`](https://github.com/git-artes/gr-isdbt), 7 erros críticos foram identificados, corrigidos e cobertos por testes. **Nenhum agente futuro deve reintroduzir qualquer um dos padrões incorretos abaixo:**
+
+### Erro 1: Tap Invertido no LFSR do PRBS dos Pilotos (`X^11 + X^2 + 1`)
+- ❌ **O que estava errado:** O gerador PRBS de 11 bits (`reg = 0x7FF`) deslocava para a direita (`reg >> 1`), mas fazia XOR com `reg >> 9` pensando em $1 + X^9 + X^{11}$. Isso invertia a polaridade de ~50% dos pilotos dispersos (SP) e destruía a estimativa de canal.
+- ✅ **Como é o correto (`oneseg_demodulator.cpp` / `gr-isdbt`):** Em um registrador de 11 bits que desloca para a direita e insere no bit 10 (`<< 10`), o estágio $X^{11}$ é o bit `0` e o estágio $X^9$ é o bit `2` (`11 - 9 = 2`):
+  ```cpp
+  uint8_t new_bit = ((reg >> 2) ^ (reg >> 0)) & 0x01;
+  reg = (reg >> 1) | (new_bit << 10);
+  ```
+- **Além disso:** No Modo 3, o PRBS avança ao longo das 5617 portadoras ativas do canal; o Segmento 0 (físico 6) começa no índice global `2592` (`6 * 432`) e usa a portadora `2592 + 432` como piloto da borda direita.
+
+### Erro 2: Polinômios e Bit de Sobrevivente no Decodificador Viterbi (`viterbi_decoder.cpp`)
+- ❌ **O que estava errado:**
+  1. Usava `POLY_G1 = 0171` (`0x79`) e `POLY_G2 = 0133` (`0x5B`) com registrador `reg7 = (state << 1) | b` (onde o bit mais recente entra no LSB), sem espelhar os 7 bits dos polinômios.
+  2. No traceback, salvava `if (state & 1)` em vez do bit mais antigo que sai de `state` (`if (state & 0x20)`).
+  3. Reiniciava o trellis (`path_metric`) a cada símbolo OFDM (768 bits), quebrando a continuidade entre símbolos.
+- ✅ **Como é o correto (`viterbi_decoder.cpp` / `gr-isdbt`):**
+  1. Usar `POLY_G1 = 0x4F` (`POLYA`) e `POLY_G2 = 0x6D` (`POLYB`) para `reg7 = (state << 1) | b`.
+  2. Salvar `if (state & 0x20)` no bit sobrevivente e reconstruir `prev_state = (cur_state >> 1) | (msb_was_1 ? 0x20 : 0)`.
+  3. Usar `decode_continuous(...)` no fluxo de símbolos OFDM, mantendo métricas de caminho, buffer residual de despunção e janela de sobreviventes contínuos, além de atribuir métrica `0` para bits puncionados (`soft_bit == 128`).
+
+### Erro 3: Busca de Chien e Algoritmo de Forney no Reed-Solomon (`reed_solomon.cpp`)
+- ❌ **O que estava errado:** Na busca de Chien para $\Lambda(x) = \prod (1 - X_k x)$, avaliava `x_inv = exp_table_[p_idx]` ($X_k$) em vez de $X_k^{-1} = \alpha^{255 - p_{\text{idx}}}$. E no algoritmo de Forney (`FCR = 0`), omitia a multiplicação por $X_k$ no numerador.
+- ✅ **Como é o correto (`reed_solomon.cpp`):**
+  - Raiz na busca de Chien: `uint8_t x_inv = exp_table_[(255 - p_idx) % 255];`
+  - Magnitude de erro de Forney (`FCR = 0`): `uint8_t err_val = gf_mul(x_k, gf_div(num, den));`
+
+### Erro 4: Descrambler DVB-T (`0xB8`) vs. Descrambler ISDB-T (`descrambler.cpp`)
+- ❌ **O que estava errado:** Esperava sync byte invertido `0xB8` a cada 8 pacotes (padrão europeu DVB-T) e pausava o LFSR durante o byte `0x47`.
+- ✅ **Como é o correto no ISDB-T (`descrambler.cpp` + `oneseg_demodulator.cpp` / `gr-isdbt`):**
+  - **Não existe `0xB8` no ISDB-T.** Todos os pacotes têm `0x47`.
+  - O PRBS (`0x4A80` / `0xA9`) é reiniciado **uma vez por quadro OFDM** (204 símbolos) no pulso `frame_begin` do TMCC.
+  - Na saída do Viterbi / Forney do ISDB-T, cada bloco de 204 bytes tem os 203 bytes de dados/paridade nas posições `0..202` e o sync `0x47` na posição `203` (ramo 11 do Forney, atraso 0).
+  - Durante o byte `0x47`, o PRBS **avança 8 clocks** (`clock_byte()`), embora não faça XOR no `0x47`.
+
+### Erro 5: Descarte de Amostras e Reset de Fase entre Leituras USB (`main.cpp` e `ofdm_sync.cpp`)
+- ❌ **O que estava errado:**
+  1. `find_symbol_boundary` retornava `best_d` em qualquer posição do buffer de 32768 amostras, pulando símbolos anteriores, e `main.cpp` descartava as amostras finais que não completavam `2176` amostras a cada leitura `rtlsdr_read_sync`.
+  2. `correct_frequency_offset` reiniciava a fase do NCO em `0` a cada bloco de 32768 amostras.
+  3. `main.cpp` injetava blocos `standby` sintéticos (com PAT/PMT falsas em `PID 0x0000`) sempre que um bloco de leitura não gerava pacotes TS imediatos, sobrescrevendo a PAT real da emissora no VLC.
+- ✅ **Como é o correto (`main.cpp` e `ofdm_sync.cpp`):**
+  1. `find_symbol_boundary` projeta `first_d = best_d % total_symbol_len` para apontar sempre para o primeiro símbolo do buffer.
+  2. `OfdmSync::correct_frequency_offset` acumula `current_phase_` continuamente entre blocos.
+  3. `cmd_play` acumula amostras em `stream_iq_buf` preservando as amostras residuais entre leituras USB, aplica ajuste fino de símbolo (`fine_symbol_sync`) e **não** injeta pacotes `standby` sintéticos sobre o fluxo real.
+
+### Erro 6: Tabela de Permutação em Frequência e Atraso do Bit Interleaver
+- ✅ **Regra:** A tabela `FREQ_PERM_MODE3[384]` em `src/dsp/oneseg_demodulator.cpp` é uma bijeção exata de `0..383` idêntica a `d_random_perm_mode3` em `gr-isdbt/lib/frequency_deinterleaver_impl.cc`. Nunca a substitua por fórmulas modulares aproximadas. No desentrelaçador de bits QPSK, o MSB ($\text{Re} < 0$) sofre atraso de `120` símbolos no receptor (`bit_deint_fifos_[1]`), enquanto o LSB ($\text{Im} < 0$) tem atraso `0`.
+
+### Erro 7: Injeção de Standby Sintético (`TsGenerator`) Gerando Tela Verde no VLC
+- ❌ **O que estava errado:** O `cmd_play` transmitia blocos de `TsGenerator` por padrão antes e durante a recepção se `decoded_pkts` estivesse vazio. O `TsGenerator` produz uma imagem verde de teste com PAT apontando para PMT `0x1000` e vídeo em PID `0x0100`. O demuxer do VLC travava nesses PIDs e ignorava os pacotes reais da transmissão da emissora (ex: BAND HD com vídeo no PID `0x0111` e áudio no PID `0x0112`).
+- ✅ **Como é o correto (`main.cpp`):** O standby sintético com imagem de teste só é transmitido se a flag `--test-pattern` for explicitamente requisitada pelo usuário. Na recepção normal, nenhum pacote sintético de tela verde é enviado.
+
+### Erro 8: Reset Prematuro do Demodulador em Quedas Transientes de Correlação
+- ❌ **O que estava errado:** O contador `unlock_counter > 10` acionava `demod.reset()` com apenas 10 leituras de 32768 amostras (~160 ms) sem pico de correlação do prefixo cíclico. Porém, os desentrelaçadores de tempo ($I=4$, 384 símbolos $\approx 435$ ms) e convolucional Forney (187 pacotes $\approx 675$ ms) requerem cerca de 1.1 segundos contínuos para iniciar a entrega dos primeiros pacotes válidos. Qualquer flutuação de sinal de 160 ms reiniciava as FIFOs a zero, impedindo a emissão de qualquer pacote.
+- ✅ **Como é o correto (`main.cpp`):** O limiar de perda de sincronismo foi estendido para `unlock_counter > 200` (~3.2 segundos contínuos de perda de portadora antes de reiniciar o estado do demodulador).
+
+### Erro 9: Ausência de PAT (PID 0x0000) na Recepção Parcial 1-Seg do ISDB-Tb
+- ❌ **O que estava errado:** No padrão ISDB-Tb (ABNT NBR 15603), o Segmento 0 (1-Seg móvel) transmite seu PMT diretamente no PID reservado `0x1FC8`, sem transmitir uma PAT no PID `0x0000` (que trafega nos segmentos Full-Seg 1 a 12). Reprodutores de vídeo genéricos como o VLC exigem uma PAT no PID `0x0000` para mapear os fluxos elementares de vídeo e áudio.
+- ✅ **Como é o correto (`psi_parser.cpp` / `main.cpp`):** `PsiParser::build_pat_packet` sintetiza periodicamente (~10 vezes por segundo) um pacote PAT válido com CRC32 apontando o programa ativo para o PMT `0x1FC8`, permitindo que o VLC abra e mapeie imediatamente as trilhas de vídeo H.264 (`0x0111`) e áudio AAC (`0x0112`).
+
+### Erro 10: Tempo de Estabilização do PLL do Tuner R820T
+- ❌ **O que estava errado:** Chamar `rtlsdr_set_center_freq` seguido imediatamente de leitura de amostras ou ajuste de ganho sem intervalo causava o erro `[R82XX] PLL not locked!` no driver do tuner.
+- ✅ **Como é o correto (`main.cpp`):** Inserir um intervalo de 100 ms (`std::this_thread::sleep_for(std::chrono::milliseconds(100))`) logo após a sintonia da frequência para que o PLL do chip Rafael Micro trave com estabilidade antes da leitura de amostras.
+
+### Erro 11: Travamento Prematuro de IFO em Lóbulos Laterais com Limiar Baixo (0.35)
+- ❌ **O que estava errado:** O limiar de coerência `max_coh > 0.35f` permitia que lóbulos laterais espúrios de pilotos dispersos (coerência de pico ~0.36) fossem aceitos como portadora central de 1-Seg (`ifo_locked_ = true`), restringindo a busca subsequente estritamente a `[ifo_bins_, ifo_bins_]`. Preso a 2 portadoras de distância da frequência real (ex: IFO=-25 em vez de -27), as 4 portadoras de TMCC (101, 131, 286, 349) liam dados arbitrários em vez de DBPSK, impossibilitando a validação da paridade BCH(273, 191) e mantendo o receptor indefinidamente em `TMCC: SYNC` e `TS do Ar: 0 pkts`.
+- ✅ **Como é o correto (`oneseg_demodulator.cpp`):** Enquanto `tmcc_locked_` for falso, a busca de IFO permanece aberta na faixa `[-45 .. +45]` subportadoras e exige coerência $> 0.50$ (o piloto verdadeiro atinge coerência $> 0.95$). Apenas quando o TMCC confirma o sincronismo e a paridade de quadro é que a busca de IFO é restringida.
+
+---
+
+## 🛠️ 4. Como Compilar e Rodar os Testes
 
 O ambiente no Windows utiliza **GCC 16.2 / G++ 16.2** e **CMake** (`w64devkit`):
 
@@ -64,42 +136,21 @@ cmake --build build -j
 .\build\test_viterbi.exe
 .\build\test_fec_pipeline.exe
 .\build\test_ofdm_sync.exe
+.\build\test_oneseg_e2e.exe
 ```
 
 ---
 
-## 🗺️ 4. Mapa de Módulos do Código
+## 🗺️ 5. Mapa de Módulos do Código
 
 | Módulo | Arquivos | Responsabilidade |
 |---|---|---|
-| **OFDM Sync** | `include/dsp/ofdm_sync.hpp`<br>`src/dsp/ofdm_sync.cpp` | Autocorrelação de prefixo cíclico (Van de Beek), correção de FFO via SIMD VOLK, FFTW3. |
-| **Reed-Solomon** | `include/dsp/reed_solomon.hpp`<br>`src/dsp/reed_solomon.cpp` | Decodificador \(RS(204, 188, t=8)\) com Berlekamp-Massey, Chien Search e Forney. |
-| **Descrambler** | `include/dsp/descrambler.hpp`<br>`src/dsp/descrambler.cpp` | LFSR de 15 bits (\(1 + X^{14} + X^{15}\)), reset por sync `0xB8`, descrambler de payload. |
-| **Viterbi** | `include/dsp/viterbi_decoder.hpp`<br>`src/dsp/viterbi_decoder.cpp` | Inner FEC convolucional \(K=7\) com matriz Trellis de 64 estados e puncionamento (1/2, 2/3, 3/4). |
+| **OFDM Sync** | `include/dsp/ofdm_sync.hpp`<br>`src/dsp/ofdm_sync.cpp` | Autocorrelação de prefixo cíclico (Van de Beek), rastreamento fino CP, correção de FFO contínua via SIMD VOLK, FFTW3. |
+| **1-Seg Demodulator** | `include/dsp/oneseg_demodulator.hpp`<br>`src/dsp/oneseg_demodulator.cpp` | IFO + Pilotos SP/CP ($X^{11}+X^2+1$), TMCC DBPSK com BCH(273,191), Deinterleavers (Freq/Tempo/Bit/Forney) e integração FEC. |
+| **Reed-Solomon** | `include/dsp/reed_solomon.hpp`<br>`src/dsp/reed_solomon.cpp` | Decodificador \(RS(204, 188, t=8)\) com Berlekamp-Massey, Chien Search e Forney (`FCR=0`). |
+| **Descrambler** | `include/dsp/descrambler.hpp`<br>`src/dsp/descrambler.cpp` | LFSR de 15 bits (\(1 + X^{14} + X^{15}\)) com suporte ao modo ISDB-T (por quadro OFDM) e superframe. |
+| **Viterbi** | `include/dsp/viterbi_decoder.hpp`<br>`src/dsp/viterbi_decoder.cpp` | Inner FEC convolucional contínuo \(K=7\) (`0x4F`/`0x6D`) com matriz Trellis de 64 estados e puncionamento (1/2, 2/3, 3/4, 5/6, 7/8). |
 | **Streaming UDP** | `include/streaming/udp_streamer.hpp`<br>`src/streaming/udp_streamer.cpp` | Sockets WinSock2/POSIX enviando datagramas de 1316B para VLC. |
 | **PSI/SI Parser** | `include/mpegts/psi_parser.hpp`<br>`src/mpegts/psi_parser.cpp` | Parser de PAT (PID 0), PMT e SDT (PID 0x0011) para capturar o nome da emissora. |
 | **Channel Manager** | `include/cli/channel_manager.hpp`<br>`src/cli/channel_manager.cpp` | Gerencia `channels.json` e exportação `.m3u`. |
 | **Main CLI** | `src/main.cpp` | Interface CLI11 com comandos `probe`, `scan`, `list`, `export` e `play`. |
-
----
-
-## 🚀 5. Backlog e Sugestões para Futuros Agentes
-
-Se você for um subagente encarregado de continuar o projeto, aqui estão as tarefas prioritárias recomendadas:
-
-### Tarefa A: Mapeador de Constelação & Equalizador Dinâmico (Channel Estimator)
-- **Local:** `include/dsp/channel_equalizer.hpp`
-- **Objetivo:** Implementar interpolação 2D (tempo/frequência) dos Pilotos Dispersos (Scattered Pilots - SP) e Pilotos Contínuos (Continual Pilots - CP) definidos na norma ABNT NBR 15601.
-- **Saída:** Compensação de desvanecimento multipercurso (fading) para alimentar métricas soft LLR precisas ao Viterbi.
-
-### Tarefa B: Decodificador TMCC Avançado (Transmission and Multiplexing Configuration Control)
-- **Local:** `include/dsp/tmcc_decoder.hpp`
-- **Objetivo:** Decodificar os 204 símbolos do bloco de sinalização TMCC (portadoras BPSK dedicadas) para detectar automaticamente:
-  - Modulação do segmento 0 (DQPSK, QPSK, 16QAM).
-  - Taxa de código (1/2, 2/3, 3/4, 5/6, 7/8).
-  - Profundidade do desentrelaçador de tempo (\(I \in \{0, 1, 2, 4, 8, 16\}\)).
-
-### Tarefa C: Suporte a SDRs de Banda Larga (Full-Seg HDTV)
-- **Local:** `include/hardware/sdr_device.hpp`
-- **Objetivo:** Criar classe base polimórfica para suportar SoapySDR ou HackRF/Airspy, permitindo amostragem a 8.126984 MSps e decodificação dos 13 segmentos (sinal HDTV 1080i).
-

@@ -6,6 +6,10 @@
 #include <thread>
 #include <chrono>
 #include <csignal>
+#include <algorithm>
+#include <queue>
+#include <mutex>
+#include <condition_variable>
 
 #ifdef _WIN32
     #include <windows.h>
@@ -318,15 +322,15 @@ int cmd_play(int channel_number, const std::string& name_query, bool open_vlc, u
     if (!streamer.start()) {
         return 1;
     }
-    // Envia bloco de standby (PAT, PMT, vídeo H.264 dummy) antes de iniciar a recepção real
-    {
+
+    // Envia bloco de teste apenas se explicitamente solicitado (--test-pattern)
+    if (test_pattern) {
         isdbt::TsGenerator ts_gen;
         std::vector<std::vector<uint8_t>> standby_packets;
         ts_gen.get_standby_block(standby_packets);
         for (auto &pkt : standby_packets) {
             streamer.send_ts_packet(pkt.data());
         }
-        // Garante que o datagrama de 1316 B seja enviado imediatamente
         streamer.flush();
     }
 
@@ -352,28 +356,72 @@ int cmd_play(int channel_number, const std::string& name_query, bool open_vlc, u
 
     rtlsdr_set_sample_rate(dev, ISDBT_SAMPLE_RATE);
     rtlsdr_set_center_freq(dev, freq_hz);
+    std::this_thread::sleep_for(std::chrono::milliseconds(100)); // Aguarda estabilizacao do PLL do tuner R820T
     rtlsdr_set_tuner_gain_mode(dev, 1); // Ganho manual otimizado
     int gain_tenths = static_cast<int>(std::round(gain_db * 10.0));
     rtlsdr_set_tuner_gain(dev, gain_tenths);
     rtlsdr_set_agc_mode(dev, 0);
     rtlsdr_reset_buffer(dev);
 
+    constexpr size_t FFT_LEN = 2048;
+    // O intervalo de guarda (1/4, 1/8, 1/16, 1/32) e detectado automaticamente pelo OfdmSync.
+    // Ex: a BAND (Canal 23) usa GI 1/8 -> 2304 amostras por simbolo.
+    size_t GI_LEN  = 128;
+    size_t SYM_LEN = FFT_LEN + GI_LEN;
+    float frac_pos = 0.0f;           // posicao fracionaria do proximo simbolo (rastreio de deriva de clock)
+    bool air_stream_started = false; // apos o 1o pacote real, o standby sintetico NUNCA mais e enviado
+    auto last_pat_time = std::chrono::steady_clock::now();
+
     isdbt::OfdmSync sync(isdbt::OfdmMode::MODE_1_2K, isdbt::GuardInterval::GI_1_16, static_cast<float>(ISDBT_SAMPLE_RATE));
     isdbt::OneSegDemodulator demod(isdbt::OfdmMode::MODE_1_2K, isdbt::GuardInterval::GI_1_16);
     isdbt::PsiParser psi;
+    isdbt::TsGenerator channel_ts_gen;
 
-    size_t chunk_samples = 32768;
-    std::vector<uint8_t> raw_buf(chunk_samples * 2);
+    const size_t chunk_samples = 32768;
+    const size_t chunk_bytes = chunk_samples * 2;
+    std::mutex q_mtx;
+    std::condition_variable q_cv;
+    std::queue<std::vector<uint8_t>> raw_queue;
+
+    std::thread reader_thread([&]() {
+        while (g_running) {
+            std::vector<uint8_t> buf(chunk_bytes);
+            int n_read = 0;
+            int r = rtlsdr_read_sync(dev, buf.data(), static_cast<int>(buf.size()), &n_read);
+            if (r < 0 || n_read != static_cast<int>(chunk_bytes)) continue;
+            {
+                std::lock_guard<std::mutex> lock(q_mtx);
+                if (raw_queue.size() < 64) {
+                    raw_queue.push(std::move(buf));
+                }
+            }
+            q_cv.notify_one();
+        }
+    });
+
     std::vector<std::complex<float>> iq_buf(chunk_samples);
+    std::vector<std::complex<float>> stream_iq_buf;
+    stream_iq_buf.reserve(chunk_samples * 2);
+
+    bool ofdm_locked = false;
+    float tracked_ffo_hz = 0.0f;
+    float last_peak_corr = 0.0f;
+    int unlock_counter = 0;
 
     uint64_t total_air_packets = 0;
     uint64_t total_standby_packets = 0;
     auto last_time = std::chrono::steady_clock::now();
 
     while (g_running) {
-        int n_read = 0;
-        int r = rtlsdr_read_sync(dev, raw_buf.data(), static_cast<int>(raw_buf.size()), &n_read);
-        if (r < 0 || !g_running) break;
+        std::vector<uint8_t> raw_buf;
+        {
+            std::unique_lock<std::mutex> lock(q_mtx);
+            q_cv.wait_for(lock, std::chrono::milliseconds(100), [&]() { return !raw_queue.empty() || !g_running; });
+            if (!g_running) break;
+            if (raw_queue.empty()) continue;
+            raw_buf = std::move(raw_queue.front());
+            raw_queue.pop();
+        }
 
         float pwr_sum = 0.0f;
         for (size_t i = 0; i < chunk_samples; ++i) {
@@ -384,75 +432,147 @@ int cmd_play(int channel_number, const std::string& name_query, bool open_vlc, u
         }
         float rssi_dbfs = 10.0f * std::log10((pwr_sum / chunk_samples) + 1e-12f);
 
-        auto sync_res = sync.find_symbol_boundary(iq_buf.data(), iq_buf.size());
+        auto sync_res = sync.find_symbol_boundary(iq_buf.data(), chunk_samples);
+        last_peak_corr = sync_res.peak_correlation;
         std::vector<std::vector<uint8_t>> decoded_pkts;
 
-        if (sync_res.locked) {
-            sync.correct_frequency_offset(iq_buf.data(), iq_buf.size(), sync_res.ffo_hz);
+        if (!ofdm_locked) {
+            if (sync_res.locked) {
+                ofdm_locked = true;
+                unlock_counter = 0;
+                GI_LEN = static_cast<size_t>(sync.gi_size());
+                SYM_LEN = FFT_LEN + GI_LEN;
+                frac_pos = 0.0f;
+                tracked_ffo_hz = sync_res.ffo_hz;
+                sync.reset_phase();
+                sync.correct_frequency_offset(iq_buf.data(), iq_buf.size(), tracked_ffo_hz);
 
-            // Simbolo util (2048) + GI (128) = 2176 amostras
-            const size_t sym_len = 2048 + 128;
-            size_t offset = static_cast<size_t>(std::max(0, sync_res.symbol_offset));
-            while (offset + 2048 <= chunk_samples) {
-                // symbol_offset ja aponta exatamente para o inicio do periodo util do simbolo
-                const std::complex<float>* sym_data = &iq_buf[offset];
-                demod.process_symbol(sym_data, decoded_pkts);
-                offset += sym_len;
+                // symbol_offset aponta para o inicio da parte util; recuamos GI_LEN para alinhar
+                // o inicio de stream_iq_buf exatamente com o prefixo ciclico do primeiro simbolo
+                size_t gi_start = (sync_res.symbol_offset >= static_cast<int>(GI_LEN))
+                                  ? static_cast<size_t>(sync_res.symbol_offset - static_cast<int>(GI_LEN))
+                                  : 0;
+                stream_iq_buf.assign(iq_buf.begin() + gi_start, iq_buf.end());
+            }
+        } else {
+            if (!sync_res.locked) {
+                unlock_counter++;
+                if (unlock_counter > 200) { // ~3.2 segundos de perda real de sinal
+                    ofdm_locked = false;
+                    stream_iq_buf.clear();
+                    demod.reset();
+                }
+            } else {
+                unlock_counter = 0;
+                // Rastreamento suave do FFO com DESEMBRULHO de fase: a estimativa do CP so e valida
+                // em +/- meia subportadora (~496 Hz). Se o desvio real estiver perto de 0.5 bin,
+                // a estimativa alterna entre +490 e -490 Hz; media direta daria ~0 Hz (errado!).
+                const float spacing = static_cast<float>(ISDBT_SAMPLE_RATE) / static_cast<float>(FFT_LEN);
+                float residual = sync_res.ffo_hz - tracked_ffo_hz;
+                residual -= spacing * std::round(residual / spacing);
+                tracked_ffo_hz += 0.1f * residual;
             }
 
-            // Envia todos os pacotes MPEG-TS reais decodificados do ar para o VLC
+            if (ofdm_locked) {
+                // Desrotaciona o novo bloco mantendo continuidade de fase NCO
+                sync.correct_frequency_offset(iq_buf.data(), iq_buf.size(), tracked_ffo_hz);
+                stream_iq_buf.insert(stream_iq_buf.end(), iq_buf.begin(), iq_buf.end());
+            }
+        }
+
+        if (ofdm_locked) {
+            // Processa todos os simbolos completos acumulados, rastreando suavemente o pico do
+            // prefixo ciclico (+/-4 amostras, ganho 0.25) para compensar a deriva de clock do dongle
+            while (static_cast<size_t>(std::lround(frac_pos)) + SYM_LEN + 8 <= stream_iq_buf.size()) {
+                int base_pos = static_cast<int>(std::lround(frac_pos));
+                int max_neg = (base_pos >= 4) ? 4 : base_pos;
+                int best_sh = 0;
+                float best_mag = -1.0f;
+                for (int sh = -max_neg; sh <= 4; ++sh) {
+                    std::complex<float> g(0.0f, 0.0f);
+                    for (size_t m = 0; m < GI_LEN; ++m) {
+                        g += stream_iq_buf[base_pos + sh + m] * std::conj(stream_iq_buf[base_pos + sh + m + FFT_LEN]);
+                    }
+                    float mag = std::norm(g);
+                    if (mag > best_mag) { best_mag = mag; best_sh = sh; }
+                }
+                frac_pos += 0.25f * static_cast<float>(best_sh);
+                int sym_d = std::max(0, static_cast<int>(std::lround(frac_pos)));
+                if (static_cast<size_t>(sym_d) + SYM_LEN > stream_iq_buf.size()) break;
+
+                demod.process_symbol(&stream_iq_buf[sym_d + GI_LEN], decoded_pkts);
+                frac_pos += static_cast<float>(SYM_LEN);
+            }
+
+            int consume_i = static_cast<int>(std::floor(frac_pos)) - 8;
+            if (consume_i > 0 && static_cast<size_t>(consume_i) <= stream_iq_buf.size()) {
+                stream_iq_buf.erase(stream_iq_buf.begin(), stream_iq_buf.begin() + consume_i);
+                frac_pos -= static_cast<float>(consume_i);
+            }
+
             for (const auto& pkt : decoded_pkts) {
-                streamer.send_ts_packet(pkt.data());
                 psi.parse_packet(pkt.data());
-                total_air_packets++;
-            }
-            // Força envio imediato do buffer para reduzir latência
-            streamer.flush();
-            // Debug: exibe contagem de pacotes enviados a cada segundo
-            static auto last_debug = std::chrono::steady_clock::now();
-            auto now_debug = std::chrono::steady_clock::now();
-            if (std::chrono::duration_cast<std::chrono::seconds>(now_debug - last_debug).count() >= 1) {
-                std::cout << "[DEBUG] Pacotes enviados ao VLC: " << total_air_packets << "\n";
-                last_debug = now_debug;
             }
 
-            // Se o sinal de TV esta travado com sincronismo OFDM no ar, mas a cadeia de bits
-            // ainda esta acumulando simbolos ou recuperando erros residuais, emite fluxo completo
-            // com video H.264/PCR dinamico (27 MHz) em datagramas de 1316 bytes para manter o VLC
-            // com janela aberta e sem congelar no cone preto
-            if (decoded_pkts.empty()) {
-                static isdbt::TsGenerator channel_ts_gen;
+            if (!decoded_pkts.empty()) {
+                air_stream_started = true;
+                // Em recepcao parcial 1-Seg o PMT vem no PID 0x1FC8 sem PAT correspondente:
+                // injeta uma PAT sintetica (~10x/s) apontando para ele, para o VLC achar o programa
+                auto now_pat = std::chrono::steady_clock::now();
+                if (std::chrono::duration_cast<std::chrono::milliseconds>(now_pat - last_pat_time).count() >= 100) {
+                    uint8_t pat_pkt[188];
+                    if (psi.build_pat_packet(pat_pkt)) {
+                        streamer.send_ts_packet(pat_pkt);
+                    }
+                    last_pat_time = now_pat;
+                }
+                // Envia todos os pacotes MPEG-TS reais decodificados do ar para o VLC (em blocos de 7x188 = 1316B)
+                for (const auto& pkt : decoded_pkts) {
+                    streamer.send_ts_packet(pkt.data());
+                    total_air_packets++;
+                }
+                streamer.flush();
+            } else if (test_pattern) {
+                // Apenas envia pacotes de teste sinteticos se solicitado com --test-pattern
                 std::vector<std::vector<uint8_t>> standby_pkts;
                 channel_ts_gen.get_standby_block(standby_pkts);
                 for (const auto& pkt : standby_pkts) {
                     streamer.send_ts_packet(pkt.data());
                     total_standby_packets++;
                 }
+                streamer.flush();
             }
-        }
-
-        if (test_pattern) {
-            static isdbt::TsGenerator test_gen;
+        } else if (test_pattern) {
             std::vector<std::vector<uint8_t>> standby_pkts;
-            test_gen.get_standby_block(standby_pkts);
+            channel_ts_gen.get_standby_block(standby_pkts);
             for (const auto& pkt : standby_pkts) {
                 streamer.send_ts_packet(pkt.data());
                 total_standby_packets++;
             }
+            streamer.flush();
         }
 
         auto now = std::chrono::steady_clock::now();
         if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_time).count() >= 500) {
             std::string s_name = psi.get_primary_service_name();
             std::cout << "\r[Status] RSSI: " << std::fixed << std::setprecision(1) << rssi_dbfs << " dBFS | "
-                      << "OFDM: " << (sync_res.locked ? "\033[1;32mLOCKED\033[0m" : "\033[1;31mSEARCH\033[0m")
-                      << " (Pico " << std::setprecision(2) << sync_res.peak_correlation << ") | "
-                      << "FFO: " << std::setprecision(0) << sync_res.ffo_hz << " Hz | "
+                      << "OFDM: " << (ofdm_locked ? "\033[1;32mLOCKED\033[0m" : "\033[1;31mSEARCH\033[0m")
+                      << " (Pico " << std::setprecision(2) << last_peak_corr << ") | "
+                      << "FFO: " << std::setprecision(0) << tracked_ffo_hz
+                      << " Hz (IFO " << (demod.get_ifo() * 992) << " Hz) | "
+                      << "TMCC: " << (demod.is_tmcc_locked() ? "\033[1;32mLOCK\033[0m" : "SYNC")
+                      << " (sym " << demod.total_symbols_processed() << ") | "
                       << "TS do Ar: " << total_air_packets << " pkts"
-                      << " | Standby: " << total_standby_packets << " pkts"
+                      << (test_pattern ? (" | Teste: " + std::to_string(total_standby_packets) + " pkts") : "")
                       << (!s_name.empty() ? (" | " + s_name) : "") << "   " << std::flush;
             last_time = now;
         }
+    }
+
+    g_running = false;
+    q_cv.notify_all();
+    if (reader_thread.joinable()) {
+        reader_thread.join();
     }
 
     std::cout << "\n\n[Encerrando] Fechando dongle RTL-SDR e encerrando stream UDP...\n";

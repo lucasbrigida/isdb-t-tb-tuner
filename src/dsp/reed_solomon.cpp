@@ -153,14 +153,14 @@ int ReedSolomon::decode(uint8_t* block204) {
         return -1; // Mais erros do que a capacidade de correcao t=8
     }
 
-    // 3. Busca de Chien para encontrar as raizes do polinomio localizador
+    // 3. Busca de Chien para encontrar as raizes X_k^-1 do polinomio localizador
     int err_pos[NROOTS];
     int num_errors = 0;
 
     for (int i = 0; i < 204; ++i) {
-        // Posicao no codigo original (255)
+        // Potencia correspondente no polinomio (203 - i)
         int p_idx = 203 - i;
-        uint8_t x_inv = exp_table_[p_idx]; // alpha^p_idx
+        uint8_t x_inv = exp_table_[(255 - p_idx) % 255]; // X_k^-1 = alpha^(-p_idx)
         uint8_t sum = lambda[0];
         uint8_t term = 1;
         for (int j = 1; j <= L; ++j) {
@@ -185,11 +185,12 @@ int ReedSolomon::decode(uint8_t* block204) {
         }
     }
 
-    // Corrigir cada erro
+    // Corrigir cada erro: para FCR = 0, e_k = X_k * Omega(X_k^-1) / Lambda'(X_k^-1)
     for (int i = 0; i < num_errors; ++i) {
         int pos = err_pos[i];
         int p_idx = 203 - pos;
-        uint8_t x_inv = exp_table_[p_idx];
+        uint8_t x_k = exp_table_[p_idx];
+        uint8_t x_inv = exp_table_[(255 - p_idx) % 255];
 
         // Omega(X_k^-1)
         uint8_t num = 0;
@@ -211,7 +212,7 @@ int ReedSolomon::decode(uint8_t* block204) {
             return -1;
         }
 
-        uint8_t err_val = gf_div(num, den);
+        uint8_t err_val = gf_mul(x_k, gf_div(num, den));
         block204[pos] ^= err_val;
     }
 
@@ -219,4 +220,3 @@ int ReedSolomon::decode(uint8_t* block204) {
 }
 
 } // namespace isdbt
-

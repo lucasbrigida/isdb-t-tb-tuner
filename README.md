@@ -1,23 +1,25 @@
 # 📡 ISDB-T / ISDB-Tb Universal SDR Receiver & Player
 
-Decodificador universal de TV digital **ISDB-T / ISDB-Tb (1-Seg)** em C++17 multiplataforma (Windows 10+ e Linux), com aceleração matemática vetorial (SIMD **VOLK** + **FFTW3**), captura direta via **RTL-SDR**, varredura profunda de canais e streaming em tempo real via **UDP** para o **VLC Media Player**.
+Decodificador universal de TV digital **ISDB-T / ISDB-Tb (1-Seg)** em C++17 multiplataforma (Windows 10+ e Linux), com aceleração matemática vetorial (SIMD **VOLK** + **FFTW3**), captura direta via **RTL-SDR**, varredura profunda de canais e streaming em tempo real via **UDP** para o **VLC Media Player**, 100% compatível com a implementação de referência [`git-artes/gr-isdbt`](https://github.com/git-artes/gr-isdbt).
 
 ---
 
 ## 🚀 Funcionalidades
 
 - **Descoberta Automática de RTL-SDR:** Detecta dongles conectados (`RTL2832U`, `R820T/R828D`), seriais e ganhos suportados.
-- **Camada Física Completa (Physical Layer DSP):**
-  - **Sincronismo de Símbolo OFDM:** Autocorrelação de Prefixo Cíclico deslizante (estimador ML Van de Beek).
-  - **Correção de Frequência Fina (FFO):** Desrotacionamento de portadora acelerado via SIMD AVX2/FMA com VOLK.
-  - **FFT:** Modos 1 (2K), 2 (4K) e 3 (8K) com a biblioteca FFTW3.
-  - **Decodificador Viterbi (Inner FEC):** Convolucional \(K=7\), geradores \(171_8\) e \(133_8\), com suporte a taxas puncionadas (1/2, 2/3, 3/4...).
-  - **Descrambler de Dispersão de Energia:** PRBS \(1 + X^{14} + X^{15}\) sincronizado pelo sync byte invertido `0xB8`.
-  - **Decodificador Reed-Solomon (Outer FEC):** \(RS(204, 188, t=8)\) com correção de até 8 bytes corrompidos por pacote.
+- **Camada Física Completa (Physical Layer DSP - 1-Seg):**
+  - **Sincronismo de Símbolo OFDM Contínuo:** Autocorrelação de Prefixo Cíclico deslizante (estimador ML Van de Beek) e rastreamento fino de borda de símbolo.
+  - **Correção de Frequência Fina (FFO) e Inteira (IFO):** Desrotacionamento de portadora com fase NCO contínua via SIMD VOLK e busca conjunta de IFO + fase de pilotos dispersos (`sym_mod4`).
+  - **FFT e Equalização de Canal:** Modos 1 (2K), 2 (4K) e 3 (8K) com FFTW3 e interpolação linear sobre Pilotos Dispersos (SP) e Piloto Contínuo (CP) com PRBS \(X^{11} + X^2 + 1\).
+  - **Decodificador TMCC DBPSK + BCH(273, 191):** Detecção de palavras de sincronismo par/ímpar (`frame_begin` a cada 204 símbolos) e configuração automática de modulação (`DQPSK`, `QPSK`, `16QAM`), taxa de código e entrelaçamento temporal (\(I \in \{0, 1, 2, 4, 8, 16\}\)).
+  - **Desentrelaçadores ISDB-T:** Frequência (`FREQ_PERM_MODE3` de 384 portadoras), Tempo (FIFOs \(I \times (95 - (5c \bmod 96))\)), Bits (atraso de 120 no MSB QPSK) e Bytes Convolucional de Forney (\(I=12, M=17\)).
+  - **Decodificador Viterbi Contínuo (Inner FEC):** Convolucional \(K=7\) (`POLYA=0x4F`, `POLYB=0x6D`), Trellis contínua de 64 estados com suporte às taxas puncionadas `1/2`, `2/3`, `3/4`, `5/6` e `7/8`.
+  - **Descrambler de Dispersão de Energia ISDB-T:** PRBS \(1 + X^{14} + X^{15}\) sincronizado a cada quadro OFDM de 204 símbolos (e suporte a superframe no teste unitário).
+  - **Decodificador Reed-Solomon (Outer FEC):** \(RS(204, 188, t=8, \text{FCR}=0)\) com Berlekamp-Massey, Chien Search e Forney corrigindo até 8 bytes por pacote.
 - **Camada de Aplicação:**
-  - **Varredura Profunda de Frequências (`scan`):** Varre a faixa UHF (canais 14 a 51/69) e salva os canais em `%APPDATA%\isdbtb_rx\channels.json` (Windows) ou `~/.config/isdbtb_rx/channels.json` (Linux).
+  - **Varredura Profunda de Frequências (`scan`):** Varre a faixa UHF (canais 14 a 45/69) e salva os canais em `%APPDATA%\isdbtb_rx\channels.json` (Windows) ou `~/.config/isdbtb_rx/channels.json` (Linux).
   - **Listagem Formatada (`list`):** Tabela ANSI com canal, frequência, RSSI e codecs.
-  - **Streaming Nativo para o VLC (`play`):** Empacotamento broadcast padrão de 7 pacotes MPEG-TS (188B) por datagrama UDP (1316 bytes) para `udp://@127.0.0.1:1234` com latência ultrabaixa.
+  - **Streaming Nativo para o VLC (`play`):** Empacotamento broadcast padrão de 7 pacotes MPEG-TS (188B) por datagrama UDP (1316 bytes) para `udp://@127.0.0.1:1234` com latência ultrabaixa e parser PSI/SI (`PAT`, `PMT`, `SDT`).
   - **Exportação de Playlist (`export`):** Gera arquivo `.m3u` com todos os canais sintonizados.
 
 ---
@@ -38,86 +40,106 @@ cmake --build build -j
 
 ## 💻 Guia de Comandos (CLI)
 
-### 1. Inspecionar hardware e aceleração DSP
+Exibir menu geral de ajuda:
+```powershell
+.\build\isdbtb_rx.exe --help
+```
+
+### 1. Inspecionar hardware e aceleração DSP (`probe`)
 ```powershell
 .\build\isdbtb_rx.exe probe
 ```
 
-### 2. Varrer o espectro UHF em busca de canais
+### 2. Varrer o espectro UHF em busca de canais (`scan`)
 ```powershell
 # Varrer canais UHF 14 ao 45 (padrão Brasil/Internacional)
 .\build\isdbtb_rx.exe scan
 
-# Ou varrer faixa específica
-.\build\isdbtb_rx.exe scan --start 28 --end 32
+# Varrer faixa específica e escolher índice do dongle RTL-SDR (-d)
+.\build\isdbtb_rx.exe scan -s 28 -e 32 -d 0
+# Equivalente com flags longas:
+.\build\isdbtb_rx.exe scan --start 28 --end 32 --device 0
 ```
 
-### 3. Listar canais encontrados
+### 3. Listar canais encontrados (`list`)
 ```powershell
 .\build\isdbtb_rx.exe list
 ```
 
-### 4. Sintonizar e transmitir para o VLC
+### 4. Sintonizar e transmitir para o VLC (`play`)
 ```powershell
-# Sintonizar por número de canal (ex: canal 30)
+# Sintonizar por número de canal (-c / --channel)
 .\build\isdbtb_rx.exe play -c 30
 
-# Ou abrir o VLC automaticamente
-.\build\isdbtb_rx.exe play -c 30 --vlc
+# Sintonizar por nome da emissora (-n / --name) e abrir o VLC automaticamente (--vlc)
+.\build\isdbtb_rx.exe play -n GLOBO --vlc
+
+# Sintonizar ajustando ganho de RF em dB (-g / --gain), porta UDP (-p / --port) e dispositivo (-d / --device)
+.\build\isdbtb_rx.exe play -c 30 -g 28.0 -p 1234 -d 0 --vlc
+
+# Transmitir padrão de teste MPEG-TS/H.264 para diagnóstico de rede no VLC (-t / --test-pattern)
+.\build\isdbtb_rx.exe play -c 30 -t --vlc
 ```
 No VLC aberto manualmente: vá em **Mídia > Abrir Fluxo de Rede** e insira a URL:
-```
+```text
 udp://@127.0.0.1:1234
 ```
 
-### 5. Exportar Playlist M3U
+### 5. Exportar Playlist M3U (`export`)
 ```powershell
-.\build\isdbtb_rx.exe export -o channels.m3u
+# Exportar para channels.m3u (porta padrão 1234)
+.\build\isdbtb_rx.exe export -o channels.m3u -p 1234
 ```
 Para assistir: basta abrir `channels.m3u` com o VLC.
 
 ---
 
-## 🧪 Suíte de Testes Unitários
+## 🧪 Suíte de Testes Unitários e E2E
 
-Todos os blocos do DSP possuem testes unitários determinísticos:
+Todos os blocos do DSP possuem testes determinísticos que podem ser executados individualmente ou via `ctest`:
 
 ```powershell
-# Teste do decodificador Reed-Solomon (204, 188) com injeção de erros
+# Executar toda a suíte via CTest
+ctest --test-dir build --output-on-failure
+
+# 1. Teste do decodificador Reed-Solomon (204, 188) com injeção de erros
 .\build\test_reed_solomon.exe
 
-# Teste do Descrambler (PRBS de dispersão de energia)
+# 2. Teste do Descrambler (PRBS de dispersão de energia)
 .\build\test_descrambler.exe
 
-# Teste do Decodificador Viterbi (Inner FEC K=7)
+# 3. Teste do Decodificador Viterbi (Inner FEC K=7)
 .\build\test_viterbi.exe
 
-# Teste da cadeia completa de FEC integrada
+# 4. Teste da cadeia completa de FEC integrada (Viterbi + Descrambler + RS)
 .\build\test_fec_pipeline.exe
 
-# Teste do sincronismo OFDM contra amostra real de sinal do ar
+# 5. Teste do sincronismo OFDM (Van de Beek ML CP correlation)
 .\build\test_ofdm_sync.exe
+
+# 6. Teste Fim-a-Fim (E2E) do Demodulador 1-Seg completo compatível com gr-isdbt
+.\build\test_oneseg_e2e.exe
 ```
 
 ---
 
 ## 📊 Estrutura do Projeto
 
-```
+```text
 isdb_t_isdb_tb_tuner_player/
+├── AGENTS.md                   # Regras arquiteturais e histórico de erros/acertos para agentes de IA
 ├── CMakeLists.txt              # Sistema de compilação C++17
 ├── include/
-│   ├── dsp/                    # Reed-Solomon, Viterbi, Descrambler, OFDM Sync
-│   ├── streaming/              # UdpStreamer (1316 bytes MTU)
-│   ├── mpegts/                 # Parser de tabelas PSI/SI (PAT, PMT, SDT)
+│   ├── dsp/                    # OfdmSync, OneSegDemodulator, Viterbi, Descrambler, ReedSolomon
+│   ├── streaming/              # UdpStreamer (1316 bytes MTU = 7 x 188B)
+│   ├── mpegts/                 # Parser de tabelas PSI/SI (PAT, PMT, SDT) e TsGenerator
 │   ├── cli/                    # ChannelManager e persistência JSON
-│   └── third_party/            # CLI11 e nlohmann/json
+│   └── third_party/            # CLI11, nlohmann/json e headers de portabilidade DSP/SDR
 ├── src/
-│   ├── main.cpp                # Ponto de entrada CLI e orquestrador
-│   └── ...                     # Implementações dos módulos
+│   ├── main.cpp                # Ponto de entrada CLI e loop contínuo de recepção SDR
+│   └── ...                     # Implementações dos módulos DSP, MPEG-TS, CLI e Streaming
 ├── scripts/
 │   ├── calibrate_ppm.py        # Medição de DC offset e calibração de rádio
 │   └── quick_rf_scan.py        # Varredura rápida de espectro RF
-└── tests/                      # Testes unitários determinísticos e amostras IQ
+└── tests/                      # Testes unitários determinísticos e teste integrado 1-Seg E2E
 ```
-

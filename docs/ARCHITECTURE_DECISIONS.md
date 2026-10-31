@@ -136,3 +136,18 @@ Além disso, a fase do pico fornece diretamente o Desvio Fracionário de Frequê
 \]
 A correção desse desvio em tempo real é acelerada pela função SIMD `volk_32fc_x2_multiply_32fc`, eliminando qualquer rotação residual de fase antes da FFT.
 
+
+---
+
+## ADR 008: Alinhamento Matemático Integral com `git-artes/gr-isdbt` (Erros Corrigidos e Acertos Validados)
+
+### Contexto
+Na validação cruzada contra o repositório de referência [`git-artes/gr-isdbt`](https://github.com/git-artes/gr-isdbt), constatou-se que pequenas diferenças de convenção de bits/registradores e de enquadramento entre DVB-T e ISDB-T impediam a decodificação de pacotes MPEG-TS reais do ar.
+
+### Erros Corrigidos e Regras Permanentes
+1. **PRBS de Pilotos (`X^11 + X^2 + 1`):** Em registrador LFSR de 11 bits com deslocamento à direita (`reg >> 1`), o tap correspondente a $X^9$ é `reg >> 2` (e não `reg >> 9`). O PRBS deve ser rodado desde a portadora 0 do Modo 3 até o início do Segmento 0 (`2592 = 6 * 432`).
+2. **Viterbi Contínuo (`0x4F` / `0x6D`):** Como o bit de entrada entra no LSB (`reg7 = (state << 1) | b`), os polinômios octais $171_8$ e $133_8$ devem ser espelhados em 7 bits para `0x4F` e `0x6D`, e o bit sobrevivente salvo no traceback deve ser `state & 0x20` (bit 5 que deixa o estado de 6 bits), mantendo a Trellis contínua entre símbolos OFDM.
+3. **Reed-Solomon (`FCR = 0`):** Na busca de Chien, avaliar $X_k^{-1} = \alpha^{(255 - p_{\text{idx}}) \bmod 255}$; no algoritmo de Forney, multiplicar por $X_k = \alpha^{p_{\text{idx}}}$ devido ao primeiro radical consecutivo ser $\alpha^0$ (`FCR = 0`).
+4. **Dispersão de Energia ISDB-T (sem `0xB8`):** Diferente do DVB-T, o ISDB-T não inverte o sync byte para `0xB8` a cada 8 pacotes. O PRBS reseta no início de cada quadro OFDM de 204 símbolos (`frame_begin` do TMCC), opera sobre os 203 bytes (`0..202`) que antecedem o `0x47` (posição `203`, ramo 11 do Forney) e avança 8 clocks durante o byte `0x47`.
+5. **Decodificador TMCC DBPSK + BCH(273, 191):** Demodula diferencialmente as 4 portadoras TMCC (`101, 131, 286, 349`), verifica as palavras de sincronismo par (`0x35EE`) e ímpar (`0xCA11`) e valida a síndrome `BCH(273, 191)` antes de aplicar automaticamente os parâmetros da Camada A (modulação, taxa Viterbi e profundidade $I$ do desentrelaçador de tempo).
+6. **Continuidade Temporal de Símbolos no Receptor SDR:** O loop de leitura USB em `src/main.cpp` mantém um buffer deslizante contínuo (`stream_iq_buf`) e acumulador de fase NCO contínuo (`current_phase_`), garantindo que nenhum símbolo OFDM seja descartado nas fronteiras de leitura de `32768` amostras.

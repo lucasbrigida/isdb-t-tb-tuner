@@ -33,10 +33,11 @@ enum class GuardInterval {
  */
 struct SyncResult {
     bool locked = false;          ///< True se a correlacao de pico ultrapassar o limiar de deteccao (> 0.20)
-    int symbol_offset = 0;        ///< Indice da primeira amostra util do simbolo (pos-prefixo ciclico)
+    int symbol_offset = 0;        ///< Indice da primeira amostra util do primeiro simbolo (pos-prefixo ciclico)
     float ffo_hz = 0.0f;          ///< Desvio Fracionario de Frequencia (FFO) estimado em Hertz
     float peak_correlation = 0.0f;///< Coeficiente de correlacao normalizado [0.0 .. 1.0]
     float snr_est_db = 0.0f;      ///< Relacao Sinal-Ruido estimada baseada no pico de correlacao (dB)
+    GuardInterval detected_gi = GuardInterval::GI_1_16; ///< Intervalo de guarda detectado
 };
 
 /**
@@ -66,6 +67,16 @@ public:
     void set_mode(OfdmMode mode, GuardInterval gi);
 
     /**
+     * @brief Reinicia o acumulador de fase do NCO de correcao de frequencia.
+     */
+    void reset_phase() { current_phase_ = 0.0f; }
+
+    int fft_size() const { return fft_size_; }
+    int gi_size() const { return gi_size_; }
+    int symbol_size() const { return fft_size_ + gi_size_; }
+    GuardInterval guard_interval() const { return gi_; }
+
+    /**
      * @brief Realiza a busca deslizante de borda de simbolo e estimativa de FFO.
      * @param samples Buffer de amostras I/Q complexas no dominio do tempo.
      * @param num_samples Quantidade de amostras no buffer (minimo 2 simbolos completos).
@@ -74,9 +85,20 @@ public:
     SyncResult find_symbol_boundary(const std::complex<float>* samples, size_t num_samples);
 
     /**
-     * @brief Corrige o desvio fracionario de frequencia (FFO) desrotacionando o sinal I/Q.
+     * @brief Refina o alinhamento temporal do prefixo ciclico em torno da posicao esperada
+     *        e retorna o erro de fase residual (para malha fechada de FFO como no gr-isdbt).
+     * @param samples Ponteiro para o inicio esperado do prefixo ciclico (necessita ao menos fft_size_ + gi_size_ + max_shift amostras).
+     * @param max_shift Janela maxima de busca em amostras (+/- max_shift).
+     * @param phase_error_out Ponteiro opcional para receber arg(Gamma) no ponto otimo.
+     * @return Deslocamento fino em amostras [-max_shift .. +max_shift].
+     */
+    int fine_symbol_sync(const std::complex<float>* samples, int max_shift = 4, float* phase_error_out = nullptr) const;
+
+    /**
+     * @brief Corrige o desvio fracionario de frequencia (FFO) desrotacionando o sinal I/Q
+     *        com continuidade de fase entre blocos consecutivos.
      * Utiliza instrucoes SIMD AVX2/SSE atraves do VOLK para acelerar a multiplicacao complexa vetorial:
-     *   samples[n] = samples[n] * exp(-j * 2 * pi * ffo * n / Fs)
+     *   samples[n] = samples[n] * exp(j * phase[n])
      * @param samples Buffer I/Q modificado in-place.
      * @param num_samples Quantidade de amostras a desrotacionar.
      * @param ffo_hz Desvio de frequencia em Hz estimado por find_symbol_boundary.
@@ -97,6 +119,7 @@ private:
     float sample_rate_;
     int fft_size_;
     int gi_size_;
+    float current_phase_ = 0.0f;
 
     fftwf_complex* fft_in_;
     fftwf_complex* fft_out_;
@@ -104,4 +127,3 @@ private:
 };
 
 } // namespace isdbt
-

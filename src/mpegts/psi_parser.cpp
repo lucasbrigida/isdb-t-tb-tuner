@@ -1,7 +1,22 @@
 #include "mpegts/psi_parser.hpp"
 #include <iostream>
+#include <cstring>
 
 namespace isdbt {
+
+static uint32_t mpeg2_crc32(const uint8_t* data, size_t len) {
+    uint32_t crc = 0xFFFFFFFF;
+    for (size_t i = 0; i < len; ++i) {
+        crc ^= (static_cast<uint32_t>(data[i]) << 24);
+        for (int b = 0; b < 8; ++b) {
+            if (crc & 0x80000000)
+                crc = (crc << 1) ^ 0x04C11DB7;
+            else
+                crc <<= 1;
+        }
+    }
+    return crc;
+}
 
 PsiParser::PsiParser() {}
 
@@ -37,7 +52,7 @@ bool PsiParser::parse_packet(const uint8_t* ts188) {
     size_t payload_len = 188 - payload_offset;
 
     if (pusi && payload_len > 0) {
-        uint8_t pointer_field = payload[0];
+        size_t pointer_field = payload[0];
         payload += 1 + pointer_field;
         if (1 + pointer_field >= payload_len) return false;
         payload_len -= (1 + pointer_field);
@@ -50,12 +65,53 @@ bool PsiParser::parse_packet(const uint8_t* ts188) {
         // SDT - Service Description Table
         parse_sdt(payload, payload_len);
         return true;
-    } else if (pmt_pids_.find(pid) != pmt_pids_.end()) {
-        // PMT - Program Map Table
+    } else if ((pid >= 0x1FC8 && pid <= 0x1FCF) || pmt_pids_.find(pid) != pmt_pids_.end()) {
+        // PMT - Program Map Table (em 1-Seg ISDB-Tb, o PMT é transmitido no PID fixo 0x1FC8..0x1FCF)
         parse_pmt(pid, payload, payload_len);
+        return true;
     }
 
     return false;
+}
+
+bool PsiParser::build_pat_packet(uint8_t* out_ts188) {
+    if (!out_ts188) return false;
+
+    uint16_t pmt_pid = 0x1FC8;
+    uint16_t prog_num = 0x0001;
+    if (!pmt_pids_.empty()) {
+        pmt_pid = pmt_pids_.begin()->first;
+        prog_num = pmt_pids_.begin()->second;
+    }
+
+    std::memset(out_ts188, 0xFF, 188);
+    out_ts188[0] = 0x47;
+    out_ts188[1] = 0x40; // PUSI = 1, PID = 0x0000
+    out_ts188[2] = 0x00;
+    out_ts188[3] = 0x10 | (pat_cc_ & 0x0F);
+    pat_cc_ = (pat_cc_ + 1) & 0x0F;
+    out_ts188[4] = 0x00; // Pointer field = 0
+
+    uint8_t* sec = &out_ts188[5];
+    sec[0] = 0x00; // table_id = 0x00 (PAT)
+    sec[1] = 0xB0; // section_syntax_indicator = 1, section_length = 13 (0x00D)
+    sec[2] = 0x0D;
+    sec[3] = static_cast<uint8_t>((prog_num >> 8) & 0xFF); // transport_stream_id
+    sec[4] = static_cast<uint8_t>(prog_num & 0xFF);
+    sec[5] = 0xC3; // version 1 (difere da PAT do standby sintetico, forcando o VLC a re-mapear), current_next = 1
+    sec[6] = 0x00; // section_number = 0
+    sec[7] = 0x00; // last_section_number = 0
+    sec[8] = static_cast<uint8_t>((prog_num >> 8) & 0xFF); // program_number
+    sec[9] = static_cast<uint8_t>(prog_num & 0xFF);
+    sec[10] = 0xE0 | static_cast<uint8_t>((pmt_pid >> 8) & 0x1F);
+    sec[11] = static_cast<uint8_t>(pmt_pid & 0xFF);
+
+    uint32_t crc = mpeg2_crc32(sec, 12);
+    sec[12] = static_cast<uint8_t>((crc >> 24) & 0xFF);
+    sec[13] = static_cast<uint8_t>((crc >> 16) & 0xFF);
+    sec[14] = static_cast<uint8_t>((crc >> 8) & 0xFF);
+    sec[15] = static_cast<uint8_t>(crc & 0xFF);
+    return true;
 }
 
 void PsiParser::parse_pat(const uint8_t* payload, size_t len) {
@@ -63,11 +119,11 @@ void PsiParser::parse_pat(const uint8_t* payload, size_t len) {
     uint8_t table_id = payload[0];
     if (table_id != 0x00) return;
 
-    uint16_t section_len = (((static_cast<uint16_t>(payload[1] & 0x0F)) << 8) | payload[2]);
-    if (section_len + 3 > len) section_len = static_cast<uint16_t>(len - 3);
+    size_t section_len = (((static_cast<size_t>(payload[1] & 0x0F)) << 8) | payload[2]);
+    if (section_len + 3 > len) section_len = len - 3;
 
     size_t idx = 8;
-    while (idx + 4 <= section_len + 3 - 4) { // desconta os 4 bytes finais de CRC32
+    while (section_len + 3 >= 4 && idx + 4 <= section_len + 3 - 4) { // desconta os 4 bytes finais de CRC32
         uint16_t program_num = (static_cast<uint16_t>(payload[idx]) << 8) | payload[idx + 1];
         uint16_t program_pid = ((static_cast<uint16_t>(payload[idx + 2] & 0x1F)) << 8) | payload[idx + 3];
 
@@ -86,16 +142,20 @@ void PsiParser::parse_pmt(uint16_t pmt_pid, const uint8_t* payload, size_t len) 
     if (table_id != 0x02) return; // PMT table_id = 0x02
 
     uint16_t service_id = (static_cast<uint16_t>(payload[3]) << 8) | payload[4];
-    uint16_t program_info_len = (((static_cast<uint16_t>(payload[10] & 0x0F)) << 8) | payload[11]);
+    services_[service_id].service_id = service_id;
+    services_[service_id].pmt_pid = pmt_pid;
+    pmt_pids_[pmt_pid] = service_id;
+
+    size_t program_info_len = (((static_cast<size_t>(payload[10] & 0x0F)) << 8) | payload[11]);
 
     size_t idx = 12 + program_info_len;
-    uint16_t section_len = (((static_cast<uint16_t>(payload[1] & 0x0F)) << 8) | payload[2]);
-    if (section_len + 3 > len) section_len = static_cast<uint16_t>(len - 3);
+    size_t section_len = (((static_cast<size_t>(payload[1] & 0x0F)) << 8) | payload[2]);
+    if (section_len + 3 > len) section_len = len - 3;
 
-    while (idx + 5 <= section_len + 3 - 4) {
+    while (section_len + 3 >= 4 && idx + 5 <= section_len + 3 - 4) {
         uint8_t stream_type = payload[idx];
         uint16_t elem_pid = ((static_cast<uint16_t>(payload[idx + 1] & 0x1F)) << 8) | payload[idx + 2];
-        uint16_t es_info_len = (((static_cast<uint16_t>(payload[idx + 3] & 0x0F)) << 8) | payload[idx + 4]);
+        size_t es_info_len = (((static_cast<size_t>(payload[idx + 3] & 0x0F)) << 8) | payload[idx + 4]);
 
         if (stream_type == 0x1B || stream_type == 0x02) {
             // 0x1B = H.264 / AVC video, 0x02 = MPEG-2 video
@@ -114,13 +174,13 @@ void PsiParser::parse_sdt(const uint8_t* payload, size_t len) {
     uint8_t table_id = payload[0];
     if (table_id != 0x42 && table_id != 0x46) return; // 0x42 = actual TS, 0x46 = other TS
 
-    uint16_t section_len = (((static_cast<uint16_t>(payload[1] & 0x0F)) << 8) | payload[2]);
-    if (section_len + 3 > len) section_len = static_cast<uint16_t>(len - 3);
+    size_t section_len = (((static_cast<size_t>(payload[1] & 0x0F)) << 8) | payload[2]);
+    if (section_len + 3 > len) section_len = len - 3;
 
     size_t idx = 11;
-    while (idx + 5 <= section_len + 3 - 4) {
+    while (section_len + 3 >= 4 && idx + 5 <= section_len + 3 - 4) {
         uint16_t service_id = (static_cast<uint16_t>(payload[idx]) << 8) | payload[idx + 1];
-        uint16_t loop_len = (((static_cast<uint16_t>(payload[idx + 3] & 0x0F)) << 8) | payload[idx + 4]);
+        size_t loop_len = (((static_cast<size_t>(payload[idx + 3] & 0x0F)) << 8) | payload[idx + 4]);
 
         size_t d_idx = idx + 5;
         size_t d_end = d_idx + loop_len;
@@ -153,4 +213,3 @@ void PsiParser::parse_sdt(const uint8_t* payload, size_t len) {
 }
 
 } // namespace isdbt
-
