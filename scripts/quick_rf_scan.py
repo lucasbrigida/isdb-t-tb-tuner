@@ -7,12 +7,33 @@ import sys
 import ctypes
 import numpy as np
 
-dll_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "deps", "rtlsdr", "x64")
+project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+possible_dirs = [
+    os.path.join(project_dir, "build-setup", "rtl-sdr-64bit-20261018"),
+    os.path.join(project_dir, "deps", "rtlsdr", "x64")
+]
+
+dll_dir = None
+dll_path = None
+for d in possible_dirs:
+    for name in ["librtlsdr.dll", "rtlsdr.dll"]:
+        candidate = os.path.join(d, name)
+        if os.path.exists(candidate):
+            dll_dir = d
+            dll_path = candidate
+            break
+    if dll_path:
+        break
+
+if not dll_path:
+    print("[ERRO] Nenhuma DLL do RTL-SDR encontrada.")
+    sys.exit(1)
+
 if hasattr(os, "add_dll_directory"):
     os.add_dll_directory(dll_dir)
 os.environ["PATH"] = dll_dir + os.pathsep + os.environ.get("PATH", "")
 
-lib = ctypes.CDLL(os.path.join(dll_dir, "rtlsdr.dll"))
+lib = ctypes.CDLL(dll_path)
 
 lib.rtlsdr_get_device_count.restype = ctypes.c_uint32
 lib.rtlsdr_open.argtypes = [ctypes.POINTER(ctypes.c_void_p), ctypes.c_uint32]

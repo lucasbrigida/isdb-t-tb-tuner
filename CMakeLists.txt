@@ -7,6 +7,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Local dependency roots
 set(DEPS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps")
+set(SETUP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/build-setup/rtl-sdr-64bit-20261018")
 set(RTLSDR_ROOT "${DEPS_DIR}/rtlsdr")
 set(FFTW3_ROOT "${DEPS_DIR}/fftw3")
 set(VOLK_ROOT "${DEPS_DIR}/volk-install")
@@ -22,6 +23,7 @@ include_directories(
 
 # Link directories
 link_directories(
+    "${SETUP_DIR}"
     "${RTLSDR_ROOT}/x64"
     "${FFTW3_ROOT}"
     "${VOLK_ROOT}/lib"
@@ -88,9 +90,15 @@ endif()
 
 # Copy runtime DLLs to output directory for instant execution
 if(WIN32)
+    if(EXISTS "${SETUP_DIR}/librtlsdr.dll")
+        set(RTLSDR_DLL_PATH "${SETUP_DIR}/librtlsdr.dll")
+    else()
+        set(RTLSDR_DLL_PATH "${RTLSDR_ROOT}/x64/rtlsdr.dll")
+    endif()
+
     add_custom_command(TARGET isdbtb_rx POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${RTLSDR_ROOT}/x64/rtlsdr.dll"
+            "${RTLSDR_DLL_PATH}"
             "${FFTW3_ROOT}/libfftw3f-3.dll"
             "${VOLK_ROOT}/bin/libvolk.dll"
             $<TARGET_FILE_DIR:isdbtb_rx>
