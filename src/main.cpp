@@ -67,6 +67,25 @@ uint32_t get_channel_freq(int channel_number) {
     return static_cast<uint32_t>(freq_mhz * 1e6);
 }
 
+// Converte o nivel dBFS em uma descricao simples e intuitiva de forca de sinal para leigos
+struct SignalRating {
+    std::string text;       // "Alto (Forte)", "Normal (Bom)", "Fraco"
+    std::string ansi_color; // Verde, Ciano, Amarelo, Vermelho
+    std::string bar;        // "[#####]", "[#### ]", etc.
+};
+
+SignalRating get_signal_rating(float rssi_dbfs) {
+    if (rssi_dbfs >= -6.0f) {
+        return {"Alto (Forte)", "\033[1;32m", "[#####]"};
+    } else if (rssi_dbfs >= -12.0f) {
+        return {"Normal (Bom)", "\033[1;36m", "[#### ]"};
+    } else if (rssi_dbfs >= -18.0f) {
+        return {"Moderado",     "\033[1;33m", "[###  ]"};
+    } else {
+        return {"Fraco",        "\033[1;31m", "[#    ]"};
+    }
+}
+
 int cmd_probe() {
     std::cout << "\033[1;36m=== Inspecao de Hardware RTL-SDR e Aceleracao DSP ===\033[0m\n\n";
 
@@ -130,8 +149,8 @@ int cmd_scan(int start_ch, int end_ch, int dev_idx) {
 
     int found_count = 0;
 
-    std::cout << "Canal | Frequencia   |   RSSI    | Status OFDM   | Emissora / Servico\n";
-    std::cout << "------+--------------+-----------+---------------+--------------------\n";
+    std::cout << "Canal | Frequencia   |  Forca do Sinal |  Potencia | Status OFDM   | Emissora / Servico\n";
+    std::cout << "------+--------------+-----------------+-----------+---------------+--------------------\n";
 
     for (int ch = start_ch; ch <= end_ch && g_running; ++ch) {
         uint32_t freq_hz = get_channel_freq(ch);
@@ -151,6 +170,7 @@ int cmd_scan(int start_ch, int end_ch, int dev_idx) {
         float rssi_dbfs = 10.0f * std::log10((pwr_sum / chunk_samples) + 1e-12f);
 
         auto sync_res = sync.find_symbol_boundary(iq_buf.data(), iq_buf.size());
+        auto rating = get_signal_rating(rssi_dbfs);
 
         std::string status_str = sync_res.locked ? "\033[1;32mSINAL LOCK\033[0m" : "\033[1;30mRuido\033[0m";
         std::string ch_name = "Canal " + std::to_string(ch);
@@ -165,9 +185,12 @@ int cmd_scan(int start_ch, int end_ch, int dev_idx) {
             mgr.add_or_update(info);
         }
 
+        std::string signal_visual = rating.ansi_color + rating.bar + " " + rating.text + "\033[0m";
+
         std::cout << std::setw(4) << ch << "  | "
                   << std::fixed << std::setprecision(3) << std::setw(8) << (freq_hz / 1e6) << " MHz | "
-                  << std::setw(7) << std::setprecision(2) << rssi_dbfs << " dBFS | "
+                  << std::setw(26) << signal_visual << " | "
+                  << std::setw(6) << std::setprecision(1) << rssi_dbfs << " dBFS | "
                   << std::setw(13) << status_str << " | "
                   << (sync_res.locked ? ("\033[1;33m" + ch_name + "\033[0m") : "--")
                   << "\n";
@@ -191,17 +214,21 @@ int cmd_list() {
         return 0;
     }
 
-    std::cout << "Canal | Frequencia   |   RSSI    | Codec Video | Codec Audio | Nome / Emissora\n";
-    std::cout << "------+--------------+-----------+-------------+-------------+----------------\n";
+    std::cout << "Canal | Frequencia   |   Forca do Sinal    |  Potencia | Codecs (V/A) | Nome / Emissora\n";
+    std::cout << "------+--------------+---------------------+-----------+--------------+----------------\n";
     for (const auto& ch : list) {
+        auto rating = get_signal_rating(ch.rssi_dbfs);
+        std::string signal_str = rating.ansi_color + rating.bar + " " + rating.text + "\033[0m";
+        std::string codecs = ch.video_codec + "/" + ch.audio_codec;
+
         std::cout << std::setw(4) << ch.channel_number << "  | "
                   << std::fixed << std::setprecision(3) << std::setw(8) << (ch.frequency_hz / 1e6) << " MHz | "
-                  << std::setw(7) << std::setprecision(2) << ch.rssi_dbfs << " dBFS | "
-                  << std::setw(11) << ch.video_codec << " | "
-                  << std::setw(11) << ch.audio_codec << " | \033[1;32m"
+                  << std::setw(30) << signal_str << " | "
+                  << std::setw(6) << std::setprecision(1) << ch.rssi_dbfs << " dBFS | "
+                  << std::setw(12) << codecs << " | \033[1;32m"
                   << ch.name << "\033[0m\n";
     }
-    std::cout << "\n";
+    std::cout << "\n\033[1;30mLegenda de Forca do Sinal: [#####] Alto (Forte) >= -6 dBFS | [#### ] Normal (Bom) >= -12 dBFS | [###  ] Moderado | [#    ] Fraco\033[0m\n\n";
     return 0;
 }
 

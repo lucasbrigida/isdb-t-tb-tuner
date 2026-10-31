@@ -65,7 +65,7 @@ Os canais descobertos são salvos automaticamente no arquivo:
 ---
 
 ### 📋 2.3 Listar os Canais Salvos (`list`)
-Exibe uma tabela formatada no terminal com todos os canais sintonizados, suas frequências e níveis de potência (RSSI):
+Exibe uma tabela formatada no terminal com todos os canais sintonizados, suas frequências, codecs, força visual do sinal e potência em dBFS:
 ```powershell
 .\build\isdbtb_rx.exe list
 ```
@@ -73,13 +73,15 @@ Exibe uma tabela formatada no terminal com todos os canais sintonizados, suas fr
 ```text
 === Lista de Canais ISDB-T Armazenados (5) ===
 
-Canal | Frequencia   |   RSSI    | Codec Video | Codec Audio | Nome / Emissora
-------+--------------+-----------+-------------+-------------+----------------
-  28  |  557.143 MHz |   -2.32 dBFS |       H.264 |         AAC | Canal 28
-  29  |  563.143 MHz |   -2.08 dBFS |       H.264 |         AAC | Canal 29
-  30  |  569.143 MHz |   -1.93 dBFS |       H.264 |         AAC | Canal 30
-  31  |  575.143 MHz |   -2.25 dBFS |       H.264 |         AAC | Canal 31
-  32  |  581.143 MHz |   -4.17 dBFS |       H.264 |         AAC | Canal 32
+Canal | Frequencia   |   Forca do Sinal    |  Potencia | Codecs (V/A) | Nome / Emissora
+------+--------------+---------------------+-----------+--------------+----------------
+  28  |  557.143 MHz | [#####] Alto (Forte) |    0.5 dBFS |    H.264/AAC | Canal 28
+  29  |  563.143 MHz | [#####] Alto (Forte) |    0.3 dBFS |    H.264/AAC | Canal 29
+  30  |  569.143 MHz | [#####] Alto (Forte) |    0.4 dBFS |    H.264/AAC | Canal 30
+  35  |  599.143 MHz | [#### ] Normal (Bom) |   -6.2 dBFS |    H.264/AAC | Canal 35
+  42  |  641.143 MHz |    [###  ] Moderado |  -15.5 dBFS |    H.264/AAC | Canal 42
+
+Legenda de Forca do Sinal: [#####] Alto (Forte) >= -6 dBFS | [#### ] Normal (Bom) >= -12 dBFS | [###  ] Moderado | [#    ] Fraco
 ```
 
 ---
@@ -135,3 +137,4 @@ Para assistir: basta dar duplo clique no arquivo `canais.m3u` ou arrastá-lo par
 - **Posicionamento da Antena:** Sinais de TV digital UHF (470–700 MHz) necessitam de antena adequada (preferencialmente perto de janelas ou externa).
 - **Extensão da antena:** Ajuste o comprimento da haste telescópica da antena para cerca de **12 a 15 cm** (correspondente a \(1/4\) de onda da faixa média de UHF ~550 MHz).
 - Verifique se a sua cidade/bairro possui cobertura digital ativa naquele canal específico.
+
