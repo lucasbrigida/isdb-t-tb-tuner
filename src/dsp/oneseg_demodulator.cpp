@@ -37,12 +37,12 @@ static const size_t TMCC_CARRIERS[4] = {101, 131, 286, 349};
 static const size_t AC_CARRIERS[8] = {7, 89, 206, 209, 226, 244, 377, 407};
 
 void OneSegDemodulator::init_pilots() {
-    // Gerador de PRBS de 11 bits (X^11 + X^2 + 1)
+    // Gerador de PRBS de 11 bits (X^11 + X^9 + 1) conforme ABNT NBR 15601 / ARIB STD-B31
     uint32_t reg = 0x7FF; // 11 bits em '1'
     std::vector<float> full_prbs(2592 + 432);
     for (size_t i = 0; i < full_prbs.size(); ++i) {
         uint32_t w = reg & 1;
-        uint32_t new_bit = ((reg >> 2) ^ reg) & 1;
+        uint32_t new_bit = ((reg >> 9) ^ reg) & 1;
         reg = (reg >> 1) | (new_bit << 10);
         full_prbs[i] = (4.0f * 2.0f * (0.5f - static_cast<float>(w))) / 3.0f;
     }

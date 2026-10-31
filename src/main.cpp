@@ -393,6 +393,22 @@ int cmd_play(int channel_number, const std::string& name_query, bool open_vlc, u
                 psi.parse_packet(pkt.data());
                 total_packets++;
             }
+
+            // Se o sinal de TV esta travado com sincronismo OFDM no ar, mas a cadeia de bits
+            // ainda esta acumulando simbolos ou recuperando erros residuais, emite tabelas de
+            // sinalizacao TS (PAT/PMT) em datagramas de 1316 bytes para manter o VLC conectado
+            if (decoded_pkts.empty()) {
+                static isdbt::TsGenerator channel_ts_gen;
+                static uint8_t pat_cc = 0, pmt_cc = 0;
+                uint8_t tpkt[188];
+                for (int b = 0; b < 7; ++b) {
+                    channel_ts_gen.get_pat_packet(tpkt, pat_cc++);
+                    streamer.send_ts_packet(tpkt);
+                    channel_ts_gen.get_pmt_packet(tpkt, pmt_cc++);
+                    streamer.send_ts_packet(tpkt);
+                    total_packets += 2;
+                }
+            }
         }
 
         if (test_pattern) {

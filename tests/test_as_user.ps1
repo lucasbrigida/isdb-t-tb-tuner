@@ -73,6 +73,11 @@ Assert-CommandSuccess "Executar .\build\test_ofdm_sync.exe" {
     .\build\test_ofdm_sync.exe
 }
 
+# 7. Teste E2E de Scan e Play para canais de sinal alto
+Assert-CommandSuccess "Executar python tests\test_scan_and_play.py" {
+    python tests\test_scan_and_play.py
+}
+
 Write-Host "`n========================================================" -ForegroundColor Green
 Write-Host "  TODOS OS COMANDOS DO USUARIO NO TERMINAL FUNCIONAM!   " -ForegroundColor Green
 Write-Host "========================================================`n" -ForegroundColor Green

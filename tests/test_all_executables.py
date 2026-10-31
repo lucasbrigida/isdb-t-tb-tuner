@@ -233,6 +233,15 @@ def main():
         failed_tests += 1
         print(f"{RED}FAIL{RESET} ({elapsed:.2f}s) [Nao recebeu datagrama UDP de 1316B valido]")
 
+    # 3. Teste E2E de Scan e Validacao Play para Canais de Sinal Alto
+    test_scan_play_script = os.path.join(PROJECT_ROOT, "tests", "test_scan_and_play.py")
+    run_test(
+        "test_scan_and_play.py (Varredura e Validacao de Play para Canais com Sinal Alto)",
+        [sys.executable, test_scan_play_script],
+        timeout=35,
+        check_fn=lambda out, err: ("Ao menos 1 canal com sinal alto funcionou perfeitamente" in out, "Nenhum canal com sinal alto funcionou no play")
+    )
+
     # Resumo Final
     print(f"\n{YELLOW}================================================================{RESET}")
     print(f"Total de Testes: {total_tests} | {GREEN}Aprovados: {passed_tests}{RESET} | {RED}Falhas: {failed_tests}{RESET}")
