@@ -19,15 +19,13 @@ RESET = "\033[0m"
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BUILD_DIR = os.path.join(PROJECT_ROOT, "build")
 
-# Configurar PATH para encontrar as DLLs
-DLL_DIRS = [
-    os.path.join(PROJECT_ROOT, "build-setup", "rtl-sdr-64bit-20261018"),
-    os.path.join(PROJECT_ROOT, "deps", "rtlsdr", "x64"),
-    os.path.join(PROJECT_ROOT, "deps", "fftw3"),
-    os.path.join(PROJECT_ROOT, "deps", "volk-install", "bin"),
-    BUILD_DIR
-]
-os.environ["PATH"] = os.pathsep.join(DLL_DIRS) + os.pathsep + os.environ.get("PATH", "")
+# O teste executa estritamente no ambiente padrao do usuario (SEM injecao de DLLs externas no PATH)
+# Isso garante que a pasta build/ seja 100% autocontida e portavel.
+clean_env = os.environ.copy()
+# Remove qualquer referencia a deps/ ou build-setup/ do PATH para simular fielmente o terminal do usuario
+current_path = clean_env.get("PATH", "")
+filtered_paths = [p for p in current_path.split(os.pathsep) if "deps" not in p.lower() and "build-setup" not in p.lower()]
+clean_env["PATH"] = os.pathsep.join(filtered_paths)
 
 total_tests = 0
 passed_tests = 0
@@ -43,6 +41,7 @@ def run_test(name, cmd, timeout=15, expected_exit=0, check_fn=None):
         proc = subprocess.run(
             cmd,
             cwd=PROJECT_ROOT,
+            env=clean_env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             timeout=timeout,
@@ -203,6 +202,7 @@ def main():
     proc = subprocess.Popen(
         [exe_main, "play", "-c", "30", "-p", str(test_port)],
         cwd=PROJECT_ROOT,
+        env=clean_env,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
