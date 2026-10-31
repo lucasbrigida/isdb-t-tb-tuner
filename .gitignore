@@ -1,8 +1,7 @@
 # Build directories
 build/
-deps/downloads/
-deps/volk-build/
-deps/volk-src/
+deps/
+channels.m3u
 
 # Test data captures
 tests/data/*.raw

@@ -120,3 +120,4 @@ isdb_t_isdb_tb_tuner_player/
 │   └── quick_rf_scan.py        # Varredura rápida de espectro RF
 └── tests/                      # Testes unitários determinísticos e amostras IQ
 ```
+

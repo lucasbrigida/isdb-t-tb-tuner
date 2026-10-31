@@ -102,3 +102,4 @@ Se você for um subagente encarregado de continuar o projeto, aqui estão as tar
 ### Tarefa C: Suporte a SDRs de Banda Larga (Full-Seg HDTV)
 - **Local:** `include/hardware/sdr_device.hpp`
 - **Objetivo:** Criar classe base polimórfica para suportar SoapySDR ou HackRF/Airspy, permitindo amostragem a 8.126984 MSps e decodificação dos 13 segmentos (sinal HDTV 1080i).
+

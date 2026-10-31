@@ -158,3 +158,4 @@ isdb_t_isdb_tb_tuner_player/
 - Integração da flag `--vlc` para disparo do VLC.
 - Subcomandos da CLI: `scan`, `list`, `play`, `export` (playlist .m3u) e `status`.
 - Validação final ao vivo sintonizando canais da região.
+

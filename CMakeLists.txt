@@ -38,6 +38,7 @@ set(SOURCES
     src/dsp/ofdm_sync.cpp
     src/streaming/udp_streamer.cpp
     src/mpegts/psi_parser.cpp
+    src/mpegts/ts_generator.cpp
     src/cli/channel_manager.cpp
 )
 

@@ -135,3 +135,4 @@ Além disso, a fase do pico fornece diretamente o Desvio Fracionário de Frequê
 \Delta f = -\frac{\angle \Gamma(d_{max})}{2\pi \cdot T_u}
 \]
 A correção desse desvio em tempo real é acelerada pela função SIMD `volk_32fc_x2_multiply_32fc`, eliminando qualquer rotação residual de fase antes da FFT.
+

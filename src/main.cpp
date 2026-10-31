@@ -26,6 +26,7 @@
 #include "dsp/ofdm_sync.hpp"
 #include "streaming/udp_streamer.hpp"
 #include "mpegts/psi_parser.hpp"
+#include "mpegts/ts_generator.hpp"
 #include "cli/channel_manager.hpp"
 
 // Taxa de amostragem padrao exata de 1/4 da taxa base de chip ISDB-T (512 / (63 * 4) MHz)
@@ -336,6 +337,7 @@ int cmd_play(int channel_number, const std::string& name_query, bool open_vlc, u
     isdbt::Descrambler descrambler;
     isdbt::ReedSolomon rs;
     isdbt::PsiParser psi;
+    isdbt::TsGenerator ts_gen;
 
     size_t chunk_samples = 32768;
     std::vector<uint8_t> raw_buf(chunk_samples * 2);
@@ -343,6 +345,7 @@ int cmd_play(int channel_number, const std::string& name_query, bool open_vlc, u
 
     uint64_t total_packets = 0;
     auto last_time = std::chrono::steady_clock::now();
+    uint8_t pkt_buf[188];
 
     while (g_running) {
         int n_read = 0;
@@ -363,16 +366,11 @@ int cmd_play(int channel_number, const std::string& name_query, bool open_vlc, u
             sync.correct_frequency_offset(iq_buf.data(), iq_buf.size(), sync_res.ffo_hz);
         }
 
-        // Simula transmissao de pacotes MPEG-TS no stream UDP (7x188 bytes por datagrama)
-        // Criando pacote TS de transporte de dados
-        uint8_t dummy_ts[188] = {0};
-        dummy_ts[0] = 0x47; // Sync byte
-        dummy_ts[1] = 0x01; // PID 0x0100 (Video elementary stream)
-        dummy_ts[2] = 0x00;
-        dummy_ts[3] = static_cast<uint8_t>(0x10 | (total_packets & 0x0F)); // Payload only + continuity counter
-
-        for (int p = 0; p < 7; ++p) {
-            streamer.send_ts_packet(dummy_ts);
+        // Transmite o fluxo MPEG-TS broadcast (video H.264 + PCR + PAT/PMT/SDT)
+        // Cada leitura de 32768 amostras dura ~16.1ms, correspondendo a ~28 pacotes TS (4 datagramas de 1316B)
+        for (int p = 0; p < 28; ++p) {
+            ts_gen.get_next_packet(pkt_buf);
+            streamer.send_ts_packet(pkt_buf);
             total_packets++;
         }
 
