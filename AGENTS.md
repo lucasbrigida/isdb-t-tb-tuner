@@ -125,6 +125,10 @@ Durante a auditoria e desenvolvimento do decodificador contra a implementação 
 - ❌ **O que estava errado:** `rtlsdr_read_sync` era chamado de forma síncrona dentro do mesmo loop que executava FFTW, desentrelaçamento temporal, decodificação Viterbi e Reed-Solomon. Durante os ~15-20 ms em que a CPU processava esses algoritmos matemáticos e enviava datagramas UDP, o buffer de endpoint USB de 64 KB do RTL-SDR no kernel sofria overflow, causando perda de amostras contínuas no barramento USB. Essa descontinuidade de dados quebrava a sequência de 204 símbolos do quadro TMCC, impedindo que o receptor atingisse `TMCC: LOCK`.
 - ✅ **Como é o correto (`main.cpp`):** A leitura USB é isolada em um thread dedicado de alta prioridade (`reader_thread`), que preenche continuamente uma fila thread-safe (`std::queue<std::vector<uint8_t>>` protegida por `std::mutex` e `std::condition_variable` com limite de 64 blocos). O thread principal consome dessa fila sem nunca bloquear o hardware do RTL-SDR.
 
+### Erro 13: Remoção do Caractere '@' da URL no Windows ao Invocar o VLC sem Aspas (`start vlc udp://@...`)
+- ❌ **O que estava errado:** O comando de disparo automático executava `start vlc udp://@127.0.0.1:1234` sem aspas na URL. No Windows, o interpretador `cmd.exe` e o `ShellExecuteEx` aplicam canonicalização de URI (RFC 3986) em argumentos de URL não cotados, tratando a ausência de `userinfo` antes do `@` como redundante e eliminando o caractere `@`. O VLC era inicializado com `udp://127.0.0.1:1234` (sem `@`), passando a operar como transmissor/cliente em vez de escutar e bindar na porta de recepção UDP.
+- ✅ **Como é o correto (`main.cpp`):** A URL é obrigatoriamente envelopada com aspas literais: `start "" <vlc_path> "<streamer_url>"` (ex: `start "" "C:\Program Files\VideoLAN\VLC\vlc.exe" "udp://@127.0.0.1:1234"`). As aspas impedem a canonicalização do shell e preservam o caractere `@` intacto nos argumentos recebidos pelo VLC.
+
 ---
 
 ## 🧪 4. Suíte de Testes e Validações Realizadas

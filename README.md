@@ -42,16 +42,19 @@ cmake --build build -j
 ## 💻 Guia de Comandos (CLI)
 
 Exibir menu geral de ajuda:
+
 ```powershell
 .\build\isdbtb_rx.exe --help
 ```
 
 ### 1. Inspecionar hardware e aceleração DSP (`probe`)
+
 ```powershell
 .\build\isdbtb_rx.exe probe
 ```
 
 ### 2. Varrer o espectro UHF em busca de canais (`scan`)
+
 ```powershell
 # Varrer canais UHF 14 ao 45 (padrão Brasil/América Latina)
 .\build\isdbtb_rx.exe scan
@@ -61,11 +64,13 @@ Exibir menu geral de ajuda:
 ```
 
 ### 3. Listar canais encontrados (`list`)
+
 ```powershell
 .\build\isdbtb_rx.exe list
 ```
 
 ### 4. Sintonizar e transmitir para o VLC (`play`)
+
 ```powershell
 # Sintonizar por número de canal (-c / --channel) e abrir o VLC automaticamente (--vlc)
 .\build\isdbtb_rx.exe play -c 23 --vlc
@@ -83,15 +88,18 @@ Exibir menu geral de ajuda:
 > [!TIP]
 > **Assistindo Manualmente no VLC:**
 > Abra o VLC Media Player, acesse o menu **Mídia > Abrir Fluxo de Rede** (ou pressione `Ctrl+N`) e informe a URL:
+>
 > ```text
 > udp://@127.0.0.1:1234
 > ```
 
 ### 5. Exportar Playlist M3U (`export`)
+
 ```powershell
 # Exportar para channels.m3u (porta padrão 1234)
 .\build\isdbtb_rx.exe export -o channels.m3u -p 1234
 ```
+
 Para assistir: basta abrir o arquivo `channels.m3u` diretamente no VLC.
 
 ---

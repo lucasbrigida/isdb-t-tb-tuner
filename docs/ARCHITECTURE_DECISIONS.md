@@ -168,3 +168,19 @@ Desacoplar a recepção USB do processamento DSP:
 ### Consequências
 - Fim total de buffer overflows no barramento USB.
 - O sincronismo do TMCC trava em menos de 300 ms após a sintonia, iniciando imediatamente a emissão contínua de pacotes MPEG-TS do ar.
+
+---
+
+## ADR 010: Escaping e Aspas Literais na Invocação do VLC via Shell do Windows
+
+### Contexto
+No Windows, chamar `start vlc udp://@127.0.0.1:1234` sem aspas no argumento da URL fazia com que o `cmd.exe` e as APIs de shell (`ShellExecuteEx` / `UrlCanonicalize`) interpretassem a ausência de usuário antes do `@` como redundante pela RFC 3986, eliminando o `@` e repassando ao VLC a URL `udp://127.0.0.1:1234`.
+Sem o caractere `@`, o VLC não faz o `bind()` de escuta na porta UDP, tratando a URL como destino de transmissão e impedindo a reprodução do sinal.
+
+### Decisão
+1. Envolver a URL sempre entre aspas duplas literais na chamada de sistema: `start "" <vlc_path> "<url>"`.
+2. Resolver os caminhos padrão do VLC (`C:\Program Files\VideoLAN\VLC\vlc.exe`) diretamente pelo filesystem em tempo de execução, garantindo invocação imediata e sem dependência do registro do Windows.
+
+### Consequências
+- Preservação estrita do caractere `@` na URL recebida pelo VLC (`udp://@127.0.0.1:1234`).
+- O VLC abre instantaneamente e escuta diretamente na porta UDP sem intervenção manual do usuário.

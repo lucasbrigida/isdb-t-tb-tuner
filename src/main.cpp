@@ -10,6 +10,7 @@
 #include <queue>
 #include <mutex>
 #include <condition_variable>
+#include <filesystem>
 
 #ifdef _WIN32
     #include <windows.h>
@@ -337,10 +338,20 @@ int cmd_play(int channel_number, const std::string& name_query, bool open_vlc, u
     if (open_vlc) {
         std::cout << "[VLC] Disparando reprodutor VLC automaticamente...\n";
 #ifdef _WIN32
-        std::string cmd = "start vlc " + streamer.url();
+        // Tratamento da string da URL para o VLC no Windows:
+        // Aspas duplas sao obrigatorias ao redor da URL para que o interpretador de comandos do Windows (cmd.exe / ShellExecute)
+        // nao canonicize 'udp://@127.0.0.1:1234' retirando o caractere '@' (transformando em 'udp://127.0.0.1:1234').
+        // Localiza tambem o binario em Arquivos de Programas se disponivel para garantir abertura imediata.
+        std::string vlc_bin = "vlc";
+        if (std::filesystem::exists("C:\\Program Files\\VideoLAN\\VLC\\vlc.exe")) {
+            vlc_bin = "\"C:\\Program Files\\VideoLAN\\VLC\\vlc.exe\"";
+        } else if (std::filesystem::exists("C:\\Program Files (x86)\\VideoLAN\\VLC\\vlc.exe")) {
+            vlc_bin = "\"C:\\Program Files (x86)\\VideoLAN\\VLC\\vlc.exe\"";
+        }
+        std::string cmd = "start \"\" " + vlc_bin + " \"" + streamer.url() + "\"";
         std::system(cmd.c_str());
 #else
-        std::string cmd = "vlc " + streamer.url() + " > /dev/null 2>&1 &";
+        std::string cmd = "vlc \"" + streamer.url() + "\" > /dev/null 2>&1 &";
         std::system(cmd.c_str());
 #endif
     }
