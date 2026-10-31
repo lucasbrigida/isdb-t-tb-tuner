@@ -20,8 +20,8 @@ Decodificador universal de TV digital **ISDB-T / ISDB-Tb (1-Seg)** em C++17 mult
 - **Camada de Aplicação:**
   - **Varredura Profunda de Frequências (`scan`):** Varre a faixa UHF (canais 14 a 45/69) e salva os canais em `%APPDATA%\isdbtb_rx\channels.json` (Windows) ou `~/.config/isdbtb_rx/channels.json` (Linux).
   - **Listagem Formatada (`list`):** Tabela ANSI com canal, frequência, RSSI e codecs.
-  - **Streaming Nativo para o VLC (`play`):** Empacotamento broadcast padrão de 7 pacotes MPEG-TS (188B) por datagrama UDP (1316 bytes) para `udp://@127.0.0.1:1234?pkt_size=1316` com latência ultrabaixa e parser PSI/SI (`PAT`, `PMT`, `SDT`).
-  - **Exportação de Playlist (`export`):** Gera arquivo `.m3u` formatado diretamente com `?pkt_size=1316`.
+  - **Streaming Nativo para o VLC (`play`):** Empacotamento broadcast padrão de 7 pacotes MPEG-TS (188B) por datagrama UDP (1316 bytes) para `udp://@127.0.0.1:1234` com latência ultrabaixa e parser PSI/SI (`PAT`, `PMT`, `SDT`).
+  - **Exportação de Playlist (`export`):** Gera arquivo `.m3u` compatível com o VLC.
 
 ---
 
@@ -84,7 +84,7 @@ Exibir menu geral de ajuda:
 > **Assistindo Manualmente no VLC:**
 > Abra o VLC Media Player, acesse o menu **Mídia > Abrir Fluxo de Rede** (ou pressione `Ctrl+N`) e informe a URL:
 > ```text
-> udp://@127.0.0.1:1234?pkt_size=1316
+> udp://@127.0.0.1:1234
 > ```
 
 ### 5. Exportar Playlist M3U (`export`)
@@ -133,7 +133,7 @@ isdb_t_isdb_tb_tuner_player/
 ├── CMakeLists.txt              # Sistema de compilação C++17
 ├── include/
 │   ├── dsp/                    # OfdmSync, OneSegDemodulator, Viterbi, Descrambler, ReedSolomon
-│   ├── streaming/              # UdpStreamer (1316 bytes MTU = 7 x 188B com ?pkt_size=1316)
+│   ├── streaming/              # UdpStreamer (1316 bytes MTU = 7 x 188B para udp://@127.0.0.1:1234)
 │   ├── mpegts/                 # Parser de tabelas PSI/SI (PAT, PMT, SDT) e TsGenerator
 │   ├── cli/                    # ChannelManager e persistência JSON
 │   └── third_party/            # CLI11, nlohmann/json e headers de portabilidade DSP/SDR

@@ -31,10 +31,13 @@ Qualquer agente que editar o código-fonte deve respeitar estritamente as seguin
   \]
 - **Regra:** **NUNCA** mude a taxa para \(2.048\text{ MSps}\) fixos sem reamostragem racional. A taxa de \(2031746\text{ S/s}\) alinha perfeitamente o número de pontos de FFT por símbolo (Mode 3 = 2048 pontos, Mode 2 = 1024 pontos, Mode 1 = 512 pontos) e garante que o pico de correlação do prefixo cíclico trave com \(>90\%\) de correlação!
 
-### 2. Pacotes UDP para VLC (\(7 \times 188 = 1316\text{ bytes}\)) e Parâmetro `?pkt_size=1316`
-- Cada datagrama UDP enviado para o VLC **DEVE** conter exatamente 7 pacotes MPEG-TS completos de 188 bytes (\(7 \times 188 = 1316\text{ bytes}\)).
+### 2. Pacotes UDP para VLC (\(7 \times 188 = 1316\text{ bytes}\)) e URL de Streaming
+- Cada datagrama UDP enviado para `udp://@127.0.0.1:1234` **DEVE** conter exatamente 7 pacotes MPEG-TS completos de 188 bytes (\(7 \times 188 = 1316\text{ bytes}\)).
 - **Motivo:** 1316 bytes é o tamanho padrão da indústria de IPTV que cabe no MTU de 1500 bytes da Ethernet sem causar fragmentação de pacotes no kernel IP.
-- **Regra do Player:** A URL de streaming no VLC **DEVE SEMPRE** conter o sufixo `?pkt_size=1316` (ex: `udp://@127.0.0.1:1234?pkt_size=1316`). Sem esse parâmetro, o demuxer UDP do VLC pode assumir buffers padrão de 188 bytes ou MTUs maiores, descartando pacotes e perdendo a sincronia de quadro MPEG-TS (`sync 0x47`).
+- **Regra do Player:** A URL padrão de escuta no VLC é:
+  ```text
+  udp://@127.0.0.1:1234
+  ```
 - **Regra:** Nunca envie pacotes soltos de 188 bytes via UDP individualmente (causa sobrecarga severa de interrupções de rede e travamentos no VLC).
 
 ### 3. Modo Binário no Windows (`_setmode`)
@@ -50,7 +53,7 @@ Qualquer agente que editar o código-fonte deve respeitar estritamente as seguin
 
 ## 🛡️ 3. Histórico de Erros Corrigidos e Regras de Conformidade com `git-artes/gr-isdbt` ("NÃO REPITA ESTES ERROS")
 
-Durante a auditoria e desenvolvimento do decodificador contra a implementação de referência [`git-artes/gr-isdbt`](https://github.com/git-artes/gr-isdbt) e em testes reais com sinais do ar, 13 erros críticos foram identificados, corrigidos e documentados. **Nenhum agente futuro deve reintroduzir qualquer um dos padrões incorretos abaixo:**
+Durante a auditoria e desenvolvimento do decodificador contra a implementação de referência [`git-artes/gr-isdbt`](https://github.com/git-artes/gr-isdbt) e em testes reais com sinais do ar, 12 erros críticos foram identificados, corrigidos e documentados. **Nenhum agente futuro deve reintroduzir qualquer um dos padrões incorretos abaixo:**
 
 ### Erro 1: Tap Invertido no LFSR do PRBS dos Pilotos (`X^11 + X^2 + 1`)
 - ❌ **O que estava errado:** O gerador PRBS de 11 bits (`reg = 0x7FF`) deslocava para a direita (`reg >> 1`), mas fazia XOR com `reg >> 9` pensando em $1 + X^9 + X^{11}$. Isso invertia a polaridade de ~50% dos pilotos dispersos (SP) e destruía a estimativa de canal.
@@ -122,14 +125,6 @@ Durante a auditoria e desenvolvimento do decodificador contra a implementação 
 - ❌ **O que estava errado:** `rtlsdr_read_sync` era chamado de forma síncrona dentro do mesmo loop que executava FFTW, desentrelaçamento temporal, decodificação Viterbi e Reed-Solomon. Durante os ~15-20 ms em que a CPU processava esses algoritmos matemáticos e enviava datagramas UDP, o buffer de endpoint USB de 64 KB do RTL-SDR no kernel sofria overflow, causando perda de amostras contínuas no barramento USB. Essa descontinuidade de dados quebrava a sequência de 204 símbolos do quadro TMCC, impedindo que o receptor atingisse `TMCC: LOCK`.
 - ✅ **Como é o correto (`main.cpp`):** A leitura USB é isolada em um thread dedicado de alta prioridade (`reader_thread`), que preenche continuamente uma fila thread-safe (`std::queue<std::vector<uint8_t>>` protegida por `std::mutex` e `std::condition_variable` com limite de 64 blocos). O thread principal consome dessa fila sem nunca bloquear o hardware do RTL-SDR.
 
-### Erro 13: Demuxer do VLC sem Hint de Tamanho de Pacote (`?pkt_size=1316`)
-- ❌ **O que estava errado:** Ao abrir a URL simples `udp://@127.0.0.1:1234`, o módulo de acesso UDP do VLC Media Player tentava adivinhar o tamanho dos datagramas e desmultiplexava blocos de tamanho arbitrário em vez de sincronizar em múltiplos inteiros de pacotes TS de 188 bytes, provocando perda frequente do sync byte `0x47` e falha na reprodução de vídeo/áudio.
-- ✅ **Como é o correto (`udp_streamer.cpp` / `channel_manager.cpp` / `main.cpp`):** A URL gerada pela aplicação e repassada ao VLC possui expressamente o parâmetro `?pkt_size=1316`:
-  ```text
-  udp://@127.0.0.1:1234?pkt_size=1316
-  ```
-  Isso instrui diretamente o módulo `access_udp` do VLC a processar o buffer exatamente em blocos de 1316 bytes (\(7 \times 188\)), garantindo sincronismo imediato e sem descarte de quadros.
-
 ---
 
 ## 🧪 4. Suíte de Testes e Validações Realizadas
@@ -152,7 +147,7 @@ Executados em qualquer ambiente sem necessidade de hardware SDR conectado:
 ### Nível 3: Validação ao Vivo em Tempo Real com Hardware RTL-SDR e VLC
 - Hardware: RTL2832U com sintonizador Rafael Micro R820T.
 - Execução: `.\build\isdbtb_rx.exe play -c 23 --vlc`
-- Resultado: Bloqueio imediato do sinal (`OFDM: LOCKED (Pico > 0.95)`, `TMCC: LOCK`, `IFO: -27`), decodificação contínua de pacotes TS e reprodução fluida de vídeo e áudio em tempo real no VLC via `udp://@127.0.0.1:1234?pkt_size=1316`.
+- Resultado: Bloqueio imediato do sinal (`OFDM: LOCKED (Pico > 0.95)`, `TMCC: LOCK`, `IFO: -27`), decodificação contínua de pacotes TS e reprodução fluida de vídeo e áudio em tempo real no VLC via `udp://@127.0.0.1:1234`.
 
 ---
 
@@ -163,7 +158,7 @@ Qualquer modelo de IA que receber tarefas neste projeto deve seguir rigorosament
 1. **NUNCA altere a taxa de amostragem para 2.048 MSps:** A taxa **deve ser** sempre `2031746 S/s`.
 2. **NUNCA leia o RTL-SDR de forma síncrona no loop de DSP:** Mantenha sempre o thread de captura USB (`reader_thread`) isolado com fila concorrente para evitar buffer overflows no barramento USB.
 3. **NUNCA transmita pacotes soltos de 188 bytes via UDP:** Sempre acumule 7 pacotes completos formando datagramas de exatamente 1316 bytes.
-4. **NUNCA omita `?pkt_size=1316` da URL UDP:** O VLC depende desse parâmetro explícito para enquadramento correto.
+4. **NUNCA altere a URL padrão do VLC:** A URL deve ser sempre `udp://@127.0.0.1:1234`.
 5. **NUNCA injete pacotes sintéticos de teste (`TsGenerator`) em fluxo real:** Pacotes sintéticos de tela verde travam os PIDs do player e bloqueiam a visualização do canal real.
 6. **NUNCA reduza o limiar de IFO para menos de 0.60 sem histerese:** Lóbulos secundários de pilotos dispersos possuem coerência ~0.35 e prendem o receptor em frequências falsas.
 7. **NUNCA reinicie o Trellis do Viterbi a cada símbolo OFDM:** O fluxo de dados convolucional é contínuo ao longo de todo o quadro e transmissão.
@@ -200,7 +195,7 @@ ctest --test-dir build --output-on-failure
 | **Reed-Solomon** | `include/dsp/reed_solomon.hpp`<br>`src/dsp/reed_solomon.cpp` | Decodificador \(RS(204, 188, t=8)\) com Berlekamp-Massey, Chien Search e Forney (`FCR=0`). |
 | **Descrambler** | `include/dsp/descrambler.hpp`<br>`src/dsp/descrambler.cpp` | LFSR de 15 bits (\(1 + X^{14} + X^{15}\)) com suporte ao modo ISDB-T (por quadro OFDM) e superframe. |
 | **Viterbi** | `include/dsp/viterbi_decoder.hpp`<br>`src/dsp/viterbi_decoder.cpp` | Inner FEC convolucional contínuo \(K=7\) (`0x4F`/`0x6D`) com matriz Trellis de 64 estados e puncionamento (1/2, 2/3, 3/4, 5/6, 7/8). |
-| **Streaming UDP** | `include/streaming/udp_streamer.hpp`<br>`src/streaming/udp_streamer.cpp` | Sockets WinSock2/POSIX enviando datagramas de 1316B para VLC com URL `?pkt_size=1316`. |
+| **Streaming UDP** | `include/streaming/udp_streamer.hpp`<br>`src/streaming/udp_streamer.cpp` | Sockets WinSock2/POSIX enviando datagramas de 1316B para VLC via `udp://@127.0.0.1:1234`. |
 | **PSI/SI Parser** | `include/mpegts/psi_parser.hpp`<br>`src/mpegts/psi_parser.cpp` | Parser de PAT (PID 0), PMT e SDT (PID 0x0011) para capturar o nome da emissora e síntese de PAT de fallback. |
 | **Channel Manager** | `include/cli/channel_manager.hpp`<br>`src/cli/channel_manager.cpp` | Gerencia `channels.json` e exportação `.m3u` formatada para VLC. |
 | **Main CLI** | `src/main.cpp` | Interface CLI11 com captura assíncrona USB multithread, estabilização de PLL e comandos `probe`, `scan`, `list`, `export` e `play`. |

@@ -128,7 +128,7 @@ bool ChannelManager::export_m3u(const std::string& filepath, uint16_t udp_port) 
         for (const auto& ch : channels_) {
             file << "#EXTINF:-1 tvg-id=\"" << ch.channel_number << "\" tvg-name=\"" << ch.name
                  << "\", " << ch.channel_number << " - " << ch.name << " (" << (ch.frequency_hz / 1e6) << " MHz)\n";
-            file << "udp://@127.0.0.1:" << udp_port << "?pkt_size=1316\n";
+            file << "udp://@127.0.0.1:" << udp_port << "\n";
         }
         return true;
     } catch (...) {

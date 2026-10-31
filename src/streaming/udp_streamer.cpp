@@ -102,7 +102,7 @@ void UdpStreamer::flush() {
 }
 
 std::string UdpStreamer::url() const {
-    return "udp://@" + host_ + ":" + std::to_string(port_) + "?pkt_size=1316";
+    return "udp://@" + host_ + ":" + std::to_string(port_);
 }
 
 } // namespace isdbt

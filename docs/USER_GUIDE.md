@@ -97,9 +97,9 @@ Sintoniza a frequência desejada, inicia a captura assíncrona USB e decodifica 
    ```
 2. Abra o VLC Media Player.
 3. Clique no menu **Mídia** > **Abrir Fluxo de Rede** (ou pressione `Ctrl + N`).
-4. Digite a URL com o parâmetro explícito de tamanho de pacote:
+4. Digite a URL:
    ```text
-   udp://@127.0.0.1:1234?pkt_size=1316
+   udp://@127.0.0.1:1234
    ```
 5. Clique em **Reproduzir**.
 
@@ -112,7 +112,7 @@ Para encerrar a transmissão, pressione **Ctrl + C** no terminal.
 ---
 
 ### 📑 2.5 Exportar Playlist M3U (`export`)
-Gera um arquivo de playlist `.m3u` formatado diretamente com `?pkt_size=1316` para abertura imediata no VLC:
+Gera um arquivo de playlist `.m3u` para abertura direta no VLC:
 ```powershell
 .\build\isdbtb_rx.exe export -o canais.m3u
 ```
@@ -125,9 +125,6 @@ Para assistir: basta dar duplo clique no arquivo `canais.m3u` ou arrastá-lo par
 ### ❓ "Nenhum RTL-SDR detectado"
 - Verifique se o cabo USB está bem conectado.
 - Reabra o **Zadig** e certifique-se de que o driver instalado na Interface 0 é o **WinUSB**.
-
-### ❓ O VLC abre mas a imagem não carrega
-- Certifique-se de utilizar a URL com `?pkt_size=1316`: `udp://@127.0.0.1:1234?pkt_size=1316` (ao rodar com `--vlc`, o executável já passa essa URL automaticamente).
 
 ### ❓ Mensagem "[R82XX] PLL not locked!"
 - Esta mensagem ocorria quando não havia tempo de espera após a sintonia. A versão atual já inclui 100 ms de estabilização do PLL após `rtlsdr_set_center_freq`.

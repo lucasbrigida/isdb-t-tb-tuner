@@ -58,7 +58,7 @@ Para exibir o canal sintonizado ao usuário, foram analisadas três abordagens:
 3. **Datagramas UDP Broadcast/Unicast:** O padrão da indústria de IPTV (RFC 2250).
 
 ### Decisão
-Adotar o streaming nativo via **datagramas UDP** enviados para `udp://@127.0.0.1:1234?pkt_size=1316`, encapsulando exatamente 7 pacotes MPEG-TS de 188 bytes por datagrama (\(1316\text{ bytes}\)).
+Adotar o streaming nativo via **datagramas UDP** enviados para `udp://@127.0.0.1:1234`, encapsulando exatamente 7 pacotes MPEG-TS de 188 bytes por datagrama (\(1316\text{ bytes}\)).
 
 ### Justificativa do Tamanho de 1316 Bytes
 - O MTU (Maximum Transmission Unit) padrão da camada Ethernet é de 1500 bytes.
@@ -67,7 +67,7 @@ Adotar o streaming nativo via **datagramas UDP** enviados para `udp://@127.0.0.1
   \[
   \lfloor 1472 / 188 \rfloor = 7 \implies 7 \times 188 = 1316\text{ bytes}
   \]
-- Enviar exatamente 1316 bytes por datagrama garante zero fragmentação no kernel, consumo mínimo de interrupções de CPU e latência inferior a 300 ms no VLC.
+- Enviar exatamente 1316 bytes por datagrama garante zero fragmentação no kernel, consumo mínimo de interrupções de CPU e latência inferior a 300 ms no VLC via `udp://@127.0.0.1:1234`.
 
 ---
 
@@ -168,20 +168,3 @@ Desacoplar a recepção USB do processamento DSP:
 ### Consequências
 - Fim total de buffer overflows no barramento USB.
 - O sincronismo do TMCC trava em menos de 300 ms após a sintonia, iniciando imediatamente a emissão contínua de pacotes MPEG-TS do ar.
-
----
-
-## ADR 010: Parâmetro `?pkt_size=1316` no Streaming UDP para VLC Media Player
-
-### Contexto
-Ao reproduzir o fluxo via `udp://@127.0.0.1:1234`, o reprodutor VLC por padrão utiliza heurísticas internas do módulo `access_udp` para estimar o tamanho de cada pacote de rede. Em alguns sistemas operacionais e versões do VLC, se o tamanho de pacote não for explicitado na URL, o demuxer quebra a leitura na fronteira de 188 bytes ou 1500 bytes de forma descompassada com os datagramas de 1316 bytes enviados pela aplicação, gerando perda de sincronismo de pacotes (`0x47`) e interrupção de áudio e vídeo.
-
-### Decisão
-Padronizar a URL de streaming em toda a aplicação como:
-```text
-udp://@127.0.0.1:1234?pkt_size=1316
-```
-Tanto o disparador automático (`--vlc`), quanto o método `UdpStreamer::url()` e o exportador de playlist `.m3u` passam a incluir explicitamente a diretiva `?pkt_size=1316`.
-
-### Consequências
-- O VLC abre instantaneamente o fluxo sem congelamentos e sem necessidade de ajustes manuais nas opções de rede avançadas do player.
