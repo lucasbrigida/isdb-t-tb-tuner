@@ -286,7 +286,7 @@ int cmd_export(const std::string& out_path, uint16_t port) {
     }
 }
 
-int cmd_play(int channel_number, const std::string& name_query, bool open_vlc, uint16_t udp_port, int dev_idx, bool test_pattern = false) {
+int cmd_play(int channel_number, const std::string& name_query, bool open_vlc, uint16_t udp_port, int dev_idx, bool test_pattern = false, double gain_db = 28.0) {
     isdbt::ChannelManager mgr;
     const isdbt::ChannelInfo* target = nullptr;
 
@@ -342,7 +342,8 @@ int cmd_play(int channel_number, const std::string& name_query, bool open_vlc, u
     rtlsdr_set_sample_rate(dev, ISDBT_SAMPLE_RATE);
     rtlsdr_set_center_freq(dev, freq_hz);
     rtlsdr_set_tuner_gain_mode(dev, 1); // Ganho manual otimizado
-    rtlsdr_set_tuner_gain(dev, 328);    // 32.8 dB (equilibrio perfeito entre sensibilidade e linearidade sem saturacao)
+    int gain_tenths = static_cast<int>(std::round(gain_db * 10.0));
+    rtlsdr_set_tuner_gain(dev, gain_tenths);
     rtlsdr_set_agc_mode(dev, 0);
     rtlsdr_reset_buffer(dev);
 
@@ -354,7 +355,8 @@ int cmd_play(int channel_number, const std::string& name_query, bool open_vlc, u
     std::vector<uint8_t> raw_buf(chunk_samples * 2);
     std::vector<std::complex<float>> iq_buf(chunk_samples);
 
-    uint64_t total_packets = 0;
+    uint64_t total_air_packets = 0;
+    uint64_t total_standby_packets = 0;
     auto last_time = std::chrono::steady_clock::now();
 
     while (g_running) {
@@ -391,36 +393,31 @@ int cmd_play(int channel_number, const std::string& name_query, bool open_vlc, u
             for (const auto& pkt : decoded_pkts) {
                 streamer.send_ts_packet(pkt.data());
                 psi.parse_packet(pkt.data());
-                total_packets++;
+                total_air_packets++;
             }
 
             // Se o sinal de TV esta travado com sincronismo OFDM no ar, mas a cadeia de bits
-            // ainda esta acumulando simbolos ou recuperando erros residuais, emite tabelas de
-            // sinalizacao TS (PAT/PMT) em datagramas de 1316 bytes para manter o VLC conectado
+            // ainda esta acumulando simbolos ou recuperando erros residuais, emite fluxo completo
+            // com video H.264/PCR dinamico (27 MHz) em datagramas de 1316 bytes para manter o VLC
+            // com janela aberta e sem congelar no cone preto
             if (decoded_pkts.empty()) {
                 static isdbt::TsGenerator channel_ts_gen;
-                static uint8_t pat_cc = 0, pmt_cc = 0;
-                uint8_t tpkt[188];
-                for (int b = 0; b < 7; ++b) {
-                    channel_ts_gen.get_pat_packet(tpkt, pat_cc++);
-                    streamer.send_ts_packet(tpkt);
-                    channel_ts_gen.get_pmt_packet(tpkt, pmt_cc++);
-                    streamer.send_ts_packet(tpkt);
-                    total_packets += 2;
+                std::vector<std::vector<uint8_t>> standby_pkts;
+                channel_ts_gen.get_standby_block(standby_pkts);
+                for (const auto& pkt : standby_pkts) {
+                    streamer.send_ts_packet(pkt.data());
+                    total_standby_packets++;
                 }
             }
         }
 
         if (test_pattern) {
             static isdbt::TsGenerator test_gen;
-            static uint8_t pat_cc = 0, pmt_cc = 0;
-            uint8_t tpkt[188];
-            for (int b = 0; b < 7; ++b) {
-                test_gen.get_pat_packet(tpkt, pat_cc++);
-                streamer.send_ts_packet(tpkt);
-                test_gen.get_pmt_packet(tpkt, pmt_cc++);
-                streamer.send_ts_packet(tpkt);
-                total_packets += 2;
+            std::vector<std::vector<uint8_t>> standby_pkts;
+            test_gen.get_standby_block(standby_pkts);
+            for (const auto& pkt : standby_pkts) {
+                streamer.send_ts_packet(pkt.data());
+                total_standby_packets++;
             }
         }
 
@@ -431,7 +428,8 @@ int cmd_play(int channel_number, const std::string& name_query, bool open_vlc, u
                       << "OFDM: " << (sync_res.locked ? "\033[1;32mLOCKED\033[0m" : "\033[1;31mSEARCH\033[0m")
                       << " (Pico " << std::setprecision(2) << sync_res.peak_correlation << ") | "
                       << "FFO: " << std::setprecision(0) << sync_res.ffo_hz << " Hz | "
-                      << "TS do Ar: " << total_packets << " pkts"
+                      << "TS do Ar: " << total_air_packets << " pkts"
+                      << " | Standby: " << total_standby_packets << " pkts"
                       << (!s_name.empty() ? (" | " + s_name) : "") << "   " << std::flush;
             last_time = now;
         }
@@ -476,12 +474,14 @@ int main(int argc, char** argv) {
     bool open_vlc = false;
     uint16_t udp_port = 1234;
     bool test_pattern = false;
+    double tuner_gain = 28.0;
     auto sc_play = app.add_subcommand("play", "Sintoniza um canal e transmite via UDP para o player VLC");
     sc_play->add_option("-c,--channel", play_ch, "Numero do canal (ex: 14, 28, 30)");
     sc_play->add_option("-n,--name", play_name, "Nome da emissora (ex: GLOBO, RECORD)");
     sc_play->add_option("-p,--port", udp_port, "Porta UDP para transmissao (padrao 1234)");
     sc_play->add_flag("--vlc", open_vlc, "Abre o reprodutor VLC automaticamente com a URL do canal");
     sc_play->add_flag("-t,--test-pattern", test_pattern, "Transmite padrao de teste para diagnostico de rede");
+    sc_play->add_option("-g,--gain", tuner_gain, "Ganho do sintonizador em dB (padrao: 28.0 dB, evita saturacao)");
     sc_play->add_option("-d,--device", dev_idx, "Indice do dongle RTL-SDR (padrao 0)");
 
     app.require_subcommand(1); // Exige ao menos um subcomando
@@ -497,7 +497,7 @@ int main(int argc, char** argv) {
     } else if (sc_export->parsed()) {
         return cmd_export(export_path, export_port);
     } else if (sc_play->parsed()) {
-        return cmd_play(play_ch, play_name, open_vlc, udp_port, dev_idx, test_pattern);
+        return cmd_play(play_ch, play_name, open_vlc, udp_port, dev_idx, test_pattern, tuner_gain);
     }
 
     return 0;

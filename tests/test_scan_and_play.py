@@ -45,7 +45,8 @@ def get_channels_json_path():
 def validate_channel_play(channel_num, freq_mhz, rssi_dbfs, timeout_sec=5.0):
     """
     Inicia o comando 'play' para o canal especificado e valida se datagramas UDP
-    MPEG-TS validos (1316 bytes, sync byte 0x47) sao recebidos na porta de teste.
+    MPEG-TS validos (1316 bytes, sync byte 0x47) sao recebidos na porta de teste,
+    verificando rigorosamente a presenca de pacotes de video e integridade do stream.
     """
     test_port = 12380 + (channel_num % 100)
 
@@ -71,20 +72,51 @@ def validate_channel_play(channel_num, freq_mhz, rssi_dbfs, timeout_sec=5.0):
     received_ok = False
     details = ""
     try:
-        data, _ = sock.recvfrom(2048)
-        elapsed = time.time() - start_t
-        if len(data) == 1316 and data[0] == 0x47:
-            # Validar que todos os 7 pacotes de 188 bytes comecam com sync byte 0x47
-            sync_errors = sum(1 for i in range(0, 1316, 188) if data[i] != 0x47)
-            if sync_errors == 0:
+        total_dgrams = 0
+        sync_errors_total = 0
+        video_pkts_found = 0
+        pcr_found = False
+
+        while time.time() - start_t < timeout_sec:
+            try:
+                data, _ = sock.recvfrom(2048)
+            except socket.timeout:
+                break
+
+            total_dgrams += 1
+            if len(data) != 1316 or data[0] != 0x47:
+                sync_errors_total += 1
+                continue
+
+            for i in range(0, 1316, 188):
+                pkt = data[i:i+188]
+                if pkt[0] != 0x47:
+                    sync_errors_total += 1
+                    continue
+                pid = ((pkt[1] & 0x1F) << 8) | pkt[2]
+                afc = (pkt[3] >> 4) & 0x03
+                if afc in (2, 3) and pkt[4] > 0:
+                    af_flags = pkt[5]
+                    if af_flags & 0x10:
+                        pcr_found = True
+                if pid == 0x0100:
+                    video_pkts_found += 1
+
+            if video_pkts_found > 0 and total_dgrams >= 1 and sync_errors_total == 0:
                 received_ok = True
-                details = f"Datagrama 1316B valido (7x 188B TS, sync 0x47) recebido em {elapsed:.2f}s"
+                elapsed = time.time() - start_t
+                pcr_str = "com PCR 27MHz" if pcr_found else "sem PCR"
+                details = f"Stream integro: {total_dgrams} datagramas 1316B recebidos em {elapsed:.2f}s | {video_pkts_found} pacotes de video ({pcr_str})"
+                break
+
+        if not received_ok:
+            if total_dgrams == 0:
+                details = f"Timeout ({timeout_sec:.1f}s) aguardando datagrama UDP"
+            elif sync_errors_total > 0:
+                details = f"Falha de integridade: {sync_errors_total} pacotes desalinhados"
             else:
-                details = f"Sync bytes invalidos no datagrama ({sync_errors}/7 pacotes desalinhados)"
-        else:
-            details = f"Tamanho inesperado: {len(data)} bytes (esperado 1316B) ou sync incorreto: 0x{data[0]:02X}"
-    except socket.timeout:
-        details = f"Timeout ({timeout_sec:.1f}s) aguardando datagrama UDP"
+                details = f"Recebeu {total_dgrams} datagramas mas nenhum pacote de video (PID 0x0100)"
+
     except Exception as e:
         details = f"Excecao no socket: {e}"
     finally:
