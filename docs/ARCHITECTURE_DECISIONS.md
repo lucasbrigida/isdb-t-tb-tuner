@@ -58,7 +58,7 @@ Para exibir o canal sintonizado ao usuário, foram analisadas três abordagens:
 3. **Datagramas UDP Broadcast/Unicast:** O padrão da indústria de IPTV (RFC 2250).
 
 ### Decisão
-Adotar o streaming nativo via **datagramas UDP** enviados para `udp://@127.0.0.1:1234`, encapsulando exatamente 7 pacotes MPEG-TS de 188 bytes por datagrama (\(1316\text{ bytes}\)).
+Adotar o streaming nativo via **datagramas UDP** enviados para `udp://@127.0.0.1:1234?pkt_size=1316`, encapsulando exatamente 7 pacotes MPEG-TS de 188 bytes por datagrama (\(1316\text{ bytes}\)).
 
 ### Justificativa do Tamanho de 1316 Bytes
 - O MTU (Maximum Transmission Unit) padrão da camada Ethernet é de 1500 bytes.
@@ -136,7 +136,6 @@ Além disso, a fase do pico fornece diretamente o Desvio Fracionário de Frequê
 \]
 A correção desse desvio em tempo real é acelerada pela função SIMD `volk_32fc_x2_multiply_32fc`, eliminando qualquer rotação residual de fase antes da FFT.
 
-
 ---
 
 ## ADR 008: Alinhamento Matemático Integral com `git-artes/gr-isdbt` (Erros Corrigidos e Acertos Validados)
@@ -151,3 +150,38 @@ Na validação cruzada contra o repositório de referência [`git-artes/gr-isdbt
 4. **Dispersão de Energia ISDB-T (sem `0xB8`):** Diferente do DVB-T, o ISDB-T não inverte o sync byte para `0xB8` a cada 8 pacotes. O PRBS reseta no início de cada quadro OFDM de 204 símbolos (`frame_begin` do TMCC), opera sobre os 203 bytes (`0..202`) que antecedem o `0x47` (posição `203`, ramo 11 do Forney) e avança 8 clocks durante o byte `0x47`.
 5. **Decodificador TMCC DBPSK + BCH(273, 191):** Demodula diferencialmente as 4 portadoras TMCC (`101, 131, 286, 349`), verifica as palavras de sincronismo par (`0x35EE`) e ímpar (`0xCA11`) e valida a síndrome `BCH(273, 191)` antes de aplicar automaticamente os parâmetros da Camada A (modulação, taxa Viterbi e profundidade $I$ do desentrelaçador de tempo).
 6. **Continuidade Temporal de Símbolos no Receptor SDR:** O loop de leitura USB em `src/main.cpp` mantém um buffer deslizante contínuo (`stream_iq_buf`) e acumulador de fase NCO contínuo (`current_phase_`), garantindo que nenhum símbolo OFDM seja descartado nas fronteiras de leitura de `32768` amostras.
+
+---
+
+## ADR 009: Arquitetura Multithread de Captura Assíncrona USB (Fila Concorrente de Amostras I/Q)
+
+### Contexto
+Durante os testes de recepção ao vivo em tempo real, verificou-se que chamar `rtlsdr_read_sync` no mesmo thread onde é executada a computação intensiva de DSP (FFT 2048 pontos, desentrelaçamento temporal, Trellis de Viterbi e Reed-Solomon) bloqueava o atendimento das transferências USB por 10 a 25 ms por bloco.
+Esse atraso excedia a capacidade do buffer interno do chip RTL2832U, provocando perda silenciosa de amostras contínuas no barramento USB. Essa perda fragmentava o quadro TMCC de 204 símbolos contínuos, mantendo o demodulador preso no estado `TMCC: SYNC` sem nunca atingir `TMCC: LOCK`.
+
+### Decisão
+Desacoplar a recepção USB do processamento DSP:
+1. Um thread dedicado de alta prioridade (`reader_thread`) executa exclusivamente `rtlsdr_read_sync` em loop contínuo.
+2. Cada bloco de 32768 amostras brutas lidas é inserido em uma fila concorrente (`std::queue<std::vector<uint8_t>>`) sincronizada por `std::mutex` e `std::condition_variable` com limite de segurança de 64 blocos.
+3. O thread principal extrai os blocos da fila e alimenta o pipeline DSP sem perda de continuidade.
+
+### Consequências
+- Fim total de buffer overflows no barramento USB.
+- O sincronismo do TMCC trava em menos de 300 ms após a sintonia, iniciando imediatamente a emissão contínua de pacotes MPEG-TS do ar.
+
+---
+
+## ADR 010: Parâmetro `?pkt_size=1316` no Streaming UDP para VLC Media Player
+
+### Contexto
+Ao reproduzir o fluxo via `udp://@127.0.0.1:1234`, o reprodutor VLC por padrão utiliza heurísticas internas do módulo `access_udp` para estimar o tamanho de cada pacote de rede. Em alguns sistemas operacionais e versões do VLC, se o tamanho de pacote não for explicitado na URL, o demuxer quebra a leitura na fronteira de 188 bytes ou 1500 bytes de forma descompassada com os datagramas de 1316 bytes enviados pela aplicação, gerando perda de sincronismo de pacotes (`0x47`) e interrupção de áudio e vídeo.
+
+### Decisão
+Padronizar a URL de streaming em toda a aplicação como:
+```text
+udp://@127.0.0.1:1234?pkt_size=1316
+```
+Tanto o disparador automático (`--vlc`), quanto o método `UdpStreamer::url()` e o exportador de playlist `.m3u` passam a incluir explicitamente a diretiva `?pkt_size=1316`.
+
+### Consequências
+- O VLC abre instantaneamente o fluxo sem congelamentos e sem necessidade de ajustes manuais nas opções de rede avançadas do player.

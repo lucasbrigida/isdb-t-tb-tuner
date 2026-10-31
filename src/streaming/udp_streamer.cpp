@@ -47,7 +47,7 @@ bool UdpStreamer::start() {
         return false;
     }
 
-    // configurar buffer de envio para 1 MiB
+    // configurar buffer de envio para 1 MiB
     int send_buf_size = 1024 * 1024;
     setsockopt(s, SOL_SOCKET, SO_SNDBUF, reinterpret_cast<const char*>(&send_buf_size), sizeof(send_buf_size));
 
@@ -84,10 +84,10 @@ bool UdpStreamer::send_ts_packet(const uint8_t* ts_packet188) {
 
 void UdpStreamer::flush() {
     if (!is_running_ || buffer_.empty()) return;
-    // preencher até 7 pacotes (1316 B) com pacotes nulos (PID 0x1FFF)
+    // preencher até 7 pacotes (1316 B) com pacotes nulos (PID 0x1FFF)
     while (buffer_.size() < UDP_PAYLOAD_SIZE) {
         static const uint8_t null_header[4] = { 0x47, 0x1F, 0xFF, 0x10 };
-        std::array<uint8_t, TS_PACKET_SIZE - 4> zeros{}; // zero‑filled payload
+        std::array<uint8_t, TS_PACKET_SIZE - 4> zeros{}; // zero-filled payload
         buffer_.insert(buffer_.end(), std::begin(null_header), std::end(null_header));
         buffer_.insert(buffer_.end(), zeros.begin(), zeros.end());
     }
@@ -102,7 +102,7 @@ void UdpStreamer::flush() {
 }
 
 std::string UdpStreamer::url() const {
-    return "udp://@" + host_ + ":" + std::to_string(port_);
+    return "udp://@" + host_ + ":" + std::to_string(port_) + "?pkt_size=1316";
 }
 
 } // namespace isdbt

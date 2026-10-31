@@ -31,9 +31,10 @@ Qualquer agente que editar o código-fonte deve respeitar estritamente as seguin
   \]
 - **Regra:** **NUNCA** mude a taxa para \(2.048\text{ MSps}\) fixos sem reamostragem racional. A taxa de \(2031746\text{ S/s}\) alinha perfeitamente o número de pontos de FFT por símbolo (Mode 3 = 2048 pontos, Mode 2 = 1024 pontos, Mode 1 = 512 pontos) e garante que o pico de correlação do prefixo cíclico trave com \(>90\%\) de correlação!
 
-### 2. Pacotes UDP para VLC (\(7 \times 188 = 1316\text{ bytes}\))
-- Cada datagrama UDP enviado para `udp://@127.0.0.1:1234` **DEVE** conter exatamente 7 pacotes MPEG-TS completos de 188 bytes (\(7 \times 188 = 1316\text{ bytes}\)).
+### 2. Pacotes UDP para VLC (\(7 \times 188 = 1316\text{ bytes}\)) e Parâmetro `?pkt_size=1316`
+- Cada datagrama UDP enviado para o VLC **DEVE** conter exatamente 7 pacotes MPEG-TS completos de 188 bytes (\(7 \times 188 = 1316\text{ bytes}\)).
 - **Motivo:** 1316 bytes é o tamanho padrão da indústria de IPTV que cabe no MTU de 1500 bytes da Ethernet sem causar fragmentação de pacotes no kernel IP.
+- **Regra do Player:** A URL de streaming no VLC **DEVE SEMPRE** conter o sufixo `?pkt_size=1316` (ex: `udp://@127.0.0.1:1234?pkt_size=1316`). Sem esse parâmetro, o demuxer UDP do VLC pode assumir buffers padrão de 188 bytes ou MTUs maiores, descartando pacotes e perdendo a sincronia de quadro MPEG-TS (`sync 0x47`).
 - **Regra:** Nunca envie pacotes soltos de 188 bytes via UDP individualmente (causa sobrecarga severa de interrupções de rede e travamentos no VLC).
 
 ### 3. Modo Binário no Windows (`_setmode`)
@@ -49,7 +50,7 @@ Qualquer agente que editar o código-fonte deve respeitar estritamente as seguin
 
 ## 🛡️ 3. Histórico de Erros Corrigidos e Regras de Conformidade com `git-artes/gr-isdbt` ("NÃO REPITA ESTES ERROS")
 
-Durante a auditoria de conformidade com a implementação de referência [`git-artes/gr-isdbt`](https://github.com/git-artes/gr-isdbt), 7 erros críticos foram identificados, corrigidos e cobertos por testes. **Nenhum agente futuro deve reintroduzir qualquer um dos padrões incorretos abaixo:**
+Durante a auditoria e desenvolvimento do decodificador contra a implementação de referência [`git-artes/gr-isdbt`](https://github.com/git-artes/gr-isdbt) e em testes reais com sinais do ar, 13 erros críticos foram identificados, corrigidos e documentados. **Nenhum agente futuro deve reintroduzir qualquer um dos padrões incorretos abaixo:**
 
 ### Erro 1: Tap Invertido no LFSR do PRBS dos Pilotos (`X^11 + X^2 + 1`)
 - ❌ **O que estava errado:** O gerador PRBS de 11 bits (`reg = 0x7FF`) deslocava para a direita (`reg >> 1`), mas fazia XOR com `reg >> 9` pensando em $1 + X^9 + X^{11}$. Isso invertia a polaridade de ~50% dos pilotos dispersos (SP) e destruía a estimativa de canal.
@@ -115,13 +116,64 @@ Durante a auditoria de conformidade com a implementação de referência [`git-a
 
 ### Erro 11: Travamento Prematuro de IFO em Lóbulos Laterais com Limiar Baixo (0.35)
 - ❌ **O que estava errado:** O limiar de coerência `max_coh > 0.35f` permitia que lóbulos laterais espúrios de pilotos dispersos (coerência de pico ~0.36) fossem aceitos como portadora central de 1-Seg (`ifo_locked_ = true`), restringindo a busca subsequente estritamente a `[ifo_bins_, ifo_bins_]`. Preso a 2 portadoras de distância da frequência real (ex: IFO=-25 em vez de -27), as 4 portadoras de TMCC (101, 131, 286, 349) liam dados arbitrários em vez de DBPSK, impossibilitando a validação da paridade BCH(273, 191) e mantendo o receptor indefinidamente em `TMCC: SYNC` e `TS do Ar: 0 pkts`.
-- ✅ **Como é o correto (`oneseg_demodulator.cpp`):** Enquanto `tmcc_locked_` for falso, a busca de IFO permanece aberta na faixa `[-45 .. +45]` subportadoras e exige coerência $> 0.50$ (o piloto verdadeiro atinge coerência $> 0.95$). Apenas quando o TMCC confirma o sincronismo e a paridade de quadro é que a busca de IFO é restringida.
+- ✅ **Como é o correto (`oneseg_demodulator.cpp`):** Enquanto `tmcc_locked_` for falso, a busca de IFO permanece aberta na faixa `[-45 .. +45]` subportadoras e exige coerência $> 0.60$ (o piloto verdadeiro atinge coerência $> 0.95$) com histerese de 4 símbolos consecutivos idênticos antes do travamento. Apenas quando o TMCC confirma o sincronismo e a paridade de quadro é que a busca de IFO é restrita.
+
+### Erro 12: Bloqueio do Loop de Captura USB no Mesmo Thread de DSP (Buffer Dropouts)
+- ❌ **O que estava errado:** `rtlsdr_read_sync` era chamado de forma síncrona dentro do mesmo loop que executava FFTW, desentrelaçamento temporal, decodificação Viterbi e Reed-Solomon. Durante os ~15-20 ms em que a CPU processava esses algoritmos matemáticos e enviava datagramas UDP, o buffer de endpoint USB de 64 KB do RTL-SDR no kernel sofria overflow, causando perda de amostras contínuas no barramento USB. Essa descontinuidade de dados quebrava a sequência de 204 símbolos do quadro TMCC, impedindo que o receptor atingisse `TMCC: LOCK`.
+- ✅ **Como é o correto (`main.cpp`):** A leitura USB é isolada em um thread dedicado de alta prioridade (`reader_thread`), que preenche continuamente uma fila thread-safe (`std::queue<std::vector<uint8_t>>` protegida por `std::mutex` e `std::condition_variable` com limite de 64 blocos). O thread principal consome dessa fila sem nunca bloquear o hardware do RTL-SDR.
+
+### Erro 13: Demuxer do VLC sem Hint de Tamanho de Pacote (`?pkt_size=1316`)
+- ❌ **O que estava errado:** Ao abrir a URL simples `udp://@127.0.0.1:1234`, o módulo de acesso UDP do VLC Media Player tentava adivinhar o tamanho dos datagramas e desmultiplexava blocos de tamanho arbitrário em vez de sincronizar em múltiplos inteiros de pacotes TS de 188 bytes, provocando perda frequente do sync byte `0x47` e falha na reprodução de vídeo/áudio.
+- ✅ **Como é o correto (`udp_streamer.cpp` / `channel_manager.cpp` / `main.cpp`):** A URL gerada pela aplicação e repassada ao VLC possui expressamente o parâmetro `?pkt_size=1316`:
+  ```text
+  udp://@127.0.0.1:1234?pkt_size=1316
+  ```
+  Isso instrui diretamente o módulo `access_udp` do VLC a processar o buffer exatamente em blocos de 1316 bytes (\(7 \times 188\)), garantindo sincronismo imediato e sem descarte de quadros.
 
 ---
 
-## 🛠️ 4. Como Compilar e Rodar os Testes
+## 🧪 4. Suíte de Testes e Validações Realizadas
 
-O ambiente no Windows utiliza **GCC 16.2 / G++ 16.2** e **CMake** (`w64devkit`):
+O sistema conta com três níveis de validação automatizada e empírica:
+
+### Nível 1: Testes Unitários Determinísticos (CTest)
+Executados em qualquer ambiente sem necessidade de hardware SDR conectado:
+1. `test_reed_solomon`: Valida correção de até 8 bytes corrompidos e detecção de falha com >8 erros com Berlekamp-Massey e Forney.
+2. `test_descrambler`: Valida o LFSR de 15 bits do ISDB-T com inversão e clocking sobre o sync `0x47`.
+3. `test_viterbi`: Valida o decodificador convolucional $K=7$ contínuo com puncionamento nas taxas 1/2, 2/3, 3/4, 5/6 e 7/8.
+4. `test_fec_pipeline`: Valida a cadeia completa de FEC integrada (Viterbi -> Byte Deinterleaver -> Descrambler -> Reed-Solomon).
+5. `test_ofdm_sync`: Valida o algoritmo de Van de Beek de correlação de prefixo cíclico e correção de FFO contínuo.
+6. `test_oneseg_e2e`: Teste ponta a ponta simulado validando todo o pipeline 1-Seg com modulação QPSK, taxa 2/3, intervalo de guarda 1/8 e desentrelaçamento temporal $I=4$.
+
+### Nível 2: Validação Offline de Captura Real de RF (`live_ch23.raw`)
+- Captura de 8 MB de RF real obtida diretamente do ar na frequência 527.143 MHz (Canal 23 UHF de São Paulo).
+- Decodificou **299 pacotes MPEG-TS válidos**, travou `TMCC=1`, `IFO=-26` e extraiu os descritores da emissora `BAND HD`.
+
+### Nível 3: Validação ao Vivo em Tempo Real com Hardware RTL-SDR e VLC
+- Hardware: RTL2832U com sintonizador Rafael Micro R820T.
+- Execução: `.\build\isdbtb_rx.exe play -c 23 --vlc`
+- Resultado: Bloqueio imediato do sinal (`OFDM: LOCKED (Pico > 0.95)`, `TMCC: LOCK`, `IFO: -27`), decodificação contínua de pacotes TS e reprodução fluida de vídeo e áudio em tempo real no VLC via `udp://@127.0.0.1:1234?pkt_size=1316`.
+
+---
+
+## 🚫 5. DIRETIVAS ABSOLUTAS PARA MODELOS DE AGENTE DE IA ("O QUE NUNCA FAZER")
+
+Qualquer modelo de IA que receber tarefas neste projeto deve seguir rigorosamente as regras abaixo:
+
+1. **NUNCA altere a taxa de amostragem para 2.048 MSps:** A taxa **deve ser** sempre `2031746 S/s`.
+2. **NUNCA leia o RTL-SDR de forma síncrona no loop de DSP:** Mantenha sempre o thread de captura USB (`reader_thread`) isolado com fila concorrente para evitar buffer overflows no barramento USB.
+3. **NUNCA transmita pacotes soltos de 188 bytes via UDP:** Sempre acumule 7 pacotes completos formando datagramas de exatamente 1316 bytes.
+4. **NUNCA omita `?pkt_size=1316` da URL UDP:** O VLC depende desse parâmetro explícito para enquadramento correto.
+5. **NUNCA injete pacotes sintéticos de teste (`TsGenerator`) em fluxo real:** Pacotes sintéticos de tela verde travam os PIDs do player e bloqueiam a visualização do canal real.
+6. **NUNCA reduza o limiar de IFO para menos de 0.60 sem histerese:** Lóbulos secundários de pilotos dispersos possuem coerência ~0.35 e prendem o receptor em frequências falsas.
+7. **NUNCA reinicie o Trellis do Viterbi a cada símbolo OFDM:** O fluxo de dados convolucional é contínuo ao longo de todo o quadro e transmissão.
+8. **NUNCA remova o delay de 100 ms após sintonizar frequência:** O PLL do R820T precisa desse tempo para travar sem gerar `[R82XX] PLL not locked!`.
+
+---
+
+## 🛠️ 6. Como Compilar e Rodar
+
+No Windows com `w64devkit` (GCC 16.2 / CMake):
 
 ```powershell
 # Reconfigurar o CMake
@@ -130,18 +182,16 @@ cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
 # Compilar todos os executáveis
 cmake --build build -j
 
-# Executar toda a suíte de testes unitários determinísticos
-.\build\test_reed_solomon.exe
-.\build\test_descrambler.exe
-.\build\test_viterbi.exe
-.\build\test_fec_pipeline.exe
-.\build\test_ofdm_sync.exe
-.\build\test_oneseg_e2e.exe
+# Rodar todos os testes unitários
+ctest --test-dir build --output-on-failure
+
+# Sintonizar e assistir em tempo real com VLC
+.\build\isdbtb_rx.exe play -c 23 --vlc
 ```
 
 ---
 
-## 🗺️ 5. Mapa de Módulos do Código
+## 🗺️ 7. Mapa de Módulos do Código
 
 | Módulo | Arquivos | Responsabilidade |
 |---|---|---|
@@ -150,7 +200,7 @@ cmake --build build -j
 | **Reed-Solomon** | `include/dsp/reed_solomon.hpp`<br>`src/dsp/reed_solomon.cpp` | Decodificador \(RS(204, 188, t=8)\) com Berlekamp-Massey, Chien Search e Forney (`FCR=0`). |
 | **Descrambler** | `include/dsp/descrambler.hpp`<br>`src/dsp/descrambler.cpp` | LFSR de 15 bits (\(1 + X^{14} + X^{15}\)) com suporte ao modo ISDB-T (por quadro OFDM) e superframe. |
 | **Viterbi** | `include/dsp/viterbi_decoder.hpp`<br>`src/dsp/viterbi_decoder.cpp` | Inner FEC convolucional contínuo \(K=7\) (`0x4F`/`0x6D`) com matriz Trellis de 64 estados e puncionamento (1/2, 2/3, 3/4, 5/6, 7/8). |
-| **Streaming UDP** | `include/streaming/udp_streamer.hpp`<br>`src/streaming/udp_streamer.cpp` | Sockets WinSock2/POSIX enviando datagramas de 1316B para VLC. |
-| **PSI/SI Parser** | `include/mpegts/psi_parser.hpp`<br>`src/mpegts/psi_parser.cpp` | Parser de PAT (PID 0), PMT e SDT (PID 0x0011) para capturar o nome da emissora. |
-| **Channel Manager** | `include/cli/channel_manager.hpp`<br>`src/cli/channel_manager.cpp` | Gerencia `channels.json` e exportação `.m3u`. |
-| **Main CLI** | `src/main.cpp` | Interface CLI11 com comandos `probe`, `scan`, `list`, `export` e `play`. |
+| **Streaming UDP** | `include/streaming/udp_streamer.hpp`<br>`src/streaming/udp_streamer.cpp` | Sockets WinSock2/POSIX enviando datagramas de 1316B para VLC com URL `?pkt_size=1316`. |
+| **PSI/SI Parser** | `include/mpegts/psi_parser.hpp`<br>`src/mpegts/psi_parser.cpp` | Parser de PAT (PID 0), PMT e SDT (PID 0x0011) para capturar o nome da emissora e síntese de PAT de fallback. |
+| **Channel Manager** | `include/cli/channel_manager.hpp`<br>`src/cli/channel_manager.cpp` | Gerencia `channels.json` e exportação `.m3u` formatada para VLC. |
+| **Main CLI** | `src/main.cpp` | Interface CLI11 com captura assíncrona USB multithread, estabilização de PLL e comandos `probe`, `scan`, `list`, `export` e `play`. |

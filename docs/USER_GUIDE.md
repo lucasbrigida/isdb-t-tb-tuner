@@ -53,9 +53,9 @@ Executa a varredura profunda no espectro UHF, detecta o sinal de cada canal, ver
   .\build\isdbtb_rx.exe scan
   ```
 
-- **Varredura em uma faixa específica (ex: canais 28 ao 32):**
+- **Varredura em uma faixa específica (ex: canais 20 ao 25):**
   ```powershell
-  .\build\isdbtb_rx.exe scan --start 28 --end 32
+  .\build\isdbtb_rx.exe scan --start 20 --end 25
   ```
 
 Os canais descobertos são salvos automaticamente no arquivo:
@@ -71,52 +71,48 @@ Exibe uma tabela formatada no terminal com todos os canais sintonizados, suas fr
 ```
 *Exemplo:*
 ```text
-=== Lista de Canais ISDB-T Armazenados (5) ===
+=== Lista de Canais ISDB-T Armazenados ===
 
 Canal | Frequencia   |   Forca do Sinal    |  Potencia | Codecs (V/A) | Nome / Emissora
 ------+--------------+---------------------+-----------+--------------+----------------
+  23  |  527.143 MHz | [#####] Alto (Forte) |   -1.8 dBFS |    H.264/AAC | BAND HD
   28  |  557.143 MHz | [#####] Alto (Forte) |    0.5 dBFS |    H.264/AAC | Canal 28
-  29  |  563.143 MHz | [#####] Alto (Forte) |    0.3 dBFS |    H.264/AAC | Canal 29
   30  |  569.143 MHz | [#####] Alto (Forte) |    0.4 dBFS |    H.264/AAC | Canal 30
-  35  |  599.143 MHz | [#### ] Normal (Bom) |   -6.2 dBFS |    H.264/AAC | Canal 35
-  42  |  641.143 MHz |    [###  ] Moderado |  -15.5 dBFS |    H.264/AAC | Canal 42
-
-Legenda de Forca do Sinal: [#####] Alto (Forte) >= -6 dBFS | [#### ] Normal (Bom) >= -12 dBFS | [###  ] Moderado | [#    ] Fraco
 ```
 
 ---
 
 ### 📺 2.4 Assistir ao Canal no VLC (`play`)
-Sintoniza a frequência desejada, inicia o decodificador DSP e transmite os pacotes MPEG-TS em tempo real via UDP na porta 1234.
+Sintoniza a frequência desejada, inicia a captura assíncrona USB e decodifica os pacotes MPEG-TS em tempo real via UDP na porta 1234.
 
 #### Opção A: Sintonizar e abrir o VLC automaticamente
 ```powershell
-.\build\isdbtb_rx.exe play -c 30 --vlc
+.\build\isdbtb_rx.exe play -c 23 --vlc
 ```
 
 #### Opção B: Iniciar a transmissão e abrir o VLC manualmente
 1. No terminal, execute:
    ```powershell
-   .\build\isdbtb_rx.exe play -c 30
+   .\build\isdbtb_rx.exe play -c 23
    ```
 2. Abra o VLC Media Player.
 3. Clique no menu **Mídia** > **Abrir Fluxo de Rede** (ou pressione `Ctrl + N`).
-4. Digite a URL:
-   ```
-   udp://@127.0.0.1:1234
+4. Digite a URL com o parâmetro explícito de tamanho de pacote:
+   ```text
+   udp://@127.0.0.1:1234?pkt_size=1316
    ```
 5. Clique em **Reproduzir**.
 
 Durante a exibição, o terminal atualiza os dados em tempo real:
 ```text
-[Status] RSSI: -1.9 dBFS | OFDM: LOCKED (Pico 0.94) | FFO: 314 Hz | TS Enviados: 1420 pkts
+[Status] RSSI: -1.8 dBFS | OFDM: LOCKED (Pico 0.98) | FFO: 120 Hz (IFO -26784 Hz) | TMCC: LOCK | TS do Ar: 542 pkts
 ```
 Para encerrar a transmissão, pressione **Ctrl + C** no terminal.
 
 ---
 
 ### 📑 2.5 Exportar Playlist M3U (`export`)
-Gera um arquivo de playlist `.m3u` que pode ser aberto diretamente no VLC ou Kodi:
+Gera um arquivo de playlist `.m3u` formatado diretamente com `?pkt_size=1316` para abertura imediata no VLC:
 ```powershell
 .\build\isdbtb_rx.exe export -o canais.m3u
 ```
@@ -130,11 +126,12 @@ Para assistir: basta dar duplo clique no arquivo `canais.m3u` ou arrastá-lo par
 - Verifique se o cabo USB está bem conectado.
 - Reabra o **Zadig** e certifique-se de que o driver instalado na Interface 0 é o **WinUSB**.
 
+### ❓ O VLC abre mas a imagem não carrega
+- Certifique-se de utilizar a URL com `?pkt_size=1316`: `udp://@127.0.0.1:1234?pkt_size=1316` (ao rodar com `--vlc`, o executável já passa essa URL automaticamente).
+
 ### ❓ Mensagem "[R82XX] PLL not locked!"
-- Esta mensagem é comum durante a inicialização do chip sintonizador Rafael Micro R820T ao trocar abruptamente de frequência e não impede a recepção.
+- Esta mensagem ocorria quando não havia tempo de espera após a sintonia. A versão atual já inclui 100 ms de estabilização do PLL após `rtlsdr_set_center_freq`.
 
 ### ❓ "Status OFDM: Ruido / Não Travado" no scanner
 - **Posicionamento da Antena:** Sinais de TV digital UHF (470–700 MHz) necessitam de antena adequada (preferencialmente perto de janelas ou externa).
 - **Extensão da antena:** Ajuste o comprimento da haste telescópica da antena para cerca de **12 a 15 cm** (correspondente a \(1/4\) de onda da faixa média de UHF ~550 MHz).
-- Verifique se a sua cidade/bairro possui cobertura digital ativa naquele canal específico.
-
