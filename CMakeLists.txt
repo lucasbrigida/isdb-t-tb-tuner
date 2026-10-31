@@ -98,17 +98,28 @@ endif()
 
 # Copy runtime DLLs to output directory for instant execution
 if(WIN32)
+    set(DLLS_TO_COPY
+        "${FFTW3_ROOT}/libfftw3f-3.dll"
+        "${VOLK_ROOT}/bin/libvolk.dll"
+    )
+
     if(EXISTS "${SETUP_DIR}/librtlsdr.dll")
-        set(RTLSDR_DLL_PATH "${SETUP_DIR}/librtlsdr.dll")
+        list(APPEND DLLS_TO_COPY
+            "${SETUP_DIR}/librtlsdr.dll"
+            "${SETUP_DIR}/libusb-1.0.dll"
+            "${SETUP_DIR}/libwinpthread-1.dll"
+        )
     else()
-        set(RTLSDR_DLL_PATH "${RTLSDR_ROOT}/x64/rtlsdr.dll")
+        list(APPEND DLLS_TO_COPY
+            "${RTLSDR_ROOT}/x64/rtlsdr.dll"
+            "${RTLSDR_ROOT}/x64/pthreadVC2.dll"
+            "${RTLSDR_ROOT}/x64/msvcr100.dll"
+        )
     endif()
 
     add_custom_command(TARGET isdbtb_rx POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${RTLSDR_DLL_PATH}"
-            "${FFTW3_ROOT}/libfftw3f-3.dll"
-            "${VOLK_ROOT}/bin/libvolk.dll"
+            ${DLLS_TO_COPY}
             $<TARGET_FILE_DIR:isdbtb_rx>
     )
 endif()
