@@ -152,7 +152,7 @@ Executados em qualquer ambiente sem necessidade de hardware SDR conectado:
 
 ### Nível 3: Validação ao Vivo em Tempo Real com Hardware RTL-SDR e VLC
 - Hardware: RTL2832U com sintonizador Rafael Micro R820T.
-- Execução: `.\build\isdbtb_rx.exe play -c 23 --vlc`
+- Execução: `.\build\isdbtb_rx.exe play -c 23`
 - Resultado: Bloqueio imediato do sinal (`OFDM: LOCKED (Pico > 0.95)`, `TMCC: LOCK`, `IFO: -27`), decodificação contínua de pacotes TS e reprodução fluida de vídeo e áudio em tempo real no VLC via `udp://@127.0.0.1:1234`.
 
 ---
@@ -186,8 +186,8 @@ cmake --build build -j
 # Rodar todos os testes unitários
 ctest --test-dir build --output-on-failure
 
-# Sintonizar e assistir em tempo real com VLC
-.\build\isdbtb_rx.exe play -c 23 --vlc
+# Sintonizar e assistir em tempo real com VLC (udp://@127.0.0.1:1234)
+.\build\isdbtb_rx.exe play -c 23
 ```
 
 ---

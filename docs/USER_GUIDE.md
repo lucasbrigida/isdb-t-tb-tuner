@@ -82,21 +82,15 @@ Canal | Frequencia   |   Forca do Sinal    |  Potencia | Codecs (V/A) | Nome / E
 
 ---
 
-### 📺 2.4 Assistir ao Canal no VLC (`play`)
-Sintoniza a frequência desejada, inicia a captura assíncrona USB e decodifica os pacotes MPEG-TS em tempo real via UDP na porta 1234.
+### 📺 2.4 Assistir ao Canal no Player (`play`)
+Sintoniza a frequência desejada, inicia a captura assíncrona USB e decodifica os pacotes MPEG-TS em tempo real via UDP na porta 1234:
 
-#### Opção A: Sintonizar e abrir o VLC automaticamente
-```powershell
-.\build\isdbtb_rx.exe play -c 23 --vlc
-```
-
-#### Opção B: Iniciar a transmissão e abrir o VLC manualmente
 1. No terminal, execute:
    ```powershell
    .\build\isdbtb_rx.exe play -c 23
    ```
-2. Abra o VLC Media Player.
-3. Clique no menu **Mídia** > **Abrir Fluxo de Rede** (ou pressione `Ctrl + N`).
+2. Abra o VLC Media Player (ou ffplay / mpv).
+3. No VLC, clique no menu **Mídia** > **Abrir Fluxo de Rede** (ou pressione `Ctrl + N`).
 4. Digite a URL:
    ```text
    udp://@127.0.0.1:1234

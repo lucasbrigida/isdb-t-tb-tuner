@@ -204,6 +204,88 @@ int cmd_scan(int start_ch, int end_ch, int dev_idx) {
 
         if (is_locked) {
             found_count++;
+            // Tenta decodificar o nome real da emissora via SDT (PID 0x0011) por ate 3.0 segundos
+            constexpr size_t FFT_LEN = 2048;
+            size_t GI_LEN = 256;
+            if (sync_res.detected_gi == isdbt::GuardInterval::GI_1_4) GI_LEN = 512;
+            else if (sync_res.detected_gi == isdbt::GuardInterval::GI_1_8) GI_LEN = 256;
+            else if (sync_res.detected_gi == isdbt::GuardInterval::GI_1_16) GI_LEN = 128;
+            else if (sync_res.detected_gi == isdbt::GuardInterval::GI_1_32) GI_LEN = 64;
+            size_t SYM_LEN = FFT_LEN + GI_LEN;
+
+            isdbt::OneSegDemodulator scan_demod(isdbt::OfdmMode::MODE_1_2K, sync_res.detected_gi);
+            isdbt::PsiParser scan_psi;
+            isdbt::OfdmSync scan_sync(isdbt::OfdmMode::MODE_1_2K, sync_res.detected_gi, static_cast<float>(ISDBT_SAMPLE_RATE));
+            std::vector<std::complex<float>> scan_iq_buf;
+            float scan_tracked_ffo = sync_res.ffo_hz;
+            float scan_frac_pos = static_cast<float>(sync_res.symbol_offset);
+
+            auto scan_start = std::chrono::steady_clock::now();
+            while (g_running) {
+                auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - scan_start).count();
+                if (elapsed_ms >= 3000) break;
+
+                int scan_n_read = 0;
+                rtlsdr_read_sync(dev, raw_buf.data(), static_cast<int>(raw_buf.size()), &scan_n_read);
+                if (scan_n_read < static_cast<int>(raw_buf.size())) break;
+
+                for (size_t i = 0; i < chunk_samples; ++i) {
+                    float iv = (static_cast<float>(raw_buf[2 * i + 0]) - 127.5f) / 127.5f;
+                    float qv = (static_cast<float>(raw_buf[2 * i + 1]) - 127.5f) / 127.5f;
+                    iq_buf[i] = std::complex<float>(iv, qv);
+                }
+
+                auto cur_sync = scan_sync.find_symbol_boundary(iq_buf.data(), iq_buf.size());
+                if (cur_sync.peak_correlation >= 0.35f) {
+                    const float spacing = static_cast<float>(ISDBT_SAMPLE_RATE) / static_cast<float>(FFT_LEN);
+                    float residual = cur_sync.ffo_hz - scan_tracked_ffo;
+                    residual -= spacing * std::round(residual / spacing);
+                    scan_tracked_ffo += 0.1f * residual;
+                }
+
+                scan_sync.correct_frequency_offset(iq_buf.data(), iq_buf.size(), scan_tracked_ffo);
+                scan_iq_buf.insert(scan_iq_buf.end(), iq_buf.begin(), iq_buf.end());
+
+                std::vector<std::vector<uint8_t>> scan_pkts;
+                while (static_cast<size_t>(std::lround(scan_frac_pos)) + SYM_LEN + 8 <= scan_iq_buf.size()) {
+                    int base_pos = static_cast<int>(std::lround(scan_frac_pos));
+                    int max_neg = (base_pos >= 4) ? 4 : base_pos;
+                    int best_sh = 0;
+                    float best_mag = -1.0f;
+                    for (int sh = -max_neg; sh <= 4; ++sh) {
+                        std::complex<float> g(0.0f, 0.0f);
+                        for (size_t m = 0; m < GI_LEN; ++m) {
+                            g += scan_iq_buf[base_pos + sh + m] * std::conj(scan_iq_buf[base_pos + sh + m + FFT_LEN]);
+                        }
+                        float mag = std::norm(g);
+                        if (mag > best_mag) { best_mag = mag; best_sh = sh; }
+                    }
+                    scan_frac_pos += 0.25f * static_cast<float>(best_sh);
+                    int sym_d = std::max(0, static_cast<int>(std::lround(scan_frac_pos)));
+                    if (static_cast<size_t>(sym_d) + SYM_LEN > scan_iq_buf.size()) break;
+
+                    scan_demod.process_symbol(&scan_iq_buf[sym_d + GI_LEN], scan_pkts);
+                    scan_frac_pos += static_cast<float>(SYM_LEN);
+                }
+
+                int consume_i = static_cast<int>(std::floor(scan_frac_pos)) - 8;
+                if (consume_i > 0 && static_cast<size_t>(consume_i) <= scan_iq_buf.size()) {
+                    scan_iq_buf.erase(scan_iq_buf.begin(), scan_iq_buf.begin() + consume_i);
+                    scan_frac_pos -= static_cast<float>(consume_i);
+                }
+
+                for (const auto& pkt : scan_pkts) {
+                    scan_psi.parse_packet(pkt.data());
+                }
+
+                std::string s_name = scan_psi.get_primary_service_name();
+                if (!s_name.empty()) {
+                    ch_name = s_name;
+                    break;
+                }
+            }
+
             isdbt::ChannelInfo info;
             info.channel_number = ch;
             info.frequency_hz = freq_hz;
@@ -292,7 +374,7 @@ int cmd_export(const std::string& out_path, uint16_t port) {
     }
 }
 
-int cmd_play(int channel_number, const std::string& name_query, bool open_vlc, uint16_t udp_port, int dev_idx, bool test_pattern = false, double gain_db = 28.0) {
+int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_port, int dev_idx, bool test_pattern = false, double gain_db = 28.0) {
     isdbt::ChannelManager mgr;
     const isdbt::ChannelInfo* target = nullptr;
 
@@ -336,34 +418,8 @@ int cmd_play(int channel_number, const std::string& name_query, bool open_vlc, u
         streamer.flush();
     }
 
-    if (open_vlc) {
-        std::cout << "[VLC] Disparando reprodutor VLC automaticamente...\n";
-#ifdef _WIN32
-        // Nota sobre a URL e o titulo da janela do VLC:
-        // O VLC recebe a URL completa com o '@' (ex: "udp://@127.0.0.1:1234") como argumento
-        // de inicializacao para que seu modulo access_udp faca o bind de escuta local na porta.
-        // A GUI do VLC (Qt) intencionalmente remove o '@' ao formatar o titulo da janela, exibindo
-        // visualmente apenas "udp://127.0.0.1:1234 - VLC media player". Esse comportamento eh
-        // normal do proprio VLC e nao interfere na escuta do socket UDP.
-        // Utilizamos ShellExecuteA diretamente para evitar problemas de parsing do cmd.exe.
-        std::string vlc_bin = "vlc.exe";
-        if (std::filesystem::exists("C:\\Program Files\\VideoLAN\\VLC\\vlc.exe")) {
-            vlc_bin = "C:\\Program Files\\VideoLAN\\VLC\\vlc.exe";
-        } else if (std::filesystem::exists("C:\\Program Files (x86)\\VideoLAN\\VLC\\vlc.exe")) {
-            vlc_bin = "C:\\Program Files (x86)\\VideoLAN\\VLC\\vlc.exe";
-        }
-        HINSTANCE res = ShellExecuteA(NULL, "open", vlc_bin.c_str(), streamer.url().c_str(), NULL, SW_SHOWNORMAL);
-        if (reinterpret_cast<intptr_t>(res) <= 32) {
-            std::string cmd = "start \"\" \"" + vlc_bin + "\" \"" + streamer.url() + "\"";
-            std::system(cmd.c_str());
-        }
-#else
-        std::string cmd = "vlc \"" + streamer.url() + "\" > /dev/null 2>&1 &";
-        std::system(cmd.c_str());
-#endif
-    }
-
-    std::cout << "URL de streaming para o VLC: \033[1;32m" << streamer.url() << "\033[0m\n";
+    std::cout << "[UDP] Streaming ativo em " << streamer.url() << "\n";
+    std::cout << "Abra seu reprodutor de video (ex: VLC) na URL: \033[1;32m" << streamer.url() << "\033[0m\n";
     std::cout << "Pressione \033[1;33mCtrl+C\033[0m para encerrar a transmissao.\n\n";
 
     rtlsdr_dev_t* dev = nullptr;
@@ -571,18 +627,17 @@ int cmd_play(int channel_number, const std::string& name_query, bool open_vlc, u
         }
 
         auto now = std::chrono::steady_clock::now();
-        if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_time).count() >= 500) {
+        if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_time).count() >= 300) {
             std::string s_name = psi.get_primary_service_name();
-            std::cout << "\r[Status] RSSI: " << std::fixed << std::setprecision(1) << rssi_dbfs << " dBFS | "
-                      << "OFDM: " << (ofdm_locked ? "\033[1;32mLOCKED\033[0m" : "\033[1;31mSEARCH\033[0m")
-                      << " (Pico " << std::setprecision(2) << last_peak_corr << ") | "
-                      << "FFO: " << std::setprecision(0) << tracked_ffo_hz
-                      << " Hz (IFO " << (demod.get_ifo() * 992) << " Hz) | "
-                      << "TMCC: " << (demod.is_tmcc_locked() ? "\033[1;32mLOCK\033[0m" : "SYNC")
-                      << " (sym " << demod.total_symbols_processed() << ") | "
-                      << "TS do Ar: " << total_air_packets << " pkts"
-                      << (test_pattern ? (" | Teste: " + std::to_string(total_standby_packets) + " pkts") : "")
-                      << (!s_name.empty() ? (" | " + s_name) : "") << "   " << std::flush;
+            std::stringstream status_ss;
+            status_ss << "[Status] RSSI: " << std::fixed << std::setprecision(1) << rssi_dbfs << " dBFS | "
+                      << "OFDM: " << (ofdm_locked ? "LOCK" : "SYNC") << " (" << std::setprecision(2) << last_peak_corr << ") | "
+                      << "TMCC: " << (demod.is_tmcc_locked() ? "LOCK" : "SYNC") << " | "
+                      << "TS: " << total_air_packets << " pkts";
+            if (!s_name.empty()) {
+                status_ss << " | " << s_name;
+            }
+            std::cout << "\r" << status_ss.str() << "\033[K" << std::flush;
             last_time = now;
         }
     }
@@ -629,15 +684,13 @@ int main(int argc, char** argv) {
     // 5. Subcomando PLAY
     int play_ch = 0;
     std::string play_name;
-    bool open_vlc = false;
     uint16_t udp_port = 1234;
     bool test_pattern = false;
     double tuner_gain = 28.0;
-    auto sc_play = app.add_subcommand("play", "Sintoniza um canal e transmite via UDP para o player VLC");
+    auto sc_play = app.add_subcommand("play", "Sintoniza um canal e transmite via UDP para o player");
     sc_play->add_option("-c,--channel", play_ch, "Numero do canal (ex: 14, 28, 30)");
     sc_play->add_option("-n,--name", play_name, "Nome da emissora (ex: GLOBO, RECORD)");
     sc_play->add_option("-p,--port", udp_port, "Porta UDP para transmissao (padrao 1234)");
-    sc_play->add_flag("--vlc", open_vlc, "Abre o reprodutor VLC automaticamente com a URL do canal");
     sc_play->add_flag("-t,--test-pattern", test_pattern, "Transmite padrao de teste para diagnostico de rede");
     sc_play->add_option("-g,--gain", tuner_gain, "Ganho do sintonizador em dB (padrao: 28.0 dB, evita saturacao)");
     sc_play->add_option("-d,--device", dev_idx, "Indice do dongle RTL-SDR (padrao 0)");
@@ -655,7 +708,7 @@ int main(int argc, char** argv) {
     } else if (sc_export->parsed()) {
         return cmd_export(export_path, export_port);
     } else if (sc_play->parsed()) {
-        return cmd_play(play_ch, play_name, open_vlc, udp_port, dev_idx, test_pattern, tuner_gain);
+        return cmd_play(play_ch, play_name, udp_port, dev_idx, test_pattern, tuner_gain);
     }
 
     return 0;

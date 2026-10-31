@@ -69,28 +69,32 @@ Exibir menu geral de ajuda:
 .\build\isdbtb_rx.exe list
 ```
 
-### 4. Sintonizar e transmitir para o VLC (`play`)
+### 4. Sintonizar e transmitir via UDP (`play`)
 
 ```powershell
-# Sintonizar por número de canal (-c / --channel) e abrir o VLC automaticamente (--vlc)
-.\build\isdbtb_rx.exe play -c 23 --vlc
+# Sintonizar por número de canal (-c / --channel)
+.\build\isdbtb_rx.exe play -c 23
 
 # Sintonizar por nome da emissora (-n / --name)
-.\build\isdbtb_rx.exe play -n BAND --vlc
+.\build\isdbtb_rx.exe play -n BAND
 
 # Sintonizar ajustando ganho de RF em dB (-g / --gain), porta UDP (-p / --port) e dispositivo (-d / --device)
-.\build\isdbtb_rx.exe play -c 23 -g 28.0 -p 1234 -d 0 --vlc
+.\build\isdbtb_rx.exe play -c 23 -g 28.0 -p 1234 -d 0
 
 # Transmitir padrão de teste sintético para diagnóstico de rede (-t / --test-pattern)
-.\build\isdbtb_rx.exe play -c 23 -t --vlc
+.\build\isdbtb_rx.exe play -c 23 -t
 ```
 
 > [!TIP]
-> **Assistindo Manualmente no VLC:**
+> **Como assistir no seu player (VLC, ffplay, etc.):**
 > Abra o VLC Media Player, acesse o menu **Mídia > Abrir Fluxo de Rede** (ou pressione `Ctrl+N`) e informe a URL:
 >
 > ```text
 > udp://@127.0.0.1:1234
+> ```
+> Ou via terminal:
+> ```powershell
+> vlc udp://@127.0.0.1:1234
 > ```
 
 ### 5. Exportar Playlist M3U (`export`)
