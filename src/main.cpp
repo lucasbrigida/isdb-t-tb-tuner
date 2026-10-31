@@ -14,6 +14,7 @@
 
 #ifdef _WIN32
     #include <windows.h>
+    #include <shellapi.h>
     #include <io.h>
     #include <fcntl.h>
 #endif
@@ -338,18 +339,24 @@ int cmd_play(int channel_number, const std::string& name_query, bool open_vlc, u
     if (open_vlc) {
         std::cout << "[VLC] Disparando reprodutor VLC automaticamente...\n";
 #ifdef _WIN32
-        // Tratamento da string da URL para o VLC no Windows:
-        // Aspas duplas sao obrigatorias ao redor da URL para que o interpretador de comandos do Windows (cmd.exe / ShellExecute)
-        // nao canonicize 'udp://@127.0.0.1:1234' retirando o caractere '@' (transformando em 'udp://127.0.0.1:1234').
-        // Localiza tambem o binario em Arquivos de Programas se disponivel para garantir abertura imediata.
-        std::string vlc_bin = "vlc";
+        // Nota sobre a URL e o titulo da janela do VLC:
+        // O VLC recebe a URL completa com o '@' (ex: "udp://@127.0.0.1:1234") como argumento
+        // de inicializacao para que seu modulo access_udp faca o bind de escuta local na porta.
+        // A GUI do VLC (Qt) intencionalmente remove o '@' ao formatar o titulo da janela, exibindo
+        // visualmente apenas "udp://127.0.0.1:1234 - VLC media player". Esse comportamento eh
+        // normal do proprio VLC e nao interfere na escuta do socket UDP.
+        // Utilizamos ShellExecuteA diretamente para evitar problemas de parsing do cmd.exe.
+        std::string vlc_bin = "vlc.exe";
         if (std::filesystem::exists("C:\\Program Files\\VideoLAN\\VLC\\vlc.exe")) {
-            vlc_bin = "\"C:\\Program Files\\VideoLAN\\VLC\\vlc.exe\"";
+            vlc_bin = "C:\\Program Files\\VideoLAN\\VLC\\vlc.exe";
         } else if (std::filesystem::exists("C:\\Program Files (x86)\\VideoLAN\\VLC\\vlc.exe")) {
-            vlc_bin = "\"C:\\Program Files (x86)\\VideoLAN\\VLC\\vlc.exe\"";
+            vlc_bin = "C:\\Program Files (x86)\\VideoLAN\\VLC\\vlc.exe";
         }
-        std::string cmd = "start \"\" " + vlc_bin + " \"" + streamer.url() + "\"";
-        std::system(cmd.c_str());
+        HINSTANCE res = ShellExecuteA(NULL, "open", vlc_bin.c_str(), streamer.url().c_str(), NULL, SW_SHOWNORMAL);
+        if (reinterpret_cast<intptr_t>(res) <= 32) {
+            std::string cmd = "start \"\" \"" + vlc_bin + "\" \"" + streamer.url() + "\"";
+            std::system(cmd.c_str());
+        }
 #else
         std::string cmd = "vlc \"" + streamer.url() + "\" > /dev/null 2>&1 &";
         std::system(cmd.c_str());

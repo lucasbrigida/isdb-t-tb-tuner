@@ -171,16 +171,16 @@ Desacoplar a recepção USB do processamento DSP:
 
 ---
 
-## ADR 010: Escaping e Aspas Literais na Invocação do VLC via Shell do Windows
+## ADR 010: Invocação Direta do VLC via ShellExecute e Comportamento Visual do Player
 
 ### Contexto
-No Windows, chamar `start vlc udp://@127.0.0.1:1234` sem aspas no argumento da URL fazia com que o `cmd.exe` e as APIs de shell (`ShellExecuteEx` / `UrlCanonicalize`) interpretassem a ausência de usuário antes do `@` como redundante pela RFC 3986, eliminando o `@` e repassando ao VLC a URL `udp://127.0.0.1:1234`.
-Sem o caractere `@`, o VLC não faz o `bind()` de escuta na porta UDP, tratando a URL como destino de transmissão e impedindo a reprodução do sinal.
+No Windows, chamar `start vlc udp://@127.0.0.1:1234` através de `std::system` passava pelo `cmd.exe /c`, que sofre de problemas crônicos ao lidar com aspas aninhadas e caminhos de arquivos contendo espaços (como `C:\Program Files\VideoLAN\VLC\vlc.exe`).
+Além disso, constatou-se que a interface gráfica Qt do VLC Media Player, por convenção visual própria, omite o `@` na sua barra de título (exibindo `udp://127.0.0.1:1234 - VLC media player`), embora seu módulo interno `access_udp` receba e utilize o `@` para efetuar o `bind()` de escuta na porta local.
 
 ### Decisão
-1. Envolver a URL sempre entre aspas duplas literais na chamada de sistema: `start "" <vlc_path> "<url>"`.
-2. Resolver os caminhos padrão do VLC (`C:\Program Files\VideoLAN\VLC\vlc.exe`) diretamente pelo filesystem em tempo de execução, garantindo invocação imediata e sem dependência do registro do Windows.
+1. Utilizar a API nativa do Win32 `ShellExecuteA(NULL, "open", vlc_path, url, NULL, SW_SHOWNORMAL)` para lançar o processo do VLC de forma assíncrona, direta e limpa, contornando o interpretador `cmd.exe`.
+2. Registrar formalmente na documentação que o título `udp://127.0.0.1:1234` na janela do VLC é uma simplificação estética da GUI do player e não afeta o binding de rede.
 
 ### Consequências
-- Preservação estrita do caractere `@` na URL recebida pelo VLC (`udp://@127.0.0.1:1234`).
-- O VLC abre instantaneamente e escuta diretamente na porta UDP sem intervenção manual do usuário.
+- Abertura garantida e confiável do executável do VLC no Windows.
+- Preservação da integridade dos argumentos de inicialização da rede UDP.

@@ -104,7 +104,7 @@ add_test(NAME OfdmSync COMMAND test_ofdm_sync)
 add_test(NAME OneSegE2E COMMAND test_oneseg_e2e)
 
 if(WIN32)
-    target_link_libraries(isdbtb_rx PRIVATE ws2_32)
+    target_link_libraries(isdbtb_rx PRIVATE ws2_32 shell32)
     target_compile_definitions(isdbtb_rx PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX)
 endif()
 
