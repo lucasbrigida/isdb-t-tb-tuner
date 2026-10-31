@@ -8,30 +8,59 @@
 namespace isdbt {
 
 /**
- * @brief Emissor de Streaming UDP para VLC (Padrao Broadcast IPTV)
+ * @brief Emissor de Streaming UDP para VLC (Padrao Broadcast IPTV - RFC 2250)
  * 
- * Agrupa exatamente 7 pacotes MPEG-TS de 188 bytes por datagrama UDP (1316 bytes).
- * 1316 bytes cabem com folga no MTU de 1500 bytes da rede Ethernet sem fragmentacao.
+ * Agrupa exatamente 7 pacotes MPEG-TS de 188 bytes por datagrama UDP:
+ *   7 pacotes * 188 bytes = 1316 bytes por datagrama
+ * 
+ * Justificativa do MTU:
+ *   Ethernet MTU = 1500 bytes
+ *   Cabecalho IPv4 (20 bytes) + Cabecalho UDP (8 bytes) = 28 bytes de overhead
+ *   Espaco util maximo sem fragmentacao no kernel IP: 1500 - 28 = 1472 bytes
+ *   Maior multiplo inteiro de 188 bytes: floor(1472 / 188) * 188 = 1316 bytes.
+ * 
+ * Este formato garante transmissao em tempo real com latencia quase zero (< 300ms)
+ * e sem fragmentacao de datagramas na interface de rede local ou Wi-Fi.
  */
 class UdpStreamer {
 public:
+    /**
+     * @brief Construtor do emissor UDP.
+     * @param host Endereco IP de destino (padrao "127.0.0.1" para loopback local).
+     * @param port Porta UDP de escuta do player (padrao 1234).
+     */
     UdpStreamer(const std::string& host = "127.0.0.1", uint16_t port = 1234);
     ~UdpStreamer();
 
+    /**
+     * @brief Inicializa o socket UDP (com WSAStartup no Windows e criacao de socket DGRAM).
+     * @return true se o socket foi aberto com sucesso, false caso contrario.
+     */
     bool start();
+
+    /**
+     * @brief Descarrega o buffer pendente e encerra o socket UDP.
+     */
     void stop();
 
     /**
-     * @brief Enfileira e transmite um pacote MPEG-TS de 188 bytes.
-     * Quando atinge 7 pacotes (1316 bytes), o datagrama UDP eh enviado imediatamente.
+     * @brief Enfileira um pacote MPEG-TS de 188 bytes para transmissao.
+     * Quando o acumulador interno atinge 7 pacotes (1316 bytes), o datagrama
+     * eh enviado atomicamente atraves de sendto().
+     * @param ts_packet188 Ponteiro para os 188 bytes do pacote TS (sync byte 0x47).
+     * @return true se o pacote foi enfileirado com sucesso.
      */
     bool send_ts_packet(const uint8_t* ts_packet188);
 
     /**
-     * @brief Forca o envio de qualquer pacote pendente no buffer acumulador.
+     * @brief Forca a transmissao imediata de quaisquer pacotes restantes no buffer.
      */
     void flush();
 
+    /**
+     * @brief Retorna a URL completa formatada para abertura direta no VLC Media Player.
+     * Exemplo: "udp://@127.0.0.1:1234"
+     */
     std::string url() const;
 
 private:
