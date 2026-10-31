@@ -1,6 +1,6 @@
 #include "streaming/udp_streamer.hpp"
 #include <iostream>
-#include <cstring>
+#include <array>
 
 #ifdef _WIN32
     #include <winsock2.h>
@@ -47,7 +47,7 @@ bool UdpStreamer::start() {
         return false;
     }
 
-    // Configurar tamanho do buffer de transmissao do socket para 1MB
+    // configurar buffer de envio para 1 MiB
     int send_buf_size = 1024 * 1024;
     setsockopt(s, SOL_SOCKET, SO_SNDBUF, reinterpret_cast<const char*>(&send_buf_size), sizeof(send_buf_size));
 
@@ -61,29 +61,21 @@ bool UdpStreamer::start() {
 
 void UdpStreamer::stop() {
     if (!is_running_) return;
-
     flush();
-
     socket_t s = static_cast<socket_t>(socket_fd_);
     if (s != INVALID_SOCK) {
         CLOSE_SOCK(s);
         socket_fd_ = reinterpret_cast<uintptr_t>(INVALID_SOCK);
     }
-
 #ifdef _WIN32
     WSACleanup();
 #endif
-
     is_running_ = false;
 }
 
 bool UdpStreamer::send_ts_packet(const uint8_t* ts_packet188) {
     if (!is_running_ || !ts_packet188) return false;
-
-    // Adiciona o pacote de 188 bytes ao buffer acumulador
     buffer_.insert(buffer_.end(), ts_packet188, ts_packet188 + TS_PACKET_SIZE);
-
-    // Quando atinge exatamente 7 pacotes (1316 bytes), envia o datagrama UDP
     if (buffer_.size() >= UDP_PAYLOAD_SIZE) {
         flush();
     }
@@ -92,17 +84,20 @@ bool UdpStreamer::send_ts_packet(const uint8_t* ts_packet188) {
 
 void UdpStreamer::flush() {
     if (!is_running_ || buffer_.empty()) return;
-
+    // preencher até 7 pacotes (1316 B) com pacotes nulos (PID 0x1FFF)
+    while (buffer_.size() < UDP_PAYLOAD_SIZE) {
+        static const uint8_t null_header[4] = { 0x47, 0x1F, 0xFF, 0x10 };
+        std::array<uint8_t, TS_PACKET_SIZE - 4> zeros{}; // zero‑filled payload
+        buffer_.insert(buffer_.end(), std::begin(null_header), std::end(null_header));
+        buffer_.insert(buffer_.end(), zeros.begin(), zeros.end());
+    }
     socket_t s = static_cast<socket_t>(socket_fd_);
-    sockaddr_in dest_addr;
-    std::memset(&dest_addr, 0, sizeof(dest_addr));
+    sockaddr_in dest_addr{};
     dest_addr.sin_family = AF_INET;
-    dest_addr.sin_port = htons(port_);
+    dest_addr.sin_port   = htons(port_);
     inet_pton(AF_INET, host_.c_str(), &dest_addr.sin_addr);
-
     sendto(s, reinterpret_cast<const char*>(buffer_.data()), static_cast<int>(buffer_.size()), 0,
            reinterpret_cast<sockaddr*>(&dest_addr), sizeof(dest_addr));
-
     buffer_.clear();
 }
 
@@ -111,4 +106,3 @@ std::string UdpStreamer::url() const {
 }
 
 } // namespace isdbt
-

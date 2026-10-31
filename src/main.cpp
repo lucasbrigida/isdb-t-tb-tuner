@@ -318,6 +318,17 @@ int cmd_play(int channel_number, const std::string& name_query, bool open_vlc, u
     if (!streamer.start()) {
         return 1;
     }
+    // Envia bloco de standby (PAT, PMT, vídeo H.264 dummy) antes de iniciar a recepção real
+    {
+        isdbt::TsGenerator ts_gen;
+        std::vector<std::vector<uint8_t>> standby_packets;
+        ts_gen.get_standby_block(standby_packets);
+        for (auto &pkt : standby_packets) {
+            streamer.send_ts_packet(pkt.data());
+        }
+        // Garante que o datagrama de 1316 B seja enviado imediatamente
+        streamer.flush();
+    }
 
     if (open_vlc) {
         std::cout << "[VLC] Disparando reprodutor VLC automaticamente...\n";
@@ -394,6 +405,15 @@ int cmd_play(int channel_number, const std::string& name_query, bool open_vlc, u
                 streamer.send_ts_packet(pkt.data());
                 psi.parse_packet(pkt.data());
                 total_air_packets++;
+            }
+            // Força envio imediato do buffer para reduzir latência
+            streamer.flush();
+            // Debug: exibe contagem de pacotes enviados a cada segundo
+            static auto last_debug = std::chrono::steady_clock::now();
+            auto now_debug = std::chrono::steady_clock::now();
+            if (std::chrono::duration_cast<std::chrono::seconds>(now_debug - last_debug).count() >= 1) {
+                std::cout << "[DEBUG] Pacotes enviados ao VLC: " << total_air_packets << "\n";
+                last_debug = now_debug;
             }
 
             // Se o sinal de TV esta travado com sincronismo OFDM no ar, mas a cadeia de bits

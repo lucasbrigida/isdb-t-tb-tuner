@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <iostream>
 
 namespace isdbt {
 
@@ -167,7 +168,11 @@ size_t OneSegDemodulator::process_symbol(const std::complex<float>* symbol_time_
         }
     }
 
-    if (data_carriers.size() != 384) return 0;
+    if (data_carriers.size() != 384) {
+        std::cerr << "[WARN] Unexpected data carrier count: " << data_carriers.size() << " (expected 384)" << std::endl;
+        if (data_carriers.size() > 384) data_carriers.resize(384);
+        else data_carriers.resize(384, std::complex<float>(0.0f, 0.0f));
+    }
 
     // 5. Desentrelaçamento em Frequencia (Permutacao de 384 portadoras)
     std::vector<std::complex<float>> freq_deint(384);
