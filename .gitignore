@@ -1,0 +1,15 @@
+# Build directories
+build/
+deps/downloads/
+deps/volk-build/
+deps/volk-src/
+
+# Test data captures
+tests/data/*.raw
+
+# Compiled binaries
+*.exe
+*.dll
+*.o
+*.obj
+*.a
