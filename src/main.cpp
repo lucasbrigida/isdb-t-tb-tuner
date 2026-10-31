@@ -86,6 +86,16 @@ SignalRating get_signal_rating(float rssi_dbfs) {
     }
 }
 
+// Funcao auxiliar para alinhar colunas visuais no terminal ignorando caracteres de escape ANSI
+std::string pad_string(const std::string& str, size_t width, bool left_align = true) {
+    if (str.length() >= width) return str.substr(0, width);
+    if (left_align) {
+        return str + std::string(width - str.length(), ' ');
+    } else {
+        return std::string(width - str.length(), ' ') + str;
+    }
+}
+
 int cmd_probe() {
     std::cout << "\033[1;36m=== Inspecao de Hardware RTL-SDR e Aceleracao DSP ===\033[0m\n\n";
 
@@ -149,8 +159,8 @@ int cmd_scan(int start_ch, int end_ch, int dev_idx) {
 
     int found_count = 0;
 
-    std::cout << "Canal | Frequencia   |  Forca do Sinal |  Potencia | Status OFDM   | Emissora / Servico\n";
-    std::cout << "------+--------------+-----------------+-----------+---------------+--------------------\n";
+    std::cout << " Canal |  Frequencia  |    Forca do Sinal    |  Potencia  | Status OFDM | Emissora / Servico\n";
+    std::cout << "-------+--------------+----------------------+------------+-------------+--------------------\n";
 
     for (int ch = start_ch; ch <= end_ch && g_running; ++ch) {
         uint32_t freq_hz = get_channel_freq(ch);
@@ -171,8 +181,6 @@ int cmd_scan(int start_ch, int end_ch, int dev_idx) {
 
         auto sync_res = sync.find_symbol_boundary(iq_buf.data(), iq_buf.size());
         auto rating = get_signal_rating(rssi_dbfs);
-
-        std::string status_str = sync_res.locked ? "\033[1;32mSINAL LOCK\033[0m" : "\033[1;30mRuido\033[0m";
         std::string ch_name = "Canal " + std::to_string(ch);
 
         if (sync_res.locked) {
@@ -185,15 +193,28 @@ int cmd_scan(int start_ch, int end_ch, int dev_idx) {
             mgr.add_or_update(info);
         }
 
-        std::string signal_visual = rating.ansi_color + rating.bar + " " + rating.text + "\033[0m";
+        // Formatacao com largura visual exata (sem quebra por codigos de escape ANSI)
+        std::string raw_signal = rating.bar + " " + rating.text;
+        std::string colored_signal = rating.ansi_color + pad_string(raw_signal, 20) + "\033[0m";
 
-        std::cout << std::setw(4) << ch << "  | "
-                  << std::fixed << std::setprecision(3) << std::setw(8) << (freq_hz / 1e6) << " MHz | "
-                  << std::setw(26) << signal_visual << " | "
-                  << std::setw(6) << std::setprecision(1) << rssi_dbfs << " dBFS | "
-                  << std::setw(13) << status_str << " | "
-                  << (sync_res.locked ? ("\033[1;33m" + ch_name + "\033[0m") : "--")
-                  << "\n";
+        std::string raw_status = sync_res.locked ? "SINAL LOCK" : "Ruido";
+        std::string colored_status = (sync_res.locked ? "\033[1;32m" : "\033[1;30m") + pad_string(raw_status, 11) + "\033[0m";
+
+        std::string raw_name = sync_res.locked ? ch_name : "--";
+        std::string colored_name = sync_res.locked ? ("\033[1;33m" + raw_name + "\033[0m") : raw_name;
+
+        std::stringstream freq_ss;
+        freq_ss << std::fixed << std::setprecision(3) << (freq_hz / 1e6) << " MHz";
+
+        std::stringstream pwr_ss;
+        pwr_ss << std::fixed << std::setprecision(1) << rssi_dbfs << " dBFS";
+
+        std::cout << " " << std::setw(5) << ch << " | "
+                  << std::setw(12) << freq_ss.str() << " | "
+                  << colored_signal << " | "
+                  << std::setw(10) << pwr_ss.str() << " | "
+                  << colored_status << " | "
+                  << colored_name << "\n";
     }
 
     rtlsdr_close(dev);
@@ -214,17 +235,25 @@ int cmd_list() {
         return 0;
     }
 
-    std::cout << "Canal | Frequencia   |   Forca do Sinal    |  Potencia | Codecs (V/A) | Nome / Emissora\n";
-    std::cout << "------+--------------+---------------------+-----------+--------------+----------------\n";
+    std::cout << " Canal |  Frequencia  |    Forca do Sinal    |  Potencia  | Codecs (V/A) | Nome / Emissora\n";
+    std::cout << "-------+--------------+----------------------+------------+--------------+----------------\n";
     for (const auto& ch : list) {
         auto rating = get_signal_rating(ch.rssi_dbfs);
-        std::string signal_str = rating.ansi_color + rating.bar + " " + rating.text + "\033[0m";
+        std::string raw_signal = rating.bar + " " + rating.text;
+        std::string colored_signal = rating.ansi_color + pad_string(raw_signal, 20) + "\033[0m";
+
+        std::stringstream freq_ss;
+        freq_ss << std::fixed << std::setprecision(3) << (ch.frequency_hz / 1e6) << " MHz";
+
+        std::stringstream pwr_ss;
+        pwr_ss << std::fixed << std::setprecision(1) << ch.rssi_dbfs << " dBFS";
+
         std::string codecs = ch.video_codec + "/" + ch.audio_codec;
 
-        std::cout << std::setw(4) << ch.channel_number << "  | "
-                  << std::fixed << std::setprecision(3) << std::setw(8) << (ch.frequency_hz / 1e6) << " MHz | "
-                  << std::setw(30) << signal_str << " | "
-                  << std::setw(6) << std::setprecision(1) << ch.rssi_dbfs << " dBFS | "
+        std::cout << " " << std::setw(5) << ch.channel_number << " | "
+                  << std::setw(12) << freq_ss.str() << " | "
+                  << colored_signal << " | "
+                  << std::setw(10) << pwr_ss.str() << " | "
                   << std::setw(12) << codecs << " | \033[1;32m"
                   << ch.name << "\033[0m\n";
     }
