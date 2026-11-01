@@ -12,4 +12,12 @@ tests/data/*.raw
 *.dll
 *.o
 *.obj
-*.as
+*.a
+
+# Never ignore anything in tools
+!tools/
+!tools/**
+!tools/*.exe
+!tools/*.dll
+!tools/**/*.exe
+!tools/**/*.dlls
