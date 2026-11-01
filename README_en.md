@@ -26,12 +26,10 @@ Complete digital broadcast TV receiver and demodulator for the **ISDB-T / ISDB-T
 Watch the demodulator running live: tuning broadcast channel 23 UHF (*BAND HD* in São Paulo, Brazil), demodulating RF samples at 2.0317 MSps, and streaming directly to the embedded MPV player configured with GPU upscaling and motion interpolation:
 
 <div align="center">
-  <video src="docs/videos/demo.mp4" poster="docs/videos/demo_poster.png" controls width="90%" style="border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.35);">
-    <a href="docs/videos/demo.mp4">
-      <img src="docs/videos/demo_poster.png" alt="ISDB-T Receiver Real-Time Demo" width="90%" style="border-radius: 8px; border: 1px solid #333;" />
-    </a>
-    <p><em>Click on the image above or <a href="docs/videos/demo.mp4">open docs/videos/demo.mp4 directly</a> to view the full demo video.</em></p>
-  </video>
+  <a href="docs/videos/demo.mp4" title="Click to watch demo video">
+    <img src="docs/videos/demo_poster.png" alt="ISDB-T Receiver Real-Time Demo" width="90%" style="border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.35); border: 1px solid #333;" />
+  </a>
+  <p><em>▶️ <strong>Click on the image above</strong> or <a href="docs/videos/demo.mp4">open docs/videos/demo.mp4 directly</a> to watch the full demo video.</em></p>
 </div>
 
 ---

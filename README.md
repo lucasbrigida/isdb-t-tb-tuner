@@ -26,12 +26,10 @@ Receptor e decodificador digital completo de televisão aberta no padrão **ISDB
 Assista ao decodificador em execução ao vivo sintonizando a emissora aberta (*BAND HD*, Canal 23 UHF), demodulando o sinal de RF a 2.0317 MSps e reproduzindo o fluxo no player MPV integrado com interpolação de escala e movimento ativados:
 
 <div align="center">
-  <video src="docs/videos/demo.mp4" poster="docs/videos/demo_poster.png" controls width="90%" style="border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.35);">
-    <a href="docs/videos/demo.mp4">
-      <img src="docs/videos/demo_poster.png" alt="Demonstração do ISDB-T Receiver em Execução" width="90%" style="border-radius: 8px; border: 1px solid #333;" />
-    </a>
-    <p><em>Clique na imagem acima ou <a href="docs/videos/demo.mp4">acesse diretamente docs/videos/demo.mp4</a> para assistir ao vídeo em resolução original.</em></p>
-  </video>
+  <a href="docs/videos/demo.mp4" title="Clique para assistir ao vídeo de demonstração">
+    <img src="docs/videos/demo_poster.png" alt="Demonstração do ISDB-T Receiver em Execução" width="90%" style="border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.35); border: 1px solid #333;" />
+  </a>
+  <p><em>▶️ <strong>Clique na imagem acima</strong> ou <a href="docs/videos/demo.mp4">acesse diretamente docs/videos/demo.mp4</a> para assistir à demonstração em vídeo.</em></p>
 </div>
 
 ---
