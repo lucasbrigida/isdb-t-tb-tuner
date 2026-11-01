@@ -21,7 +21,6 @@ Decodificador universal de TV digital **ISDB-T / ISDB-Tb (1-Seg)** em C++17 mult
   - **Varredura Profunda de Frequências (`scan`):** Varre a faixa UHF (canais 14 a 45/69) e salva os canais em `%APPDATA%\isdbtb_rx\channels.json` (Windows) ou `~/.config/isdbtb_rx/channels.json` (Linux).
   - **Listagem Formatada (`list`):** Tabela ANSI com canal, frequência, RSSI e codecs.
   - **Streaming Nativo para o VLC (`play`):** Empacotamento broadcast padrão de 7 pacotes MPEG-TS (188B) por datagrama UDP (1316 bytes) para `udp://@127.0.0.1:1234` com latência ultrabaixa e parser PSI/SI (`PAT`, `PMT`, `SDT`).
-  - **Exportação de Playlist (`export`):** Gera arquivo `.m3u` compatível com o VLC.
 
 ---
 
@@ -96,15 +95,6 @@ Exibir menu geral de ajuda:
 > ```powershell
 > vlc udp://@127.0.0.1:1234
 > ```
-
-### 5. Exportar Playlist M3U (`export`)
-
-```powershell
-# Exportar para channels.m3u (porta padrão 1234)
-.\build\isdbtb_rx.exe export -o channels.m3u -p 1234
-```
-
-Para assistir: basta abrir o arquivo `channels.m3u` diretamente no VLC.
 
 ---
 

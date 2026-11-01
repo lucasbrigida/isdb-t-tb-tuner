@@ -105,15 +105,6 @@ Para encerrar a transmissão, pressione **Ctrl + C** no terminal.
 
 ---
 
-### 📑 2.5 Exportar Playlist M3U (`export`)
-Gera um arquivo de playlist `.m3u` para abertura direta no VLC:
-```powershell
-.\build\isdbtb_rx.exe export -o canais.m3u
-```
-Para assistir: basta dar duplo clique no arquivo `canais.m3u` ou arrastá-lo para dentro da janela do VLC!
-
----
-
 ## 🛠️ 3. Solução de Problemas Frequentes (Troubleshooting)
 
 ### ❓ "Nenhum RTL-SDR detectado"

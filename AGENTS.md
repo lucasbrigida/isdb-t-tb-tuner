@@ -203,9 +203,6 @@ ctest --test-dir build --output-on-failure
 
 # Sintonizar e assistir em tempo real com VLC (udp://@127.0.0.1:1234)
 .\build\isdbtb_rx.exe play -c 23
-
-# Iniciar o servidor Web e Player integrado (http://localhost:8080)
-.\build\isdbtb_web.exe -p 8080
 ```
 
 ---
@@ -223,4 +220,3 @@ ctest --test-dir build --output-on-failure
 | **PSI/SI Parser** | `include/mpegts/psi_parser.hpp`<br>`src/mpegts/psi_parser.cpp` | Parser de PAT (PID 0), PMT e SDT (PID 0x0011) para capturar o nome da emissora e síntese de PAT de fallback. |
 | **Channel Manager** | `include/cli/channel_manager.hpp`<br>`src/cli/channel_manager.cpp` | Gerencia `channels.json`. |
 | **Main CLI** | `src/main.cpp` | Interface CLI11 com captura assíncrona USB multithread, estabilização de PLL e comandos `probe`, `scan`, `list` e `play`. |
-| **Web Server & UI** | `include/web/web_server.hpp`<br>`src/web/web_server.cpp`<br>`include/web/web_ui.hpp`<br>`include/web/process_manager.hpp`<br>`src/web/process_manager.cpp`<br>`src/web_main.cpp` | Servidor Web autônomo (`isdbtb_web.exe`), orquestração do `isdbtb_rx.exe` via `stdio`, repetidor UDP-to-HTTP live streaming e SPA HTML5 com player integrado. |

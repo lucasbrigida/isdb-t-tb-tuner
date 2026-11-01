@@ -156,6 +156,6 @@ isdb_t_isdb_tb_tuner_player/
 ### **Fase 5: Streaming UDP e Interface CLI**
 - Transmissão UDP de 1316 bytes por datagrama para `127.0.0.1:1234`.
 - Integração da flag `--vlc` para disparo do VLC.
-- Subcomandos da CLI: `scan`, `list`, `play`, `export` (playlist .m3u) e `status`.
+- Subcomandos da CLI: `probe`, `scan`, `list` e `play`.
 - Validação final ao vivo sintonizando canais da região.
 

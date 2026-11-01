@@ -169,23 +169,6 @@ def main():
         check_fn=lambda out, err: ("Lista de Canais ISDB-T Armazenados" in out, "Tabela de canais nao exibida")
     )
 
-    # Subcomando export (M3U playlist)
-    m3u_test_file = os.path.join(BUILD_DIR, "test_channels.m3u")
-    def check_export(out, err):
-        if not os.path.exists(m3u_test_file):
-            return False, "Arquivo M3U nao foi criado no disco"
-        with open(m3u_test_file, "r") as f:
-            content = f.read()
-        if "#EXTM3U" not in content or "udp://@" not in content:
-            return False, "Conteudo M3U invalido"
-        return True, ""
-
-    run_test(
-        "isdbtb_rx.exe export (Geracao de Playlist M3U)",
-        [exe_main, "export", "-o", m3u_test_file],
-        check_fn=check_export
-    )
-
     # Subcomando play (streaming UDP ao vivo com receptor de socket para validacao)
     global total_tests, passed_tests, failed_tests
     total_tests += 1

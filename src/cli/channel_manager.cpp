@@ -119,21 +119,4 @@ const ChannelInfo* ChannelManager::find_by_name(const std::string& name_query) c
     return nullptr;
 }
 
-bool ChannelManager::export_m3u(const std::string& filepath, uint16_t udp_port) const {
-    try {
-        std::ofstream file(filepath);
-        if (!file.is_open()) return false;
-
-        file << "#EXTM3U\n";
-        for (const auto& ch : channels_) {
-            file << "#EXTINF:-1 tvg-id=\"" << ch.channel_number << "\" tvg-name=\"" << ch.name
-                 << "\", " << ch.channel_number << " - " << ch.name << " (" << (ch.frequency_hz / 1e6) << " MHz)\n";
-            file << "udp://@127.0.0.1:" << udp_port << "\n";
-        }
-        return true;
-    } catch (...) {
-        return false;
-    }
-}
-
 } // namespace isdbt
