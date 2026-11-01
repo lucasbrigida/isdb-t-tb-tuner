@@ -30,6 +30,16 @@ public:
     std::string get_primary_service_name() const;
 
     /**
+     * @brief Verifica se um PID corresponde a uma trilha de audio identificada nas PMTs.
+     */
+    bool is_audio_pid(uint16_t pid) const {
+        for (const auto& [id, svc] : services_) {
+            if (svc.audio_pid != 0 && svc.audio_pid == pid) return true;
+        }
+        return false;
+    }
+
+    /**
      * @brief Constroi um pacote MPEG-TS PAT (PID 0x0000) de 188 bytes mapeando o servico 1-Seg
      *        descoberto (ex: PMT em PID 0x1FC8), necessario para que players como o VLC
      *        descubram automaticamente o programa em recepcao parcial ISDB-Tb.

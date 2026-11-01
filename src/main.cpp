@@ -150,7 +150,7 @@ int cmd_probe() {
 static bool safe_set_freq(rtlsdr_dev_t* dev, uint32_t freq_hz) {
     rtlsdr_reset_buffer(dev);
     int r = rtlsdr_set_center_freq(dev, freq_hz);
-    std::this_thread::sleep_for(std::chrono::milliseconds(80)); // Estabilizacao do PLL do tuner R820T
+    std::this_thread::sleep_for(std::chrono::milliseconds(100)); // Estabilizacao do PLL do tuner R820T (Regra 8 AGENTS.md)
     rtlsdr_reset_buffer(dev);
     return (r == 0);
 }
@@ -256,6 +256,7 @@ int cmd_scan(int start_ch, int end_ch, int dev_idx) {
     }
 
     if (candidates.empty() || !g_running) {
+        rtlsdr_reset_buffer(dev);
         rtlsdr_close(dev);
         if (candidates.empty()) {
             std::cout << "\n\033[1;33mNenhum sinal digital de TV detectado na faixa de canais UHF " << start_ch << " a " << end_ch << ".\033[0m\n";
@@ -501,18 +502,6 @@ int cmd_list() {
     return 0;
 }
 
-int cmd_export(const std::string& out_path, uint16_t port) {
-    isdbt::ChannelManager mgr;
-    if (mgr.export_m3u(out_path, port)) {
-        std::cout << "\033[1;32m[SUCESSO] Playlist M3U exportada para: " << out_path << "\033[0m\n";
-        std::cout << "Para assistir no VLC, execute: vlc " << out_path << "\n\n";
-        return 0;
-    } else {
-        std::cerr << "\033[1;31m[ERRO] Falha ao exportar playlist M3U.\033[0m\n";
-        return 1;
-    }
-}
-
 int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_port, int dev_idx, bool test_pattern = false, double gain_db = 28.0) {
     isdbt::ChannelManager mgr;
     const isdbt::ChannelInfo* target = nullptr;
@@ -557,7 +546,6 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
         streamer.flush();
     }
 
-    std::cout << "[UDP] Streaming ativo em " << streamer.url() << "\n";
     std::cout << "Abra seu reprodutor de video (ex: VLC) na URL: \033[1;32m" << streamer.url() << "\033[0m\n";
     std::cout << "Pressione \033[1;33mCtrl+C\033[0m para encerrar a transmissao.\n\n";
 
@@ -567,13 +555,13 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
         return 1;
     }
 
+    rtlsdr_reset_buffer(dev);
     rtlsdr_set_sample_rate(dev, ISDBT_SAMPLE_RATE);
-    safe_set_freq(dev, freq_hz);
     rtlsdr_set_tuner_gain_mode(dev, 1); // Ganho manual otimizado
     int gain_tenths = static_cast<int>(std::round(gain_db * 10.0));
     rtlsdr_set_tuner_gain(dev, gain_tenths);
     rtlsdr_set_agc_mode(dev, 0);
-    rtlsdr_reset_buffer(dev);
+    safe_set_freq(dev, freq_hz);
 
     constexpr size_t FFT_LEN = 2048;
     // O intervalo de guarda (1/4, 1/8, 1/16, 1/32) e detectado automaticamente pelo OfdmSync.
@@ -787,6 +775,8 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
     }
 
     std::cout << "\n\n[Encerrando] Fechando dongle RTL-SDR e encerrando stream UDP...\n";
+    rtlsdr_reset_buffer(dev);
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
     rtlsdr_close(dev);
     streamer.stop();
     return 0;
@@ -812,14 +802,7 @@ int main(int argc, char** argv) {
     // 3. Subcomando LIST
     auto sc_list = app.add_subcommand("list", "Lista os canais sintonizados armazenados em channels.json");
 
-    // 4. Subcomando EXPORT
-    std::string export_path = "channels.m3u";
-    uint16_t export_port = 1234;
-    auto sc_export = app.add_subcommand("export", "Exporta a lista de canais em formato de playlist M3U para VLC/Kodi");
-    sc_export->add_option("-o,--output", export_path, "Caminho do arquivo .m3u de saida (padrao channels.m3u)");
-    sc_export->add_option("-p,--port", export_port, "Porta UDP de streaming (padrao 1234)");
-
-    // 5. Subcomando PLAY
+    // 4. Subcomando PLAY
     int play_ch = 0;
     std::string play_name;
     uint16_t udp_port = 1234;
@@ -843,8 +826,6 @@ int main(int argc, char** argv) {
         return cmd_scan(scan_start, scan_end, dev_idx);
     } else if (sc_list->parsed()) {
         return cmd_list();
-    } else if (sc_export->parsed()) {
-        return cmd_export(export_path, export_port);
     } else if (sc_play->parsed()) {
         return cmd_play(play_ch, play_name, udp_port, dev_idx, test_pattern, tuner_gain);
     }

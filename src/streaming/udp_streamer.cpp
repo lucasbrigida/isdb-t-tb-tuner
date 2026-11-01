@@ -55,7 +55,6 @@ bool UdpStreamer::start() {
     is_running_ = true;
     buffer_.clear();
 
-    std::cout << "[UDP] Streaming ativo em " << url() << "\n";
     return true;
 }
 

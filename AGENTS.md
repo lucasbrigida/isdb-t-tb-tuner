@@ -131,13 +131,17 @@ Durante a auditoria e desenvolvimento do decodificador contra a implementação 
   2. **Comportamento visual da barra de título do VLC:** Ao abrir a URL `udp://@127.0.0.1:1234`, o módulo de rede do VLC recebe e utiliza o `@` para fazer o `bind()` de escuta local na porta. Contudo, o formatador de interface gráfica do VLC (Qt) intencionalmente remove o `@` ao compor o título da janela, mostrando visualmente apenas `udp://127.0.0.1:1234 - VLC media player`. Isso é o comportamento nativo do VLC e **não** significa que o `@` foi perdido pelo socket de rede.
 - ✅ **Como é o correto (`main.cpp`):** Utilizar a API nativa do Win32 `ShellExecuteA(NULL, "open", vlc_bin, streamer.url().c_str(), NULL, SW_SHOWNORMAL)` passando a URL `udp://@127.0.0.1:1234` diretamente ao executável do VLC em Arquivos de Programas, contornando qualquer falha de parsing do `cmd.exe`.
 
-### Erro 14: Colisão de Endpoints USB (Erro -9 / `LIBUSB_ERROR_PIPE`) e Falsos Positivos na Varredura (`scan`)
+### Erro 14: Colisão de Endpoints USB (Erro -9 / `LIBUSB_ERROR_PIPE`) e Encerramento do `play` sem Drenagem de Buffers
 - ❌ **O que estava errado:**
   1. Durante a varredura (`cmd_scan`), chamadas repetidas a `rtlsdr_read_sync` seguidas imediatamente de `rtlsdr_set_center_freq` sem descarregar requisições pendentes causavam colisão no barramento USB. O endpoint de controle 0 do RTL2832U travava com erro `rtlsdr_demod_write_reg failed with -9` (`LIBUSB_ERROR_PIPE`), impossibilitando novas escritas I2C nos registradores do chip R820T e deixando o tuner congelado no Canal 14 pelo resto da varredura.
-  2. O limiar de detecção era excessivamente permissivo (`RSSI >= -18.0 dBFS` e correlação de CP `>= 0.35`). Como o ruído térmico ambiente da antena de RF UHF oscila tipicamente entre `-17.0` e `-17.9 dBFS` e ruído gaussiano puro atinge 0.35 de correlação estatisticamente, todos os canais vazios (14 a 44) eram classificados falsamente como "SINAL LOCK".
+  2. No comando de reprodução (`cmd_play`), após o término do `reader_thread`, o programa chamava imediatamente `rtlsdr_close(dev)`. Como o stream USB bulk (`0x81`) não havia sido resetado/drenado, o procedimento interno de desligamento do tuner (`r82xx_standby` / `reg=06`) falhava ao escrever via I2C com erro `rtlsdr_demod_write_reg failed with -9` e `r82xx_write: i2c wr failed=-9 reg=06 len=1`.
+  3. No `cmd_play`, a frequência era sintonizada antes de calibrar ganho e AGC e com delay de PLL insuficiente (80ms em vez de 100ms), provocando `[R82XX] PLL not locked!`.
+  4. O limiar de detecção no scan era excessivamente permissivo (`RSSI >= -18.0 dBFS` e correlação de CP `>= 0.35`). Como o ruído térmico ambiente da antena de RF UHF oscila tipicamente entre `-17.0` e `-17.9 dBFS` e ruído gaussiano puro atinge 0.35 de correlação estatisticamente, todos os canais vazios (14 a 44) eram classificados falsamente como "SINAL LOCK".
 - ✅ **Como é o correto (`main.cpp`):**
-  1. Utilizar a função auxiliar `safe_set_freq(dev, freq_hz)` que chama `rtlsdr_reset_buffer(dev)` antes e depois de `rtlsdr_set_center_freq(dev, freq_hz)`, garantindo ainda uma pausa de 80ms para estabilização do PLL do tuner sem travar o endpoint USB.
-  2. Arquitetura de Varredura em Dois Passos (Two-Pass Scan):
+  1. Utilizar a função auxiliar `safe_set_freq(dev, freq_hz)` que chama `rtlsdr_reset_buffer(dev)` antes e depois de `rtlsdr_set_center_freq(dev, freq_hz)`, garantindo uma pausa de 100ms (Regra 8) para estabilização do PLL do tuner sem travar o endpoint USB.
+  2. No `cmd_play`, antes de sintonizar a frequência, configurar a taxa de amostragem, o modo de ganho fixo calibrado e desabilitar o AGC.
+  3. No encerramento do `cmd_play`, chamar `rtlsdr_reset_buffer(dev)` e pausar 50ms após o `reader_thread.join()` antes de executar `rtlsdr_close(dev)`, desobstruindo o endpoint de controle I2C para que o tuner entre em standby com sucesso.
+  4. Arquitetura de Varredura em Dois Passos (Two-Pass Scan):
      - **Passo 1 (Triagem Rápida de RF, ~35ms por canal):** Exige limiar mais rigoroso (`RSSI >= -13.0 dBFS` e pico de correlação de CP `>= 0.60`). Canais com apenas ruído são descartados instantaneamente em ~35ms.
      - **Passo 2 (Resolução Profunda de Nome via SDT):** Apenas os canais candidatos reais que passaram no Passo 1 são sintonizados com thread dedicada de captura (`reader_thread`) e decodificação OFDM/MPEG-TS. O parser de PSI/SI monitora a tabela SDT (PID `0x0011`) com timeout máximo de 3.0s, interrompendo antecipadamente assim que o nome da emissora é obtido.
 
@@ -199,6 +203,9 @@ ctest --test-dir build --output-on-failure
 
 # Sintonizar e assistir em tempo real com VLC (udp://@127.0.0.1:1234)
 .\build\isdbtb_rx.exe play -c 23
+
+# Iniciar o servidor Web e Player integrado (http://localhost:8080)
+.\build\isdbtb_web.exe -p 8080
 ```
 
 ---
@@ -214,5 +221,6 @@ ctest --test-dir build --output-on-failure
 | **Viterbi** | `include/dsp/viterbi_decoder.hpp`<br>`src/dsp/viterbi_decoder.cpp` | Inner FEC convolucional contínuo \(K=7\) (`0x4F`/`0x6D`) com matriz Trellis de 64 estados e puncionamento (1/2, 2/3, 3/4, 5/6, 7/8). |
 | **Streaming UDP** | `include/streaming/udp_streamer.hpp`<br>`src/streaming/udp_streamer.cpp` | Sockets WinSock2/POSIX enviando datagramas de 1316B para VLC via `udp://@127.0.0.1:1234`. |
 | **PSI/SI Parser** | `include/mpegts/psi_parser.hpp`<br>`src/mpegts/psi_parser.cpp` | Parser de PAT (PID 0), PMT e SDT (PID 0x0011) para capturar o nome da emissora e síntese de PAT de fallback. |
-| **Channel Manager** | `include/cli/channel_manager.hpp`<br>`src/cli/channel_manager.cpp` | Gerencia `channels.json` e exportação `.m3u` formatada para VLC. |
-| **Main CLI** | `src/main.cpp` | Interface CLI11 com captura assíncrona USB multithread, estabilização de PLL e comandos `probe`, `scan`, `list`, `export` e `play`. |
+| **Channel Manager** | `include/cli/channel_manager.hpp`<br>`src/cli/channel_manager.cpp` | Gerencia `channels.json`. |
+| **Main CLI** | `src/main.cpp` | Interface CLI11 com captura assíncrona USB multithread, estabilização de PLL e comandos `probe`, `scan`, `list` e `play`. |
+| **Web Server & UI** | `include/web/web_server.hpp`<br>`src/web/web_server.cpp`<br>`include/web/web_ui.hpp`<br>`include/web/process_manager.hpp`<br>`src/web/process_manager.cpp`<br>`src/web_main.cpp` | Servidor Web autônomo (`isdbtb_web.exe`), orquestração do `isdbtb_rx.exe` via `stdio`, repetidor UDP-to-HTTP live streaming e SPA HTML5 com player integrado. |
