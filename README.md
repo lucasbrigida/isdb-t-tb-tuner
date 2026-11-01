@@ -63,7 +63,7 @@ Se você deseja apenas sintonizar e assistir à TV Digital no seu computador com
 
 ### 1.1 Download da Release Autônoma
 Baixe o arquivo `.zip` da versão estável mais recente na pasta de lançamentos:
-- 📦 **Windows x64:** [`releases/windows/20261101_v1.0.0.zip`](file:///c:/Users/55119/Projects/isdb_t_isdb_tb_tuner_player/releases/windows/20261101_v1.0.0.zip) *(ou na aba [Releases do GitHub](../../releases))*
+- 📦 **Windows x64:** [`releases/windows/20261101_v1.0.0.zip`](releases/windows/20261101_v1.0.0.zip) *(ou na aba [Releases do GitHub](../../releases))*
 - Descompacte o arquivo `.zip` em qualquer pasta do seu computador. Todos os componentes (executável, bibliotecas DLL, utilitário Zadig e player MPV com shaders) já estão inclusos.
 
 ### 1.2 Instalação do Driver USB (Zadig em 1 Clique)
