@@ -13,3 +13,6 @@ tests/data/*.raw
 *.o
 *.obj
 *.a
+
+# Large video assets (> 100MB exceeds GitHub limits)
+docs/videos/*.mp4

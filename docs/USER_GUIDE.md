@@ -83,19 +83,34 @@ Canal | Frequencia   |   Forca do Sinal    |  Potencia | Codecs (V/A) | Nome / E
 ---
 
 ### 📺 2.4 Assistir ao Canal no Player (`play`)
-Sintoniza a frequência desejada, inicia a captura assíncrona USB e decodifica os pacotes MPEG-TS em tempo real via UDP na porta 1234:
+Sintoniza a frequência desejada, inicia a captura assíncrona USB com alta prioridade de thread (`THREAD_PRIORITY_HIGHEST`) e decodifica os pacotes MPEG-TS em tempo real via UDP na porta 1234.
 
-1. No terminal, execute:
+#### Opção Recomendada (Comando Único com MPV):
+Use a flag `--player` para sintonizar o canal e **abrir automaticamente o MPV Player integrado** com interpolação de resolução e movimento em tempo real:
+```powershell
+.\build\isdbtb_rx.exe play -c 23 --player
+```
+O MPV abrirá diretamente carregando as otimizações de GPU de `tools/mpv/mpv.conf`:
+- **Interpolação Espacial (EWA-Lanczos Sharp):** Upscaling inteligente de $320 \times 240/180$ para a resolução nativa do seu monitor (1080p, 1440p, 4K) eliminando pixelização e dentes de serra.
+- **Interpolação Temporal (`display-resample` + `oversample`):** Converte a taxa de ~15/30 fps da TV móvel para 60Hz/120Hz/144Hz da tela, gerando movimentos fluidos sem engasgos.
+- **Debanding Dinâmico:** Remove artefatos de compressão e faixas de cores em tempo real.
+
+> [!TIP]
+> **Atalhos Úteis no MPV durante a exibição:**
+> - `f`: Alternar tela cheia (*Fullscreen*).
+> - `i`: Exibir estatísticas de renderização, resolução de interpolação e perda de quadros na tela (OSD).
+> - `d`: Ligar ou desligar o filtro de Deband.
+> - `q`: Fechar o player.
+
+#### Abertura Manual ou Outros Reprodutores:
+Se preferir executar o receptor e o player em terminais separados:
+1. No terminal, inicie o receptor SDR:
    ```powershell
    .\build\isdbtb_rx.exe play -c 23
    ```
-2. Abra o VLC Media Player (ou ffplay / mpv).
-3. No VLC, clique no menu **Mídia** > **Abrir Fluxo de Rede** (ou pressione `Ctrl + N`).
-4. Digite a URL:
-   ```text
-   udp://@127.0.0.1:1234
-   ```
-5. Clique em **Reproduzir**.
+2. Abra o player:
+   - **MPV:** Execute `.\scripts\play_mpv.bat` (ou duplo clique no arquivo).
+   - **VLC:** Execute no menu **Mídia** > **Abrir Fluxo de Rede** (`Ctrl + N`) o endereço `udp://@127.0.0.1:1234` com Cache de Rede configurado em 2000 ms.
 
 Durante a exibição, o terminal atualiza os dados em tempo real:
 ```text

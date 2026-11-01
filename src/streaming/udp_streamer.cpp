@@ -22,7 +22,8 @@
 namespace isdbt {
 
 UdpStreamer::UdpStreamer(const std::string& host, uint16_t port)
-    : host_(host), port_(port), socket_fd_(reinterpret_cast<uintptr_t>(INVALID_SOCK)), is_running_(false) {
+    : host_(host), port_(port), socket_fd_(reinterpret_cast<uintptr_t>(INVALID_SOCK)),
+      is_running_(false), last_packet_time_(std::chrono::steady_clock::now()) {
     buffer_.reserve(UDP_PAYLOAD_SIZE);
 }
 
@@ -54,6 +55,7 @@ bool UdpStreamer::start() {
     socket_fd_ = static_cast<uintptr_t>(s);
     is_running_ = true;
     buffer_.clear();
+    last_packet_time_ = std::chrono::steady_clock::now();
 
     return true;
 }
@@ -75,10 +77,26 @@ void UdpStreamer::stop() {
 bool UdpStreamer::send_ts_packet(const uint8_t* ts_packet188) {
     if (!is_running_ || !ts_packet188) return false;
     buffer_.insert(buffer_.end(), ts_packet188, ts_packet188 + TS_PACKET_SIZE);
+    last_packet_time_ = std::chrono::steady_clock::now();
     if (buffer_.size() >= UDP_PAYLOAD_SIZE) {
         flush();
     }
     return true;
+}
+
+bool UdpStreamer::flush_if_stale(uint32_t max_age_ms) {
+    if (!is_running_ || buffer_.empty()) return false;
+    auto now = std::chrono::steady_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_packet_time_).count();
+    if (elapsed >= max_age_ms) {
+        flush();
+        return true;
+    }
+    return false;
+}
+
+size_t UdpStreamer::pending_packets() const {
+    return buffer_.size() / TS_PACKET_SIZE;
 }
 
 void UdpStreamer::flush() {

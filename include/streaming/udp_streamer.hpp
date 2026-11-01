@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <string>
 #include <vector>
+#include <chrono>
 
 namespace isdbt {
 
@@ -58,6 +59,19 @@ public:
     void flush();
 
     /**
+     * @brief Descarrega o buffer apenas se houver pacotes residuais (1 a 6)
+     * e o tempo decorrido desde o ultimo pacote recebido exceder max_age_ms.
+     * @param max_age_ms Tempo maximo em milissegundos (padrao 80ms).
+     * @return true se um datagrama foi transmitido.
+     */
+    bool flush_if_stale(uint32_t max_age_ms = 80);
+
+    /**
+     * @brief Retorna o numero de pacotes TS atualmente pendentes no buffer.
+     */
+    size_t pending_packets() const;
+
+    /**
      * @brief Retorna a URL completa formatada para abertura direta no VLC Media Player.
      * Exemplo: "udp://@127.0.0.1:1234"
      */
@@ -68,6 +82,7 @@ private:
     uint16_t port_;
     uintptr_t socket_fd_; // SOCKET no Windows / int no POSIX
     bool is_running_;
+    std::chrono::steady_clock::time_point last_packet_time_;
 
     std::vector<uint8_t> buffer_; // Buffer acumulador de 1316 bytes
     static constexpr size_t TS_PACKET_SIZE = 188;
