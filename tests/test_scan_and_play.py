@@ -31,7 +31,7 @@ EXE_MAIN = os.path.join(BUILD_DIR, "isdbtb_rx.exe")
 # Ambiente limpo simulando o terminal nativo do usuario
 clean_env = os.environ.copy()
 current_path = clean_env.get("PATH", "")
-filtered_paths = [p for p in current_path.split(os.pathsep) if "deps" not in p.lower() and "build-setup" not in p.lower()]
+filtered_paths = [p for p in current_path.split(os.pathsep) if "deps" not in p.lower() and "tools/rtl-sdr" not in p.lower()]
 clean_env["PATH"] = os.pathsep.join(filtered_paths)
 
 def get_channels_json_path():

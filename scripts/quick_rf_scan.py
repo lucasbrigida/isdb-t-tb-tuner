@@ -9,7 +9,7 @@ import numpy as np
 
 project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 possible_dirs = [
-    os.path.join(project_dir, "build-setup", "rtl-sdr-64bit-20261018"),
+    os.path.join(project_dir, "tools", "rtl-sdr"),
     os.path.join(project_dir, "deps", "rtlsdr", "x64")
 ]
 

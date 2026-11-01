@@ -22,9 +22,9 @@ BUILD_DIR = os.path.join(PROJECT_ROOT, "build")
 # O teste executa estritamente no ambiente padrao do usuario (SEM injecao de DLLs externas no PATH)
 # Isso garante que a pasta build/ seja 100% autocontida e portavel.
 clean_env = os.environ.copy()
-# Remove qualquer referencia a deps/ ou build-setup/ do PATH para simular fielmente o terminal do usuario
+# Remove qualquer referencia a deps/ ou tools/rtl-sdr do PATH para simular fielmente o terminal do usuario
 current_path = clean_env.get("PATH", "")
-filtered_paths = [p for p in current_path.split(os.pathsep) if "deps" not in p.lower() and "build-setup" not in p.lower()]
+filtered_paths = [p for p in current_path.split(os.pathsep) if "deps" not in p.lower() and "tools/rtl-sdr" not in p.lower()]
 clean_env["PATH"] = os.pathsep.join(filtered_paths)
 
 total_tests = 0
@@ -167,23 +167,6 @@ def main():
         "isdbtb_rx.exe list (Listagem de canais em channels.json)",
         [exe_main, "list"],
         check_fn=lambda out, err: ("Lista de Canais ISDB-T Armazenados" in out, "Tabela de canais nao exibida")
-    )
-
-    # Subcomando export (M3U playlist)
-    m3u_test_file = os.path.join(BUILD_DIR, "test_channels.m3u")
-    def check_export(out, err):
-        if not os.path.exists(m3u_test_file):
-            return False, "Arquivo M3U nao foi criado no disco"
-        with open(m3u_test_file, "r") as f:
-            content = f.read()
-        if "#EXTM3U" not in content or "udp://@" not in content:
-            return False, "Conteudo M3U invalido"
-        return True, ""
-
-    run_test(
-        "isdbtb_rx.exe export (Geracao de Playlist M3U)",
-        [exe_main, "export", "-o", m3u_test_file],
-        check_fn=check_export
     )
 
     # Subcomando play (streaming UDP ao vivo com receptor de socket para validacao)

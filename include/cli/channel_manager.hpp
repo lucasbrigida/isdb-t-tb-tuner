@@ -31,7 +31,6 @@ public:
     const ChannelInfo* find_by_number(int ch_num) const;
     const ChannelInfo* find_by_name(const std::string& name_query) const;
 
-    bool export_m3u(const std::string& filepath, uint16_t udp_port = 1234) const;
 
     static std::string get_default_config_path();
 

@@ -41,8 +41,35 @@ constexpr uint32_t ISDBT_SAMPLE_RATE = 2031746;
 
 std::atomic<bool> g_running{true};
 
+#ifdef _WIN32
+static HANDLE g_player_process = NULL;
+static HANDLE g_player_job = NULL;
+#else
+static pid_t g_player_pid = 0;
+#endif
+
+static void stop_player() {
+#ifdef _WIN32
+    if (g_player_process != NULL) {
+        TerminateProcess(g_player_process, 0);
+        CloseHandle(g_player_process);
+        g_player_process = NULL;
+    }
+    if (g_player_job != NULL) {
+        CloseHandle(g_player_job);
+        g_player_job = NULL;
+    }
+#else
+    if (g_player_pid > 0) {
+        kill(g_player_pid, SIGTERM);
+        g_player_pid = 0;
+    }
+#endif
+}
+
 void signal_handler(int) {
     g_running = false;
+    stop_player();
 }
 
 void setup_platform() {
@@ -58,6 +85,7 @@ void setup_platform() {
     SetConsoleCtrlHandler([](DWORD sig) -> BOOL {
         if (sig == CTRL_C_EVENT || sig == CTRL_CLOSE_EVENT) {
             g_running = false;
+            stop_player();
             return TRUE;
         }
         return FALSE;
@@ -285,6 +313,9 @@ int cmd_scan(int start_ch, int end_ch, int dev_idx) {
         std::atomic<bool> pass2_worker_running{true};
 
         std::thread reader_thread([&]() {
+#ifdef _WIN32
+            SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
+#endif
             while (pass2_worker_running && g_running) {
                 std::vector<uint8_t> buf(step_chunk_bytes);
                 int n_read = 0;
@@ -502,7 +533,73 @@ int cmd_list() {
     return 0;
 }
 
-int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_port, int dev_idx, bool test_pattern = false, double gain_db = 28.0) {
+// Dispara o MPV Player integrado configurado com interpolacao de resolucao e movimento em tempo real
+static bool launch_mpv(uint16_t udp_port) {
+#ifdef _WIN32
+    std::string mpv_bin = "tools\\mpv\\mpv.exe";
+    std::string conf_dir = "tools\\mpv";
+    if (!std::filesystem::exists(mpv_bin)) {
+        auto root = std::filesystem::current_path();
+        if (std::filesystem::exists(root / "tools" / "mpv" / "mpv.exe")) {
+            mpv_bin = (root / "tools" / "mpv" / "mpv.exe").string();
+            conf_dir = (root / "tools" / "mpv").string();
+        }
+    }
+    std::string cmdline = "\"" + mpv_bin + "\" --config-dir=\"" + conf_dir + "\" udp://127.0.0.1:" + std::to_string(udp_port);
+    std::cout << "\033[1;35m[MPV] Disparando player com interpolacao em tempo real: " << cmdline << "\033[0m\n";
+
+    STARTUPINFOA si{};
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi{};
+    std::vector<char> cmd_buf(cmdline.begin(), cmdline.end());
+    cmd_buf.push_back('\0');
+
+    BOOL ok = CreateProcessA(
+        NULL,
+        cmd_buf.data(),
+        NULL,
+        NULL,
+        FALSE,
+        0,
+        NULL,
+        NULL,
+        &si,
+        &pi
+    );
+
+    if (!ok) {
+        std::cerr << "\033[1;31m[ERRO] Falha ao iniciar MPV (" << mpv_bin << "). Execute manualmente .\\scripts\\play_mpv.bat\033[0m\n";
+        return false;
+    }
+
+    g_player_process = pi.hProcess;
+    CloseHandle(pi.hThread);
+
+    // Vincula o processo do MPV a um Job Object do Windows configurado com JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE.
+    // Isso garante pelo proprio kernel do Windows que o MPV sera fechado instantaneamente caso a CLI
+    // seja encerrada por Ctrl+C, fechamento de janela do console ou encerramento do processo.
+    g_player_job = CreateJobObjectA(NULL, NULL);
+    if (g_player_job) {
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION jeli{};
+        jeli.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        SetInformationJobObject(g_player_job, JobObjectExtendedLimitInformation, &jeli, sizeof(jeli));
+        AssignProcessToJobObject(g_player_job, g_player_process);
+    }
+    return true;
+#else
+    std::string cmd = "mpv --config-dir=tools/mpv udp://127.0.0.1:" + std::to_string(udp_port) + " &";
+    std::cout << "\033[1;35m[MPV] Disparando: " << cmd << "\033[0m\n";
+    int ret = std::system(cmd.c_str());
+    return (ret == 0);
+#endif
+}
+
+int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_port, int dev_idx, bool test_pattern = false, double gain_db = 28.0, bool auto_player = false) {
+#ifdef _WIN32
+    // Eleva a prioridade do processo para proteger o fluxo de DSP contra picos de outros aplicativos
+    SetPriorityClass(GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS);
+#endif
+
     isdbt::ChannelManager mgr;
     const isdbt::ChannelInfo* target = nullptr;
 
@@ -546,7 +643,14 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
         streamer.flush();
     }
 
-    std::cout << "Abra seu reprodutor de video (ex: VLC) na URL: \033[1;32m" << streamer.url() << "\033[0m\n";
+    std::cout << "Reprodutores de Video Disponiveis:\n";
+    std::cout << "  1. \033[1;32mMPV Player com Interpolacao em Tempo Real (Recomendado):\033[0m\n";
+    std::cout << "     Execute: \033[1;33m.\\scripts\\play_mpv.bat\033[0m (ou .\\scripts\\play_mpv.ps1)\n";
+    std::cout << "  2. \033[1;36mVLC Media Player:\033[0m\n";
+    std::cout << "     URL: \033[1;32m" << streamer.url() << "\033[0m | Cache: \033[1;33m--network-caching=2000 --clock-jitter=1000\033[0m\n";
+    if (auto_player) {
+        launch_mpv(udp_port);
+    }
     std::cout << "Pressione \033[1;33mCtrl+C\033[0m para encerrar a transmissao.\n\n";
 
     rtlsdr_dev_t* dev = nullptr;
@@ -584,6 +688,10 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
     std::queue<std::vector<uint8_t>> raw_queue;
 
     std::thread reader_thread([&]() {
+#ifdef _WIN32
+        // Eleva a prioridade da thread USB para evitar buffer overflows e perda de amostras
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
+#endif
         while (g_running) {
             std::vector<uint8_t> buf(chunk_bytes);
             int n_read = 0;
@@ -731,7 +839,8 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
                     streamer.send_ts_packet(pkt.data());
                     total_air_packets++;
                 }
-                streamer.flush();
+                // Nao forca flush() a cada chunk: send_ts_packet() envia automaticamente datagramas
+                // completos de 7 pacotes (1316B). Isso elimina a diluicao do fluxo com pacotes nulos (0x1FFF).
             } else if (test_pattern) {
                 // Apenas envia pacotes de teste sinteticos se solicitado com --test-pattern
                 std::vector<std::vector<uint8_t>> standby_pkts;
@@ -742,6 +851,9 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
                 }
                 streamer.flush();
             }
+
+            // Descarrega pacotes pendentes residuais (1 a 6) somente se ficarem > 80ms parados no buffer
+            streamer.flush_if_stale(80);
         } else if (test_pattern) {
             std::vector<std::vector<uint8_t>> standby_pkts;
             channel_ts_gen.get_standby_block(standby_pkts);
@@ -774,7 +886,8 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
         reader_thread.join();
     }
 
-    std::cout << "\n\n[Encerrando] Fechando dongle RTL-SDR e encerrando stream UDP...\n";
+    std::cout << "\n\n[Encerrando] Fechando player, dongle RTL-SDR e encerrando stream UDP...\n";
+    stop_player();
     rtlsdr_reset_buffer(dev);
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     rtlsdr_close(dev);
@@ -808,12 +921,14 @@ int main(int argc, char** argv) {
     uint16_t udp_port = 1234;
     bool test_pattern = false;
     double tuner_gain = 28.0;
+    bool auto_player = false;
     auto sc_play = app.add_subcommand("play", "Sintoniza um canal e transmite via UDP para o player");
     sc_play->add_option("-c,--channel", play_ch, "Numero do canal (ex: 14, 28, 30)");
     sc_play->add_option("-n,--name", play_name, "Nome da emissora (ex: GLOBO, RECORD)");
     sc_play->add_option("-p,--port", udp_port, "Porta UDP para transmissao (padrao 1234)");
     sc_play->add_flag("-t,--test-pattern", test_pattern, "Transmite padrao de teste para diagnostico de rede");
     sc_play->add_option("-g,--gain", tuner_gain, "Ganho do sintonizador em dB (padrao: 28.0 dB, evita saturacao)");
+    sc_play->add_flag("--player", auto_player, "Abre automaticamente o player MPV integrado com interpolacao em tempo real");
     sc_play->add_option("-d,--device", dev_idx, "Indice do dongle RTL-SDR (padrao 0)");
 
     app.require_subcommand(1); // Exige ao menos um subcomando
@@ -827,7 +942,7 @@ int main(int argc, char** argv) {
     } else if (sc_list->parsed()) {
         return cmd_list();
     } else if (sc_play->parsed()) {
-        return cmd_play(play_ch, play_name, udp_port, dev_idx, test_pattern, tuner_gain);
+        return cmd_play(play_ch, play_name, udp_port, dev_idx, test_pattern, tuner_gain, auto_player);
     }
 
     return 0;

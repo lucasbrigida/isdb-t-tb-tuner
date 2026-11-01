@@ -47,12 +47,7 @@ Assert-CommandSuccess "Executar .\build\isdbtb_rx.exe list" {
     .\build\isdbtb_rx.exe list
 }
 
-# 5. Teste do Export
-Assert-CommandSuccess "Executar .\build\isdbtb_rx.exe export -o build\user_test.m3u" {
-    .\build\isdbtb_rx.exe export -o build\user_test.m3u
-}
-
-# 6. Testes dos binarios de teste do DSP
+# 5. Testes dos binarios de teste do DSP
 Assert-CommandSuccess "Executar .\build\test_reed_solomon.exe" {
     .\build\test_reed_solomon.exe
 }

@@ -2,6 +2,7 @@
 build/
 deps/
 channels.m3u
+.agents/
 
 # Test data captures
 tests/data/*.raw
@@ -12,3 +13,11 @@ tests/data/*.raw
 *.o
 *.obj
 *.a
+
+# Never ignore anything in tools
+!tools/
+!tools/**
+!tools/*.exe
+!tools/*.dll
+!tools/**/*.exe
+!tools/**/*.dll

@@ -7,7 +7,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Local dependency roots
 set(DEPS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps")
-set(SETUP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/build-setup/rtl-sdr-64bit-20261018")
+set(SETUP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tools/rtl-sdr")
 set(RTLSDR_ROOT "${DEPS_DIR}/rtlsdr")
 set(FFTW3_ROOT "${DEPS_DIR}/fftw3")
 set(VOLK_ROOT "${DEPS_DIR}/volk-install")
@@ -44,20 +44,6 @@ set(SOURCES
 )
 
 add_executable(isdbtb_rx ${SOURCES})
-
-# Executavel Web Server & Dashboard (isdbtb_web)
-set(WEB_SOURCES
-    src/web_main.cpp
-    src/web/process_manager.cpp
-    src/web/web_server.cpp
-    src/mpegts/psi_parser.cpp
-    src/cli/channel_manager.cpp
-)
-add_executable(isdbtb_web ${WEB_SOURCES})
-if(WIN32)
-    target_link_libraries(isdbtb_web PRIVATE ws2_32)
-    target_compile_definitions(isdbtb_web PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX)
-endif()
 
 # Target libraries (link external DLLs if deps/ directory is populated; otherwise use bundled headers/dynamic loader)
 if(EXISTS "${FFTW3_ROOT}/libfftw3f-3.dll")
@@ -151,14 +137,6 @@ if(WIN32)
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 ${DLLS_TO_COPY}
                 $<TARGET_FILE_DIR:isdbtb_rx>
-        )
-    endif()
-
-    if(EXISTS "${DEPS_DIR}/ffmpeg/bin/ffmpeg.exe")
-        add_custom_command(TARGET isdbtb_web POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${DEPS_DIR}/ffmpeg/bin/ffmpeg.exe"
-                $<TARGET_FILE_DIR:isdbtb_web>
         )
     endif()
 endif()

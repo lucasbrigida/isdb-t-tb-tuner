@@ -42,7 +42,7 @@ int main() {
     isdbt::OneSegDemodulator demod(isdbt::OfdmMode::MODE_1_2K, isdbt::GuardInterval::GI_1_16);
     demod.set_parameters(isdbt::CarrierModulation::QPSK, isdbt::CodeRate::RATE_1_2, 0);
 
-    const int NUM_PKTS = 48;
+    const int NUM_PKTS = 120;
     std::vector<std::vector<uint8_t>> orig_ts(NUM_PKTS, std::vector<uint8_t>(188));
     for (int p = 0; p < NUM_PKTS; ++p) {
         orig_ts[p][0] = 0x47;

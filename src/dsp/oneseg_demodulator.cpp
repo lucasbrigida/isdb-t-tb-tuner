@@ -419,11 +419,24 @@ size_t OneSegDemodulator::process_symbol(const std::complex<float>* symbol_time_
         }
     }
 
-    // 5. Equalizacao Zero-Forcing de todas as 432 portadoras do Segmento 0
-    std::vector<std::complex<float>> eq_seg(432);
+    // 5. Equalizacao MMSE Regularizada de todas as 432 portadoras do Segmento 0
+    // Em vez de Zero-Forcing puro que explode o ruido em nulos de fading (|H|^2 -> 0),
+    // utiliza regularizacao MMSE proporcional a potencia media do canal
+    float pwr_sum = 0.0f;
     for (size_t l = 0; l < 432; ++l) {
-        float h_mag2 = std::norm(h[l]) + 1e-5f;
-        eq_seg[l] = (seg_carriers[l] * std::conj(h[l])) / h_mag2;
+        pwr_sum += std::norm(h[l]);
+    }
+    float pwr_avg = pwr_sum / 432.0f;
+    float sigma2 = std::max(1e-5f, 0.05f * pwr_avg); // SNR nominal de referencia ~13 dB
+
+    std::vector<std::complex<float>> eq_seg(432);
+    std::vector<float> csi_weight(432);
+    for (size_t l = 0; l < 432; ++l) {
+        float h_mag2 = std::norm(h[l]);
+        eq_seg[l] = (seg_carriers[l] * std::conj(h[l])) / (h_mag2 + sigma2);
+        // Peso CSI normalizado: portadoras atenuadas encolhem para ~0 (soft-bit 128 / neutro),
+        // impedindo que ruido aleatorio desvie o caminho do Trellis do Viterbi
+        csi_weight[l] = std::clamp(h_mag2 / (pwr_avg + 1e-6f), 0.0f, 2.0f);
     }
 
     // 6. Decodificacao TMCC e deteccao de inicio de quadro OFDM (204 simbolos)
@@ -435,7 +448,7 @@ size_t OneSegDemodulator::process_symbol(const std::complex<float>* symbol_time_
         frame_begin_pending_ = true;
     }
 
-    // 7. Extracao das 384 portadoras de dados (excluindo SP, TMCC e AC)
+    // 7. Extracao das 384 portadoras de dados ponderadas por CSI (excluindo SP, TMCC e AC)
     std::vector<std::complex<float>> data_carriers;
     data_carriers.reserve(384);
 
@@ -448,7 +461,8 @@ size_t OneSegDemodulator::process_symbol(const std::complex<float>* symbol_time_
 
     for (size_t l = 0; l < 432; ++l) {
         if (!is_sp[l] && !is_tmcc[l] && !is_ac[l]) {
-            data_carriers.push_back(eq_seg[l]);
+            // Aplica a ponderacao CSI diretamente ao simbolo complexo antes dos desentrelaçadores
+            data_carriers.push_back(eq_seg[l] * csi_weight[l]);
         }
     }
 

@@ -1,0 +1,239 @@
+# 📡 ISDB-T / ISDB-Tb Universal SDR Receiver & Real-Time Player
+
+<p align="center">
+  <img src="https://img.shields.io/badge/License-GPLv3-blue.svg" alt="License: GPLv3" />
+  <img src="https://img.shields.io/badge/C%2B%2B-17%20%2F%2020-00599C.svg?logo=c%2B%2B" alt="C++17/20" />
+  <img src="https://img.shields.io/badge/Hardware-RTL--SDR%20(RTL2832U)-red.svg" alt="RTL-SDR" />
+  <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-brightgreen.svg" alt="Platforms" />
+  <img src="https://img.shields.io/badge/Player-MPV%20Embedded-darkgreen.svg" alt="MPV Embedded" />
+  <img src="https://img.shields.io/badge/Tests-6%2F6%20Passed-success.svg" alt="CTest Passing" />
+</p>
+
+Complete digital broadcast TV receiver and demodulator for the **ISDB-T / ISDB-Tb / SBTVD** standard (Brazil, Japan, Philippines, and Latin America) powered by **RTL-SDR** hardware (RTL2832U with R820T/R828D/E4000 tuners). Built in **pure, high-performance native C++ without GNU Radio dependencies**, featuring **Regularized MMSE** channel equalization, **CSI weighting** in the continuous Viterbi decoder, smart two-pass spectrum scan with official station name resolution via **SDT**, and an **embedded MPV player with real-time super-resolution upscaling and motion interpolation**.
+
+---
+
+<p align="center">
+  <b>Language / Idioma:</b><br/>
+  <a href="README.md">🇧🇷 Português (Brasil)</a> &nbsp;|&nbsp; 
+  <b>🇺🇸 English</b>
+</p>
+
+---
+
+## 🎬 Real-Time Demonstration
+
+Watch the demodulator running live: tuning broadcast channel 23 UHF (*BAND HD* in São Paulo, Brazil), demodulating RF samples at 2.0317 MSps, and streaming directly to the embedded MPV player configured with GPU upscaling and motion interpolation:
+
+<div align="center">
+  <video src="docs/videos/demo.mp4" poster="docs/videos/demo_poster.png" controls width="90%" style="border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.35);">
+    <a href="docs/videos/demo.mp4">
+      <img src="docs/videos/demo_poster.png" alt="ISDB-T Receiver Real-Time Demo" width="90%" style="border-radius: 8px; border: 1px solid #333;" />
+    </a>
+    <p><em>Click on the image above or <a href="docs/videos/demo.mp4">open docs/videos/demo.mp4 directly</a> to view the full demo video.</em></p>
+  </video>
+</div>
+
+---
+
+## 📑 Table of Contents
+
+- [⚡ 1. End-User Quickstart (Download & Run)](#-1-end-user-quickstart-download--run)
+  - [1.1 Download the Standalone Release](#11-download-the-standalone-release)
+  - [1.2 USB Driver Installation (Zadig in 1 Click)](#12-usb-driver-installation-zadig-in-1-click)
+  - [1.3 Essential CLI Commands](#13-essential-cli-commands)
+  - [1.4 Embedded MPV Player Features & Hotkeys](#14-embedded-mpv-player-features--hotkeys)
+- [🛠️ 2. Developer Guide (Build & Tests)](#️-2-developer-guide-build--tests)
+  - [2.1 Prerequisites & Dependencies](#21-prerequisites--dependencies)
+  - [2.2 Building Natively](#22-building-natively)
+  - [2.3 Deterministic Unit Test Suite (CTest)](#23-deterministic-unit-test-suite-ctest)
+  - [2.4 Automated Release Packaging (`build_release.ps1`)](#24-automated-release-packaging-build_releaseps1)
+  - [2.5 Codebase Architecture Map](#25-codebase-architecture-map)
+- [🔬 3. Physical Layer (DSP) & Mathematical Innovations](#-3-physical-layer-dsp--mathematical-innovations)
+  - [3.1 Physical Layer DSP Summary](#31-physical-layer-dsp-summary)
+  - [3.2 Specialized Technical Documentation](#32-specialized-technical-documentation)
+- [🤝 4. Reference Projects & Acknowledgments](#-4-reference-projects--acknowledgments)
+- [📜 5. License](#-5-license)
+
+---
+
+## ⚡ 1. End-User Quickstart (Download & Run)
+
+If you simply want to tune and watch digital TV on your computer with an RTL-SDR dongle, follow these three steps:
+
+### 1.1 Download the Standalone Release
+Download the latest portable release archive:
+- 📦 **Windows x64:** [`releases/windows/20261101_v1.0.0.zip`](releases/windows/20261101_v1.0.0.zip) *(or from the [GitHub Releases tab](../../releases))*
+- Extract the `.zip` archive to any folder on your computer. All required binaries, runtime DLLs, the Zadig utility, and the embedded MPV player with custom shaders are included out of the box.
+
+### 1.2 USB Driver Installation (Zadig in 1 Click)
+To allow the CLI application to communicate directly with the RTL2832U chip:
+1. Plug your RTL-SDR dongle and a UHF antenna into an available USB port.
+2. Double-click the **`zadig.exe`** file included in the extracted folder (grant Administrator privileges if prompted).
+3. From the **Options** menu, click **List All Devices**.
+4. In the main dropdown menu, select **`Bulk-In, Interface (Interface 0)`** *(or `RTL2832U` / `RTL2838UHIDIR`)*.
+   > ⚠️ **Important:** If your device lists `Interface 0` and `Interface 1`, **always choose `Interface 0`** (the high-speed RF streaming interface; Interface 1 is only for the infrared remote receiver).
+5. Ensure the target driver to the right of the green arrow is set to **`WinUSB`**, then click **`Install Driver`** (or `Replace Driver`).
+6. Wait for the confirmation message: *"The driver was installed successfully"*. You are now ready to run!
+
+### 1.3 Essential CLI Commands
+Open PowerShell or the Command Prompt (CMD) in the extracted folder:
+
+```powershell
+# 1. Probe connected hardware and print supported gain values:
+.\isdbtb_rx.exe probe
+
+# 2. Scan over-the-air UHF channels (channels 14 to 69):
+#    (The smart two-pass scan automatically resolves station names via the SDT table)
+.\isdbtb_rx.exe scan
+
+# 3. List stored channels:
+.\isdbtb_rx.exe list
+
+# 4. Tune a channel (e.g., Channel 23) and automatically open the embedded MPV player:
+.\isdbtb_rx.exe play -c 23 --player
+```
+
+> 💡 **Synchronized Process Lifecycle:** The MPV player process is managed via a Windows kernel *Job Object*. When you exit the CLI (by pressing `Ctrl+C` or closing the terminal window), the player closes instantly without leaving orphan background processes.
+
+### 1.4 Embedded MPV Player Features & Hotkeys
+The embedded portable MPV player (`tools/mpv/`) is pre-configured (`tools/mpv/mpv.conf`) with custom graphics pipelines tailored specifically for 1-Seg mobile broadcasts (originally 320x240 or 320x180):
+- **Spatial Super-Resolution:** `ewa_lanczossharp` with `sigmoid-upscaling` produces sharp, ringing-free edges when upscaling to 1080p, 1440p, or 4K monitors.
+- **Dynamic Debanding:** Smooths out color banding and compression macroblocks typical of low-bitrate H.264 mobile streams.
+- **Motion Interpolation (`display-resample`):** Synchronizes video frames with your display's native refresh rate (60Hz, 120Hz, 144Hz, or 240Hz), eliminating motion judder.
+
+| Shortcut Key | Action in MPV |
+|:---:|---|
+| **`f`** | Toggle **Full Screen** |
+| **`i`** | Display real-time OSD statistics, active resolution, and frame rates |
+| **`d`** | Toggle Deband filter On / Off |
+| **`m`** | Toggle Audio Mute |
+| **`9` / `0`** | Decrease / Increase Volume |
+| **`q`** | Quit the player |
+
+---
+
+## 🛠️ 2. Developer Guide (Build & Tests)
+
+### 2.1 Prerequisites & Dependencies
+- **C++17 Compiler:** GCC 11+ (MinGW-w64 on Windows, GCC/Clang on Linux).
+- **Build System:** CMake 3.20+.
+- **Radio & Math Acceleration Libraries:**
+  - `librtlsdr` and `libusb-1.0` (headers and libraries included in `deps/`).
+  - `FFTW3` (fast Fourier transforms of 2048, 4096, and 8192 points).
+  - `VOLK` (vectorized floating-point math with AVX2, FMA, and SSE SIMD kernels).
+- *(Optional for scripting):* Python 3.8+ and PowerShell 7+.
+
+### 2.2 Building Natively
+In a Windows terminal with MinGW-w64 (e.g. `w64devkit`):
+
+```powershell
+# 1. Configure CMake in Release mode
+cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
+
+# 2. Build the main executable and test binaries
+cmake --build build -j
+```
+
+### 2.3 Deterministic Unit Test Suite (CTest)
+All core physical layer and FEC blocks feature deterministic mathematical test suites that run in fractions of a second without requiring physical radio hardware:
+
+```powershell
+# Run the entire test suite via CTest:
+ctest --test-dir build --output-on-failure
+```
+
+The test suite validates:
+1. `test_reed_solomon`: Corrects up to 8 erroneous bytes per packet and asserts failure detection with >8 errors using Berlekamp-Massey and Forney algorithms.
+2. `test_descrambler`: Verifies the 15-bit ISDB-T energy dispersal LFSR with continuous clocking over sync byte `0x47`.
+3. `test_viterbi`: Continuous $K=7$ convolutional decoding across punctured rates 1/2, 2/3, 3/4, 5/6, and 7/8.
+4. `test_fec_pipeline`: Full inner-to-outer FEC integration (Viterbi $\to$ Byte Deinterleaver $\to$ Descrambler $\to$ Reed-Solomon).
+5. `test_ofdm_sync`: Van de Beek ML cyclic prefix correlation estimator and continuous fractional frequency offset (FFO) tracking.
+6. `test_oneseg_e2e`: Simulated end-to-end 1-Seg pipeline with QPSK modulation, rate 2/3, guard interval 1/8, and time deinterleaving $I=4$.
+
+### 2.4 Automated Release Packaging (`build_release.ps1`)
+The repository includes a PowerShell automation script for compiling, packaging, and strictly verifying standalone release archives:
+
+```powershell
+# Generate the full Windows release package (build, test, stage, compress, and validate):
+.\scripts\build_release.ps1 -Platform windows
+
+# Package existing binaries without rebuilding:
+.\scripts\build_release.ps1 -Platform windows -SkipBuild
+```
+
+The script stages the binaries, DLLs, Zadig, embedded MPV, and licenses into `releases/<platform>/yyyymmdd_v<version>.zip` and **strictly validates** the archive's internal table using the native `.NET ZipFile` API, ensuring 100% compatibility with Windows File Explorer.
+
+### 2.5 Codebase Architecture Map
+
+```text
+isdb_t_isdb_tb_tuner_player/
+├── CMakeLists.txt              # CMake build configuration
+├── LICENSE                     # GNU General Public License v3.0 (GPLv3)
+├── README.md                   # Brazilian Portuguese documentation
+├── README_en.md                # English documentation
+├── AGENTS.md                   # Strict architectural invariants for AI & human developers
+├── include/
+│   ├── dsp/                    # Physical layer DSP (OfdmSync, OneSegDemod, Viterbi, RS, etc.)
+│   ├── streaming/              # UdpStreamer (1316-byte datagrams for MPV/VLC)
+│   ├── mpegts/                 # PSI/SI parsers (PAT, PMT, SDT) and test pattern generator
+│   ├── cli/                    # ChannelManager and JSON persistence
+│   └── third_party/            # CLI11, nlohmann/json
+├── src/
+│   ├── main.cpp                # CLI entry point, asynchronous USB reader, MPV Job Object
+│   └── ...                     # C++ implementations for DSP, MPEG-TS, and streaming
+├── tools/
+│   ├── zadig.exe               # Official USB driver installation utility
+│   └── mpv/                    # Embedded MPV portable player with custom scaling shaders
+├── scripts/
+│   ├── build_release.ps1       # Release automation and strict ZIP validation
+│   ├── play_mpv.bat            # Helper script for manual MPV playback
+│   └── calibrate_ppm.py        # Local oscillator PPM calibration tool
+├── releases/                   # Ready-to-use release packages (windows/, linux/, macos/)
+├── docs/                       # Technical architecture decisions (ADR) and specifications
+└── tests/                      # Deterministic CTest test cases
+```
+
+---
+
+## 🔬 3. Physical Layer (DSP) & Mathematical Innovations
+
+### 3.1 Physical Layer DSP Summary
+- **Exact Fundamental Sampling Rate ($2031746\text{ S/s}$):** Exactly $1/4$ of the ISDB-T chip rate $F_{base} = 512/63\text{ MHz} \approx 8.126984\text{ MHz}$, ensuring $>90\%$ cyclic prefix correlation and perfectly aligned FFT bins without rational resampling filters.
+- **OFDM Symbol Sync & FFO (Van de Beek ML):** Continuous sliding cyclic prefix autocorrelation with real-time NCO phase compensation accelerated by SIMD VOLK.
+- **Regularized MMSE Channel Equalization:** Replaces traditional Zero-Forcing with adaptive MMSE ($\sigma^2 = \max(10^{-5}, 0.05 \cdot P_{\text{avg}})$), preventing severe noise amplification in deep fading nulls.
+- **CSI (Channel State Information) Weighting in Viterbi:** Reliability factor $W_l = \text{clamp}(|H_l|^2 / P_{\text{avg}}, 0, 2)$ scales degraded subcarriers toward erasure (128), yielding **+2 to 3 dB SNR gain** under Rayleigh multipath fading.
+- **DBPSK TMCC + BCH(273, 191) Synchronizer:** Tracks the 204-symbol frame sync across subcarriers 101, 131, 286, and 349, dynamically configuring modulation and time deinterleaver depth.
+- **ISDB-T Deinterleavers:** Frequency (`FREQ_PERM_MODE3` over 384 carriers), Convolutional Time ($I \times (95 - (5c \bmod 96))$), Bit, and Forney Byte Deinterleaving ($I=12, M=17$).
+- **Outer FEC Reed-Solomon:** $RS(204, 188, t=8)$ decoder with Berlekamp-Massey, Chien Search, and Forney algorithm ($FCR=0$).
+
+### 3.2 Specialized Technical Documentation
+For detailed mathematical formulations, architectural trade-offs, and deep dives, refer to the documents inside the [`docs/`](docs/) directory:
+
+| Document | Content & Purpose |
+|---|---|
+| 🏛️ [`docs/ARCHITECTURE_DECISIONS.md`](docs/ARCHITECTURE_DECISIONS.md) | **Architecture Decision Records (ADR 001 to 017):** Complete history of all algorithms used and replaced (Zero-Forcing $\to$ MMSE, CSI Weighting, Two-Pass Scan, MPV Job Object, 1316-byte UDP MTU alignment, and bug fixes against `gr-isdbt`) with their full mathematical justifications. |
+| 📖 [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) | **In-Depth User Guide:** Step-by-step setup instructions, advanced CLI options, manual RF gain tuning, and troubleshooting FAQ. |
+| 📐 [`docs/blueprint_isdbt_decoder.md`](docs/blueprint_isdbt_decoder.md) | **ISDB-T Engineering Blueprint:** Standard specifications (ABNT NBR 15601/15603 and ARIB STD-B31), interleavers, and frame structures. |
+| 🤖 [`AGENTS.md`](AGENTS.md) | **AI Agent & Developer Guide:** Non-negotiable architectural invariants ("Do Not Break"), historical bug registry, and test compliance guidelines. |
+
+---
+
+## 🤝 4. Reference Projects & Acknowledgments
+
+This project is built upon the invaluable contributions and specifications of the open-source SDR community:
+
+- **[`git-artes/gr-isdbt`](https://github.com/git-artes/gr-isdbt):** Academic reference ISDB-T implementation for GNU Radio by Federico Larroca and Martin Gomez (Universidad de la República, Uruguay). Their interleaving polynomials, PRBS sequences, and trellis definitions served as the foundational model for our native C++ core.
+- **[`librtlsdr`](https://github.com/steve-m/librtlsdr):** Open-source driver for Realtek RTL2832U devices, maintained by Steve Markgraf and Dimitri Stolnikov.
+- **[`MPV Player`](https://github.com/mpv-player/mpv):** Highly extensible media player powering our integrated real-time video upscaling subsystem.
+- **[`Zadig / libwdi`](https://github.com/pbatard/libwdi):** Essential tool developed by Pete Batard for clean WinUSB driver installation on Windows.
+- **[`VOLK`](https://github.com/gnuradio/volk) & [`FFTW3`](https://www.fftw.org/):** Vectorized floating-point math acceleration and high-performance Fourier transform engines.
+- **[`CLI11`](https://github.com/CLIUtils/CLI11) & [`nlohmann/json`](https://github.com/nlohmann/json):** Modern C++ libraries for CLI parsing and JSON configuration serialization.
+
+---
+
+## 📜 5. License
+
+This project is free software licensed under the terms of the **GNU General Public License v3.0 (GPL-3.0-or-later)**.  
+See the [`LICENSE`](LICENSE) file for the full license text.
+
