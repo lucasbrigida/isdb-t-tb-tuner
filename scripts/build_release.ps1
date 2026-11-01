@@ -159,9 +159,15 @@ if (Test-Path $stagingDir) {
 New-Item -ItemType Directory -Force -Path "$stagingDir\scripts", "$stagingDir\tools\mpv" | Out-Null
 
 Copy-Item "build\isdbtb_rx.exe" "$stagingDir\"
-Copy-Item "build\librtlsdr.dll" "$stagingDir\"
-Copy-Item "build\libusb-1.0.dll" "$stagingDir\"
-Copy-Item "build\libwinpthread-1.dll" "$stagingDir\"
+if (Test-Path "build\librtlsdr.dll") {
+    Copy-Item "build\librtlsdr.dll" "$stagingDir\"
+    Copy-Item "build\libusb-1.0.dll" "$stagingDir\"
+    Copy-Item "build\libwinpthread-1.dll" "$stagingDir\"
+} else {
+    Copy-Item "tools\rtl-sdr\librtlsdr.dll" "$stagingDir\"
+    Copy-Item "tools\rtl-sdr\libusb-1.0.dll" "$stagingDir\"
+    Copy-Item "tools\rtl-sdr\libwinpthread-1.dll" "$stagingDir\"
+}
 Copy-Item $zadigPath "$stagingDir\zadig.exe"
 Copy-Item "LICENSE" "$stagingDir\LICENSE"
 

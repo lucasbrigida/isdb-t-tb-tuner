@@ -20,4 +20,4 @@ tests/data/*.raw
 !tools/*.exe
 !tools/*.dll
 !tools/**/*.exe
-!tools/**/*.dlls
+!tools/**/*.dll

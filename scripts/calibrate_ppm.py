@@ -8,11 +8,11 @@ import sys
 import ctypes
 import numpy as np
 
-# Procura DLL tanto no build-setup fornecido quanto em deps
+# Procura DLL tanto em tools/rtl-sdr quanto em deps
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_dir = os.path.dirname(script_dir)
 possible_dirs = [
-    os.path.join(project_dir, "build-setup", "rtl-sdr-64bit-20261018"),
+    os.path.join(project_dir, "tools", "rtl-sdr"),
     os.path.join(project_dir, "deps", "rtlsdr", "x64")
 ]
 

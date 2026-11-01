@@ -7,7 +7,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Local dependency roots
 set(DEPS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps")
-set(SETUP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/build-setup/rtl-sdr-64bit-20261018")
+set(SETUP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tools/rtl-sdr")
 set(RTLSDR_ROOT "${DEPS_DIR}/rtlsdr")
 set(FFTW3_ROOT "${DEPS_DIR}/fftw3")
 set(VOLK_ROOT "${DEPS_DIR}/volk-install")

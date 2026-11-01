@@ -22,9 +22,9 @@ BUILD_DIR = os.path.join(PROJECT_ROOT, "build")
 # O teste executa estritamente no ambiente padrao do usuario (SEM injecao de DLLs externas no PATH)
 # Isso garante que a pasta build/ seja 100% autocontida e portavel.
 clean_env = os.environ.copy()
-# Remove qualquer referencia a deps/ ou build-setup/ do PATH para simular fielmente o terminal do usuario
+# Remove qualquer referencia a deps/ ou tools/rtl-sdr do PATH para simular fielmente o terminal do usuario
 current_path = clean_env.get("PATH", "")
-filtered_paths = [p for p in current_path.split(os.pathsep) if "deps" not in p.lower() and "build-setup" not in p.lower()]
+filtered_paths = [p for p in current_path.split(os.pathsep) if "deps" not in p.lower() and "tools/rtl-sdr" not in p.lower()]
 clean_env["PATH"] = os.pathsep.join(filtered_paths)
 
 total_tests = 0
