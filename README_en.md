@@ -21,16 +21,15 @@ Complete digital broadcast TV receiver and demodulator for the **ISDB-T / ISDB-T
 
 ---
 
-## 🎬 Real-Time Demonstration
+## 🎬 Real-Time Demonstrations & Hardware Inspection
 
-Watch the demodulator running live: tuning broadcast channel 23 UHF (*BAND HD* in São Paulo, Brazil), demodulating RF samples at 2.0317 MSps, and streaming directly to the embedded MPV player configured with GPU upscaling and motion interpolation:
+Explore the receiver across its primary operating modes. Click on any thumbnail below to watch the video or view the image in full resolution:
 
-<div align="center">
-  <a href="docs/videos/demo.mp4" title="Click to watch demo video">
-    <img src="docs/videos/demo_poster.png" alt="ISDB-T Receiver Real-Time Demo" width="90%" style="border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.35); border: 1px solid #333;" />
-  </a>
-  <p><em>▶️ <strong>Click on the image above</strong> or <a href="docs/videos/demo.mp4">open docs/videos/demo.mp4 directly</a> to watch the full demo video.</em></p>
-</div>
+| 📡 **Automated Channel Scan (`scan`)** | 📺 **Tuning & Playback (`play`)** |
+| :---: | :---: |
+| <a href="docs/videos/scan.mp4" title="Click to watch scan video"><img src="docs/videos/scan_poster.png" alt="Channel scanning scan" width="100%" style="border-radius: 6px; border: 1px solid #333;" /></a><br>▶️ <strong>Video:</strong> <em>Fast two-pass UHF scan (channels 14–69) with deep SDT station resolution (<a href="docs/videos/scan.mp4"><code>docs/videos/scan.mp4</code></a>)</em> | <a href="docs/videos/play.mp4" title="Click to watch play video"><img src="docs/videos/play_poster.png" alt="Tuning and playback play" width="100%" style="border-radius: 6px; border: 1px solid #333;" /></a><br>▶️ <strong>Video:</strong> <em>Live playback in embedded MPV with EWA-Lanczos upscaling and motion interpolation (<a href="docs/videos/play.mp4"><code>docs/videos/play.mp4</code></a>)</em> |
+| **🎬 Full Demodulator Demo (`demo`)** | **🔍 Hardware Inspection (`probe`)** |
+| <a href="docs/videos/demo.mp4" title="Click to watch full demo video"><img src="docs/videos/demo_poster.png" alt="Full demodulator real-time demo" width="100%" style="border-radius: 6px; border: 1px solid #333;" /></a><br>▶️ <strong>Video:</strong> <em>Continuous RF demodulation at 2.0317 MSps streaming live broadcast TV (<a href="docs/videos/demo.mp4"><code>docs/videos/demo.mp4</code></a>)</em> | <a href="docs/images/probe.png" title="Click to view full probe image"><img src="docs/images/probe.png" alt="Hardware probe inspection" width="100%" style="border-radius: 6px; border: 1px solid #333;" /></a><br>📷 <strong>Image:</strong> <em>RTL-SDR dongle inspection, tuner RF gain table, and VOLK/SIMD acceleration detection (<a href="docs/images/probe.png"><code>docs/images/probe.png</code></a>)</em> |
 
 ---
 
@@ -42,11 +41,12 @@ Watch the demodulator running live: tuning broadcast channel 23 UHF (*BAND HD* i
   - [1.3 Essential CLI Commands](#13-essential-cli-commands)
   - [1.4 Embedded MPV Player Features & Hotkeys](#14-embedded-mpv-player-features--hotkeys)
 - [🛠️ 2. Developer Guide (Build & Tests)](#️-2-developer-guide-build--tests)
-  - [2.1 Prerequisites & Dependencies](#21-prerequisites--dependencies)
+  - [2.1 Prerequisites & Recommended Toolchain (w64devkit)](#21-prerequisites--recommended-toolchain-w64devkit)
   - [2.2 Building Natively](#22-building-natively)
   - [2.3 Deterministic Unit Test Suite (CTest)](#23-deterministic-unit-test-suite-ctest)
   - [2.4 Automated Release Packaging (`build_release.ps1`)](#24-automated-release-packaging-build_releaseps1)
-  - [2.5 Codebase Architecture Map](#25-codebase-architecture-map)
+  - [2.5 Developer & Diagnostic Utilities (`tools/`)](#25-developer--diagnostic-utilities-tools)
+  - [2.6 Codebase Architecture Map](#26-codebase-architecture-map)
 - [🔬 3. Physical Layer (DSP) & Mathematical Innovations](#-3-physical-layer-dsp--mathematical-innovations)
   - [3.1 Physical Layer DSP Summary](#31-physical-layer-dsp-summary)
   - [3.2 Specialized Technical Documentation](#32-specialized-technical-documentation)
@@ -113,14 +113,20 @@ The embedded portable MPV player (`tools/mpv/`) is pre-configured (`tools/mpv/mp
 
 ## 🛠️ 2. Developer Guide (Build & Tests)
 
-### 2.1 Prerequisites & Dependencies
-- **C++17 Compiler:** GCC 11+ (MinGW-w64 on Windows, GCC/Clang on Linux).
-- **Build System:** CMake 3.20+.
+### 2.1 Prerequisites & Recommended Toolchain (w64devkit)
+For native Windows compilation with maximum speed and without the bloat of heavy environments like MSYS2 or Visual Studio, the project officially adopts and recommends **[`w64devkit`](https://github.com/skeeto/w64devkit/releases)**:
+
+- **What is [`w64devkit`](https://github.com/skeeto/w64devkit/releases):** A portable, self-contained, instant-startup C and C++ development kit for x64 Windows maintained by Christopher Wellons (*skeeto*). It includes GCC, G++, GDB, GNU Make, BusyBox (providing a clean POSIX environment with `sh`, `awk`, `sed`, `grep`), and complete MinGW-w64 runtime headers supporting C++17 and C++20.
+- **How to set up w64devkit in 2 minutes:**
+  1. Download the latest release (`w64devkit-x.y.z.zip`) from the official release page: [github.com/skeeto/w64devkit/releases](https://github.com/skeeto/w64devkit/releases).
+  2. Extract the archive to a local folder (e.g. `C:\w64devkit`).
+  3. Add `C:\w64devkit\bin` to your system `PATH` environment variable (or launch a terminal via `w64devkit.exe`).
+- **Build System:** [CMake 3.20+](https://cmake.org/download/) installed and available in `PATH`.
 - **Radio & Math Acceleration Libraries:**
-  - `librtlsdr` and `libusb-1.0` (headers and libraries included in `deps/`).
+  - `librtlsdr` and `libusb-1.0` (headers and import libraries included in `deps/`).
   - `FFTW3` (fast Fourier transforms of 2048, 4096, and 8192 points).
   - `VOLK` (vectorized floating-point math with AVX2, FMA, and SSE SIMD kernels).
-- *(Optional for scripting):* Python 3.8+ and PowerShell 7+.
+- *(Optional for scripting & testing):* Python 3.8+ and PowerShell 7+.
 
 ### 2.2 Building Natively
 In a Windows terminal with MinGW-w64 (e.g. `w64devkit`):
@@ -162,7 +168,28 @@ The repository includes a PowerShell automation script for compiling, packaging,
 
 The script stages the binaries, DLLs, Zadig, embedded MPV, and licenses into `releases/<platform>/yyyymmdd_v<version>.zip` and **strictly validates** the archive's internal table using the native `.NET ZipFile` API, ensuring 100% compatibility with Windows File Explorer.
 
-### 2.5 Codebase Architecture Map
+### 2.5 Developer & Diagnostic Utilities (`tools/`)
+
+The [`tools/`](tools/) directory hosts a complete ecosystem of standalone tools and reference utilities for RF bench testing, USB hardware diagnosis, and high-performance playback:
+
+| Utility / Directory | Technical Description & Developer Use Cases |
+|---|---|
+| **[`tools/zadig.exe`](tools/zadig.exe)** | Official portable **WinUSB** driver installer (v2.9 / libwdi). Links the WinUSB driver to `Interface 0` of the RTL2832U device with 1 click, enabling the high-speed bulk I/Q streaming transfers required for OFDM demodulation. |
+| **[`tools/rtl-sdr/`](tools/rtl-sdr/)** | Complete collection of official **Osmocom RTL-SDR** diagnostic binaries and runtime libraries: |
+| ↳ `rtl_test.exe` | **USB Stability & Benchmark Tool:** Tests USB bus bandwidth and tuner PLL lock stability at the exact ISDB-T sampling rate (2031746 S/s):<br>`.\tools\rtl-sdr\rtl_test.exe -s 2031746 -t` |
+| ↳ `rtl_sdr.exe` | **Raw RF I/Q Recorder:** Captures raw RF samples directly from the air to `.raw` binary files for offline simulation and deterministic unit testing:<br>`.\tools\rtl-sdr\rtl_sdr.exe -f 527143000 -s 2031746 -n 8000000 live_ch23.raw` |
+| ↳ `rtl_power.exe` | **FFT Spectrum Analyzer:** Measures broadband RF power spectral density and thermal noise floor across the entire UHF broadcast band (470 to 806 MHz). |
+| ↳ `rtl_tcp.exe` | **Network I/Q Streaming Server:** Streams raw digitized I/Q data over TCP/IP sockets for remote SDR processing. |
+| ↳ `rtl_fm.exe` / `rtl_adsb.exe` | Command-line FM/AM demodulator and 1090 MHz ADS-B aircraft transponder telemetry decoder. |
+| ↳ `rtl_eeprom.exe` | Reads and reprograms the non-volatile EEPROM memory of the RTL2832U (serial number, Vendor ID, Product ID). |
+| ↳ `librtlsdr.dll` / `libusb-1.0.dll` | Official runtime DLLs for RTL-SDR hardware abstraction and high-speed USB device communication. |
+| **[`tools/mpv/`](tools/mpv/)** | Embedded **MPV Media Player (x64 portable)** distribution: |
+| ↳ `mpv.exe` / `mpv.com` | Portable player binaries invoked automatically via `.\isdbtb_rx.exe play -c <channel> --player`. |
+| ↳ `mpv.conf` | Tailored GPU rendering profile for 1-Seg mobile video: **EWA-Lanczos Sharp** spatial upscaling, **`display-resample`** temporal motion interpolation, dynamic debanding, and ultra-low-latency jitter buffers. |
+| ↳ `doc/` | Full official MPV documentation (`manual.pdf`) and keyboard binding reference cheatsheet (`mpbindings.png`). |
+| ↳ `installer/` | Maintenance and updater scripts (`updater.ps1`, `mpv-install.bat`). |
+
+### 2.6 Codebase Architecture Map
 
 ```text
 isdb_t_isdb_tb_tuner_player/
@@ -181,8 +208,17 @@ isdb_t_isdb_tb_tuner_player/
 │   ├── main.cpp                # CLI entry point, asynchronous USB reader, MPV Job Object
 │   └── ...                     # C++ implementations for DSP, MPEG-TS, and streaming
 ├── tools/
-│   ├── zadig.exe               # Official USB driver installation utility
-│   └── mpv/                    # Embedded MPV portable player with custom scaling shaders
+│   ├── zadig.exe               # Official USB driver installation utility (WinUSB v2.9)
+│   ├── mpv/                    # Embedded MPV portable player with custom scaling shaders
+│   │   ├── mpv.exe / mpv.conf  # Player executable and real-time GPU scaling profile
+│   │   ├── doc/                # Official MPV manual (PDF) and keybinding map
+│   │   └── installer/          # Updater scripts and optional system registration
+│   └── rtl-sdr/                # Official Osmocom RTL-SDR diagnostic tools & DLLs
+│       ├── rtl_test.exe        # USB bus benchmark and sample drop stability tester
+│       ├── rtl_sdr.exe         # Raw RF I/Q recorder for deterministic offline tests
+│       ├── rtl_tcp.exe / fm    # Network TCP streaming and command-line test receiver
+│       ├── rtl_power.exe       # Wideband FFT spectrum analyzer and UHF power meter
+│       └── librtlsdr.dll, etc. # RTL-SDR and libusb device runtime libraries
 ├── scripts/
 │   ├── build_release.ps1       # Release automation and strict ZIP validation
 │   ├── play_mpv.bat            # Helper script for manual MPV playback

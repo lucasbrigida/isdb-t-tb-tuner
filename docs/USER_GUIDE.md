@@ -8,9 +8,9 @@ Este guia prático ensina como configurar o dongle RTL-SDR, instalar os drivers 
 
 Ao conectar o dongle RTL-SDR pela primeira vez no Windows, o sistema operacional instala um driver padrão de controle de rádio FM que bloqueia o acesso direto às amostras I/Q brutas. É necessário substituir o driver pelo **WinUSB** usando o utilitário **Zadig**:
 
-1. Baixe o **Zadig** gratuitamente em [zadig.akeo.ie](https://zadig.akeo.ie/).
+1. O utilitário **Zadig** (v2.9) já vem incluído no projeto na pasta **`tools/zadig.exe`** (ou pode ser baixado em [zadig.akeo.ie](https://zadig.akeo.ie/)).
 2. Conecte o dongle RTL-SDR na porta USB do computador.
-3. Abra o **Zadig** como Administrador.
+3. Execute o **`tools/zadig.exe`** como Administrador.
 4. No menu superior, clique em **Options** e marque **List All Devices**.
 5. No menu dropdown principal, selecione:
    - `Bulk-In, Interface (Interface 0)` ou `RTL2838UHIDIR`.

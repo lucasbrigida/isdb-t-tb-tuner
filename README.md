@@ -21,16 +21,15 @@ Receptor e decodificador digital completo de televisão aberta no padrão **ISDB
 
 ---
 
-## 🎬 Demonstração em Tempo Real
+## 🎬 Demonstrações em Tempo Real & Inspeção de Hardware
 
-Assista ao decodificador em execução ao vivo sintonizando a emissora aberta (*BAND HD*, Canal 23 UHF), demodulando o sinal de RF a 2.0317 MSps e reproduzindo o fluxo no player MPV integrado com interpolação de escala e movimento ativados:
+Confira abaixo o receptor em execução em seus diferentes modos operacionais. Clique nas miniaturas para assistir aos vídeos ou visualizar a imagem em resolução original:
 
-<div align="center">
-  <a href="docs/videos/demo.mp4" title="Clique para assistir ao vídeo de demonstração">
-    <img src="docs/videos/demo_poster.png" alt="Demonstração do ISDB-T Receiver em Execução" width="90%" style="border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.35); border: 1px solid #333;" />
-  </a>
-  <p><em>▶️ <strong>Clique na imagem acima</strong> ou <a href="docs/videos/demo.mp4">acesse diretamente docs/videos/demo.mp4</a> para assistir à demonstração em vídeo.</em></p>
-</div>
+| 📡 **Varredura Automática (`scan`)** | 📺 **Sintonia e Reprodução (`play`)** |
+| :---: | :---: |
+| <a href="docs/videos/scan.mp4" title="Clique para assistir ao vídeo de varredura"><img src="docs/videos/scan_poster.png" alt="Varredura de canais scan" width="100%" style="border-radius: 6px; border: 1px solid #333;" /></a><br>▶️ <strong>Vídeo:</strong> <em>Varredura rápida em 2 passos (UHF 14–69) com decodificação SDT de emissoras (<a href="docs/videos/scan.mp4"><code>docs/videos/scan.mp4</code></a>)</em> | <a href="docs/videos/play.mp4" title="Clique para assistir ao vídeo de reprodução"><img src="docs/videos/play_poster.png" alt="Sintonia e reprodução play" width="100%" style="border-radius: 6px; border: 1px solid #333;" /></a><br>▶️ <strong>Vídeo:</strong> <em>Sintonia ao vivo com MPV integrado, upscaling EWA-Lanczos e interpolação de movimento (<a href="docs/videos/play.mp4"><code>docs/videos/play.mp4</code></a>)</em> |
+| **🎬 Demonstração Completa (`demo`)** | **🔍 Diagnóstico de Hardware (`probe`)** |
+| <a href="docs/videos/demo.mp4" title="Clique para assistir à demonstração completa"><img src="docs/videos/demo_poster.png" alt="Demonstração completa em tempo real demo" width="100%" style="border-radius: 6px; border: 1px solid #333;" /></a><br>▶️ <strong>Vídeo:</strong> <em>Demodulação de sinal de RF a 2.0317 MSps e reprodução contínua da BAND HD (<a href="docs/videos/demo.mp4"><code>docs/videos/demo.mp4</code></a>)</em> | <a href="docs/images/probe.png" title="Clique para ampliar a imagem de diagnóstico"><img src="docs/images/probe.png" alt="Diagnóstico de hardware probe" width="100%" style="border-radius: 6px; border: 1px solid #333;" /></a><br>📷 <strong>Imagem:</strong> <em>Inspeção do dongle RTL-SDR, sintonizador R820T, tabela de ganhos e aceleração VOLK SIMD (<a href="docs/images/probe.png"><code>docs/images/probe.png</code></a>)</em> |
 
 ---
 
@@ -42,11 +41,12 @@ Assista ao decodificador em execução ao vivo sintonizando a emissora aberta (*
   - [1.3 Comandos Essenciais da CLI](#13-comandos-essenciais-da-cli)
   - [1.4 Recursos e Teclas do Player MPV Integrado](#14-recursos-e-teclas-do-player-mpv-integrado)
 - [🛠️ 2. Guia para Desenvolvedores (Compilação & Testes)](#️-2-guia-para-desenvolvedores-compilação--testes)
-  - [2.1 Pré-requisitos & Dependências](#21-pré-requisitos--dependências)
+  - [2.1 Pré-requisitos & Toolchain Recomendado (w64devkit)](#21-pré-requisitos--toolchain-recomendado-w64devkit)
   - [2.2 Como Compilar Nativamente](#22-como-compilar-nativamente)
   - [2.3 Suíte de Testes Determinísticos (CTest)](#23-suíte-de-testes-determinísticos-ctest)
   - [2.4 Automação de Releases (`build_release.ps1`)](#24-automação-de-releases-build_releaseps1)
-  - [2.5 Mapa da Arquitetura do Código](#25-mapa-da-arquitetura-do-código)
+  - [2.5 Ferramentas de Desenvolvimento e Diagnóstico (`tools/`)](#25-ferramentas-de-desenvolvimento-e-diagnóstico-tools)
+  - [2.6 Mapa da Arquitetura do Código](#26-mapa-da-arquitetura-do-código)
 - [🔬 3. Camada Física (DSP) & Inovações Matemáticas](#-3-camada-física-dsp--inovações-matemáticas)
   - [3.1 Resumo dos Algoritmos de Camada Física](#31-resumo-dos-algoritmos-de-camada-física)
   - [3.2 Documentação Técnica Especializada](#32-documentação-técnica-especializada)
@@ -112,14 +112,20 @@ O reprodutor MPV embutido inclui um pipeline gráfico pré-configurado (`tools/m
 
 ## 🛠️ 2. Guia para Desenvolvedores (Compilação & Testes)
 
-### 2.1 Pré-requisitos & Dependências
-- **Compilador C++17:** GCC 11+ (MinGW-w64 no Windows, GCC/Clang no Linux).
-- **Sistema de Compilação:** CMake 3.20+.
+### 2.1 Pré-requisitos & Toolchain Recomendado (w64devkit)
+Para compilação nativa no Windows com máxima velocidade e sem a sobrecarga de ambientes pesados como MSYS2 ou Visual Studio, o projeto adota e recomenda oficialmente o **[`w64devkit`](https://github.com/skeeto/w64devkit/releases)**:
+
+- **O que é o [`w64devkit`](https://github.com/skeeto/w64devkit/releases):** Uma distribuição portátil, autocontida e de inicialização instantânea do compilador GCC/G++ para Windows x64 mantida por Christopher Wellons (*skeeto*). Inclui GDB, GNU Make, BusyBox (com shell POSIX `sh`, `awk`, `sed`, `grep`) e cabeçalhos MinGW-w64 com suporte nativo a C++17 e C++20.
+- **Como configurar o w64devkit em 2 minutos:**
+  1. Baixe o pacote mais recente (`w64devkit-x.y.z.zip`) na página oficial de releases: [github.com/skeeto/w64devkit/releases](https://github.com/skeeto/w64devkit/releases).
+  2. Extraia o conteúdo para uma pasta no seu computador (ex: `C:\w64devkit`).
+  3. Adicione o caminho `C:\w64devkit\bin` à variável de ambiente `PATH` do sistema (ou abra o terminal através do atalho `w64devkit.exe`).
+- **Sistema de Compilação:** [CMake 3.20+](https://cmake.org/download/) instalado e adicionado ao `PATH`.
 - **Bibliotecas de Aceleração e Rádio:**
-  - `librtlsdr` e `libusb-1.0` (cabeçalhos e bibliotecas inclusos em `deps/`).
+  - `librtlsdr` e `libusb-1.0` (cabeçalhos e bibliotecas de importação inclusos no repositório em `deps/`).
   - `FFTW3` (transformadas rápidas de Fourier de 2048, 4096 e 8192 pontos).
   - `VOLK` (operações matemáticas vetoriais com suporte a AVX2, FMA e SSE).
-- *(Opcional para testes e scripting):* Python 3.8+ e PowerShell 7+.
+- *(Opcional para automação e testes):* Python 3.8+ e PowerShell 7+.
 
 ### 2.2 Como Compilar Nativamente
 No terminal do Windows com ambiente MinGW-w64 (ex: `w64devkit`):
@@ -161,13 +167,35 @@ O repositório fornece um script em PowerShell para geração e verificação au
 
 O script empacota os binários, DLLs, utilitário Zadig, MPV e licença em `releases/<plataforma>/yyyymmdd_v<versao>.zip` e **valida automaticamente** a integridade e os tamanhos de todos os arquivos internos via API nativa `.NET ZipFile`, garantindo 100% de compatibilidade com o Windows Explorer.
 
-### 2.5 Mapa da Arquitetura do Código
+### 2.5 Ferramentas de Desenvolvimento e Diagnóstico (`tools/`)
+
+O repositório disponibiliza no diretório [`tools/`](tools/) um ecossistema completo de utilitários prontos para uso em bancada de testes de RF, depuração de hardware USB e reprodução de alta performance:
+
+| Ferramenta / Diretório | Função & Descrição Técnica |
+|---|---|
+| **[`tools/zadig.exe`](tools/zadig.exe)** | Instalador portátil do driver **WinUSB** (v2.9 oficial / libwdi). Permite associar o driver WinUSB à `Interface 0` do RTL2832U, liberando as transferências bulk I/Q de alta velocidade necessárias para demodulação OFDM. |
+| **[`tools/rtl-sdr/`](tools/rtl-sdr/)** | Coleção completa de binários oficiais da **Osmocom RTL-SDR** e bibliotecas de runtime: |
+| ↳ `rtl_test.exe` | **Teste de Estabilidade e Perda de Amostras:** Testa a taxa de transferência USB e estabilidade do PLL sob a taxa exata do ISDB-T (2031746 S/s):<br>`.\tools\rtl-sdr\rtl_test.exe -s 2031746 -t` |
+| ↳ `rtl_sdr.exe` | **Gravador de Amostras I/Q Brutas:** Captura amostras de RF diretamente do ar para arquivos binários (`.raw`), permitindo testes offline determinísticos:<br>`.\tools\rtl-sdr\rtl_sdr.exe -f 527143000 -s 2031746 -n 8000000 live_ch23.raw` |
+| ↳ `rtl_power.exe` | **Analisador de Espectro FFT:** Mede a densidade de potência espectral e o piso de ruído térmico em varreduras de banda larga na faixa de UHF (470 a 806 MHz). |
+| ↳ `rtl_tcp.exe` | **Servidor de Streaming I/Q em Rede:** Transmite amostras I/Q digitalizadas via rede TCP/IP para clientes SDR remotos. |
+| ↳ `rtl_fm.exe` / `rtl_adsb.exe` | Demodulador FM/AM em linha de comando e decodificador de telemetria aeronáutica ADS-B (1090 MHz). |
+| ↳ `rtl_eeprom.exe` | Leitura e reprogramação da memória EEPROM do RTL2832U (número de série, Vendor ID e Product ID). |
+| ↳ `librtlsdr.dll` / `libusb-1.0.dll` | DLLs de runtime do driver RTL-SDR e da biblioteca de abstração USB de alta velocidade. |
+| **[`tools/mpv/`](tools/mpv/)** | Reprodutor multimídia **MPV (x64 portátil)** integrado: |
+| ↳ `mpv.exe` / `mpv.com` | Binários portáteis disparados diretamente pelo decodificador via `.\isdbtb_rx.exe play -c <canal> --player`. |
+| ↳ `mpv.conf` | Configurações de GPU otimizadas para 1-Seg móvel: upscaling espacial **EWA-Lanczos Sharp**, interpolação de movimento temporal **`display-resample`**, debanding dinâmico e buffers de latência ultrabaixa. |
+| ↳ `doc/` | Manual oficial completo do MPV (`manual.pdf`) e mapa visual de atalhos de teclado (`mpbindings.png`). |
+| ↳ `installer/` | Scripts de integração e atualização automática (`updater.ps1`, `mpv-install.bat`). |
+
+### 2.6 Mapa da Arquitetura do Código
 
 ```text
 isdb_t_isdb_tb_tuner_player/
 ├── CMakeLists.txt              # Script de configuração do CMake
 ├── LICENSE                     # GNU General Public License v3.0 (GPLv3)
-├── README.md                   # Documentação principal
+├── README.md                   # Documentação principal em português
+├── README_en.md                # Documentação técnica em inglês
 ├── AGENTS.md                   # Invariantes arquiteturais rígidas para IA e desenvolvedores
 ├── include/
 │   ├── dsp/                    # Algoritmos de Camada Física (OfdmSync, OneSegDemod, Viterbi, RS, etc.)
@@ -179,8 +207,17 @@ isdb_t_isdb_tb_tuner_player/
 │   ├── main.cpp                # Ponto de entrada CLI, captura assíncrona USB e Job Object do MPV
 │   └── ...                     # Implementações C++ dos módulos de DSP, MPEG-TS e streaming
 ├── tools/
-│   ├── zadig.exe               # Utilitário oficial de instalação de drivers USB
-│   └── mpv/                    # Reprodutor MPV portátil com shaders de interpolação em tempo real
+│   ├── zadig.exe               # Utilitário oficial de instalação de drivers WinUSB (v2.9)
+│   ├── mpv/                    # Reprodutor MPV portátil x64 com pipeline de upscaling GPU
+│   │   ├── mpv.exe / mpv.conf  # Executável e perfil de renderização de vídeo e deband
+│   │   ├── doc/                # Manual oficial do MPV (PDF) e mapa de atalhos
+│   │   └── installer/          # Scripts de atualização e integração ao sistema
+│   └── rtl-sdr/                # Utilitários Osmocom RTL-SDR de diagnóstico e DLLs
+│       ├── rtl_test.exe        # Teste de estabilidade de barramento USB e perda de amostras
+│       ├── rtl_sdr.exe         # Gravador de amostras I/Q brutas de RF para testes offline
+│       ├── rtl_tcp.exe / fm    # Streaming I/Q em rede e receptor FM de teste
+│       ├── rtl_power.exe       # Analisador de espectro de RF e potência UHF
+│       └── librtlsdr.dll, etc. # DLLs de runtime do driver RTL-SDR e libusb
 ├── scripts/
 │   ├── build_release.ps1       # Automação de build, empacotamento e validação de releases
 │   ├── play_mpv.bat            # Script auxiliar de disparo manual do player MPV

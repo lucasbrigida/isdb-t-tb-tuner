@@ -189,7 +189,7 @@ Qualquer modelo de IA que receber tarefas neste projeto deve seguir rigorosament
 
 ## 🛠️ 6. Como Compilar e Rodar
 
-No Windows com `w64devkit` (GCC 16.2 / CMake):
+No Windows, o ambiente recomendado e homologado é o **[`w64devkit`](https://github.com/skeeto/w64devkit/releases)** (distribuição portátil MinGW-w64 com GCC, G++, GNU Make e BusyBox):
 
 ```powershell
 # Reconfigurar o CMake
@@ -201,8 +201,11 @@ cmake --build build -j
 # Rodar todos os testes unitários
 ctest --test-dir build --output-on-failure
 
-# Sintonizar e assistir em tempo real com VLC (udp://@127.0.0.1:1234)
-.\build\isdbtb_rx.exe play -c 23
+# Diagnosticar estabilidade e integridade USB do dongle (utilitário em tools/rtl-sdr/):
+.\tools\rtl-sdr\rtl_test.exe -s 2031746 -t
+
+# Sintonizar e assistir em tempo real com MPV integrado:
+.\build\isdbtb_rx.exe play -c 23 --player
 ```
 
 ---
