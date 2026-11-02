@@ -1,4 +1,5 @@
-#include "cli/commands.hpp"
+#include "sync/sync_factory.h"
+#include <fstream>
 #include "cli/channel_manager.hpp"
 #include "radio/frequency_plan.hpp"
 #include "radio/rtlsdr_device.hpp"
@@ -112,10 +113,16 @@ static std::string format_channel_line(const ChannelInfo& ch, bool is_selected, 
 }
 
 int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_port,
-             int dev_idx, bool test_pattern, double gain_db, bool auto_player, bool verbose) {
+             int dev_idx, bool test_pattern, double gain_db, bool auto_player, bool verbose,
+             int ofdm_mode, const std::string& input_file, const std::string& output_ts_file, bool headless) {
 #ifdef _WIN32
     SetPriorityClass(GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS);
 #endif
+
+    std::ofstream file_ts_out;
+    if (!output_ts_file.empty()) {
+        file_ts_out.open(output_ts_file, std::ios::binary);
+    }
 
     ChannelManager mgr;
     const auto& saved_channels = mgr.get_channels();
@@ -133,38 +140,44 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
     std::string ch_name = "Canal Desconhecido";
     int active_channel_num = channel_number;
 
-    if (target) {
-        freq_hz = target->frequency_hz;
-        ch_name = target->name;
-        active_channel_num = target->channel_number;
-    } else if (channel_number > 0) {
-        freq_hz = get_channel_freq(channel_number);
-        ch_name = "Canal " + std::to_string(channel_number);
-    } else {
-        std::cerr << "[ERRO] Nenhum canal especificado ou salvo. Use --channel <num> ou execute 'scan'.\n";
-        return 1;
-    }
-
-    // 1. Inicializa o hardware RTL-SDR ANTES de desenhar a interface
     rtlsdr_dev_t* dev = nullptr;
-    if (rtlsdr_open(&dev, static_cast<uint32_t>(dev_idx)) != 0) {
-        std::cerr << "[ERRO] Falha ao abrir dongle RTL-SDR #" << dev_idx << "\n";
-        return 1;
-    }
-
-    rtlsdr_reset_buffer(dev);
     constexpr uint32_t sample_rate = constants::SAMPLE_RATE;
-    rtlsdr_set_sample_rate(dev, sample_rate);
-    rtlsdr_set_tuner_gain_mode(dev, 1);
-    int gain_tenths = static_cast<int>(std::round(gain_db * 10.0));
-    rtlsdr_set_tuner_gain(dev, gain_tenths);
-    rtlsdr_set_agc_mode(dev, 0);
-    safe_set_freq(dev, freq_hz);
+
+    if (!input_file.empty()) {
+        ch_name = "Arquivo IQ";
+        active_channel_num = (channel_number > 0) ? channel_number : 18;
+    } else {
+        if (target) {
+            freq_hz = target->frequency_hz;
+            ch_name = target->name;
+            active_channel_num = target->channel_number;
+        } else if (channel_number > 0) {
+            freq_hz = get_channel_freq(channel_number);
+            ch_name = "Canal " + std::to_string(channel_number);
+        } else {
+            std::cerr << "[ERRO] Nenhum canal especificado ou salvo. Use --channel <num> ou execute 'scan'.\n";
+            return 1;
+        }
+
+        // 1. Inicializa o hardware RTL-SDR ANTES de desenhar a interface
+        if (rtlsdr_open(&dev, static_cast<uint32_t>(dev_idx)) != 0) {
+            std::cerr << "[ERRO] Falha ao abrir dongle RTL-SDR #" << dev_idx << "\n";
+            return 1;
+        }
+
+        rtlsdr_reset_buffer(dev);
+        rtlsdr_set_sample_rate(dev, sample_rate);
+        rtlsdr_set_tuner_gain_mode(dev, 1);
+        int gain_tenths = static_cast<int>(std::round(gain_db * 10.0));
+        rtlsdr_set_tuner_gain(dev, gain_tenths);
+        rtlsdr_set_agc_mode(dev, 0);
+        safe_set_freq(dev, freq_hz);
+    }
 
     // 2. Inicializa o streamer UDP
     UdpStreamer streamer("127.0.0.1", udp_port);
     if (!streamer.start()) {
-        rtlsdr_close(dev);
+        if (dev) rtlsdr_close(dev);
         return 1;
     }
 
@@ -178,14 +191,16 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
         streamer.flush();
     }
 
-    // 3. Limpa a tela para eliminar mensagens de inicializacao do driver librtlsdr
-    std::cout << "\033[2J\033[H" << std::flush;
+    if (!headless) {
+        // 3. Limpa a tela para eliminar mensagens de inicializacao do driver librtlsdr
+        std::cout << "\033[2J\033[H" << std::flush;
 
-    // 4. Exibe cabecalho e reprodutores de video
-    print_cli_header();
-    print_players_box(streamer.url());
-    if (auto_player) {
-        launch_mpv(udp_port);
+        // 4. Exibe cabecalho e reprodutores de video
+        print_cli_header();
+        print_players_box(streamer.url());
+        if (auto_player) {
+            launch_mpv(udp_port);
+        }
     }
 
     constexpr int VISIBLE_CHANNELS = 8;
@@ -266,8 +281,10 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
         std::cout << std::flush;
     };
 
-    // 5. Renderizacao inicial consistente
-    render_dynamic_ui(false);
+    // 5. Renderizacao inicial consistente (apenas modo interativo)
+    if (!headless) {
+        render_dynamic_ui(false);
+    }
 
     const size_t chunk_samples = 32768;
     const size_t chunk_bytes = chunk_samples * 2;
@@ -282,7 +299,7 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
 
     SharedPlaybackStatus shared_status;
 
-    // THREAD 1: Captura USB continua e retune seguro sem colisao
+    // THREAD 1: Captura continua (USB ou Arquivo IQ)
     std::thread reader_thread([&]() {
 #ifdef _WIN32
         SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
@@ -290,10 +307,20 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
         std::uint64_t sequence = 0;
         bool pending_discontinuity = false;
 
+        std::ifstream in_file;
+        if (!input_file.empty()) {
+            in_file.open(input_file, std::ios::binary);
+            if (!in_file.is_open()) {
+                std::cerr << "[ERRO] Nao foi possivel abrir arquivo de entrada: " << input_file << "\n";
+                reader_running.store(false, std::memory_order_release);
+                return;
+            }
+        }
+
         while (reader_running.load(std::memory_order_relaxed) && g_running) {
             uint32_t req_freq = retune_target_freq_hz.load(std::memory_order_acquire);
             if (req_freq != 0) {
-                safe_set_freq(dev, req_freq);
+                if (dev) safe_set_freq(dev, req_freq);
                 retune_target_freq_hz.store(0, std::memory_order_release);
                 pending_discontinuity = true;
                 retune_in_progress.store(false, std::memory_order_release);
@@ -301,10 +328,10 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
 
             SpscCaptureQueue<64>::WriteView view;
             if (!raw_queue->try_acquire_write(view)) {
-                raw_queue->record_drop();
+                if (input_file.empty()) raw_queue->record_drop();
                 ++sequence;
                 pending_discontinuity = true;
-                std::this_thread::sleep_for(std::chrono::microseconds(500));
+                std::this_thread::sleep_for(std::chrono::microseconds(200));
                 continue;
             }
 
@@ -313,20 +340,32 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
             block->size = 0;
             block->discontinuity_before = pending_discontinuity;
 
-            int n_read = 0;
-            int r = rtlsdr_read_sync(dev, block->raw.data(), static_cast<int>(chunk_bytes), &n_read);
-            if (r < 0 || n_read != static_cast<int>(chunk_bytes)) {
-                block->discontinuity_before = true;
-                block->size = 0;
-                pending_discontinuity = true;
+            if (!input_file.empty()) {
+                in_file.read(reinterpret_cast<char*>(block->raw.data()), chunk_bytes);
+                std::streamsize n_read = in_file.gcount();
+                if (n_read <= 0) {
+                    break;
+                }
+                block->size = static_cast<size_t>(n_read);
                 raw_queue->publish_write(view);
-                continue;
-            }
+                pending_discontinuity = false;
+            } else {
+                int n_read = 0;
+                int r = rtlsdr_read_sync(dev, block->raw.data(), static_cast<int>(chunk_bytes), &n_read);
+                if (r < 0 || n_read != static_cast<int>(chunk_bytes)) {
+                    block->discontinuity_before = true;
+                    block->size = 0;
+                    pending_discontinuity = true;
+                    raw_queue->publish_write(view);
+                    continue;
+                }
 
-            block->size = static_cast<size_t>(n_read);
-            raw_queue->publish_write(view);
-            pending_discontinuity = false;
+                block->size = static_cast<size_t>(n_read);
+                raw_queue->publish_write(view);
+                pending_discontinuity = false;
+            }
         }
+        reader_running.store(false, std::memory_order_release);
     });
 
     // THREAD 2: Worker de DSP e Streaming UDP dedicado (continua rodando mesmo com menu aberto!)
@@ -393,6 +432,9 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
 
             SpscCaptureQueue<64>::ReadView view;
             if (!raw_queue->try_acquire_read(view)) {
+                if (!reader_running.load(std::memory_order_relaxed)) {
+                    break;
+                }
                 std::this_thread::sleep_for(std::chrono::microseconds(200));
                 continue;
             }
@@ -507,12 +549,18 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
                                 uint8_t pat_pkt[188];
                                 if (psi.build_pat_packet(pat_pkt)) {
                                     streamer.send_ts_packet(pat_pkt);
+                                    if (file_ts_out.is_open()) {
+                                        file_ts_out.write(reinterpret_cast<const char*>(pat_pkt), 188);
+                                    }
                                 }
                             }
                             last_pat_time = now_pat;
                         }
                         for (const auto& pkt : decoded_pkts) {
                             streamer.send_ts_packet(pkt.data());
+                            if (file_ts_out.is_open()) {
+                                file_ts_out.write(reinterpret_cast<const char*>(pkt.data()), 188);
+                            }
                             total_air_packets++;
                             dsp_metrics.valid_ts_packets++;
                         }
@@ -580,14 +628,22 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
         }
     });
 
-    // THREAD 3 (Main): Gerenciamento de CLI, menu e teclado interativo
-    auto last_render_time = std::chrono::steady_clock::now();
-    bool channel_name_learned = false;
+    if (headless) {
+        if (reader_thread.joinable()) {
+            reader_thread.join();
+        }
+        if (dsp_worker_thread.joinable()) {
+            dsp_worker_thread.join();
+        }
+    } else {
+        // THREAD 3 (Main): Gerenciamento de CLI, menu e teclado interativo
+        auto last_render_time = std::chrono::steady_clock::now();
+        bool channel_name_learned = false;
 
-    // Oculta o cursor durante a execucao para evitar piscamento
-    std::cout << "\033[?25l" << std::flush;
+        // Oculta o cursor durante a execucao para evitar piscamento
+        std::cout << "\033[?25l" << std::flush;
 
-    while (g_running) {
+        while (g_running) {
         if (console_kbhit()) {
             int key = console_getch();
             bool need_redraw = false;
@@ -738,6 +794,8 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
 
     // Restaura o cursor do terminal
     std::cout << "\033[?25h\n\n[Encerrando] Fechando player, dongle RTL-SDR e encerrando stream UDP...\n";
+    }
+
     reader_running.store(false, std::memory_order_release);
     dsp_running.store(false, std::memory_order_release);
     g_running = false;
@@ -750,10 +808,15 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
     }
 
     stop_player();
-    rtlsdr_reset_buffer(dev);
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    rtlsdr_close(dev);
+    if (dev) {
+        rtlsdr_reset_buffer(dev);
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        rtlsdr_close(dev);
+    }
     streamer.stop();
+    if (file_ts_out.is_open()) {
+        file_ts_out.close();
+    }
     return 0;
 }
 

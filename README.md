@@ -331,3 +331,19 @@ Este projeto foi construído apoiando-se no trabalho e nas especificações de e
 
 Este projeto é um software livre distribuído sob os termos da **GNU General Public License v3.0 (GPL-3.0-or-later)**.  
 Consulte o arquivo [`LICENSE`](LICENSE) para obter o texto integral da licença.
+
+### 2.5 Suíte de Benchmark & Testes de Regressão Locais
+
+`powershell
+# Executar todos os testes locais via ctest:
+ctest --test-dir build --output-on-failure
+
+# Executar o benchmark comparativo oficial entre os algoritmos de sincronismo:
+.\build\bench_sync.exe --compare
+
+# Executar com 5 repetições e média:
+.\build\bench_sync.exe --compare --repeat=5
+`
+
+### 2.6 Licença do Port gr-isdbt
+O algoritmo de sincronização robusto (--ofdm=2, implementado em src/sync/robust_grisdbt_sync.cpp) é derivado do projeto [gr-isdbt](https://github.com/git-artes/gr-isdbt) e está licenciado sob a **GNU General Public License v3.0 (GPLv3)**.

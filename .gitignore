@@ -6,6 +6,11 @@ channels.m3u
 
 # Test data captures
 tests/data/*.raw
+tests/golden/*current_run*.ts
+
+# Benchmark results
+bench/results/*.json
+!bench/results/.gitkeep
 
 # Compiled binaries
 *.exe
