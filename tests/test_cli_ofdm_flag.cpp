@@ -34,47 +34,71 @@ static std::string find_binary() {
     return "isdbtb_rx";
 }
 
+static int run_cmd(const std::string& cmd) {
+#ifdef _WIN32
+    std::string full_cmd = cmd + " > nul 2>&1";
+#else
+    std::string full_cmd = cmd + " > /dev/null 2>&1";
+#endif
+    return std::system(full_cmd.c_str());
+}
+
 int main() {
-    std::cout << "=== Teste de Regras CLI da Flag --ofdm (R1, R2, A1) ===\n";
+    std::cout << "=== Teste de Regras CLI da Flag --ofdm (Espaco e Sinal de Igual) ===\n";
 
     std::string bin = find_binary();
 
-    // 1. Testa que valores invalidos para --ofdm no subcomando play retornam erro (R1)
-    std::cout << "  [1/4] Testando play --ofdm=3 (valor invalido)...\n";
-    std::string cmd1 = bin + " play --ofdm=3 > nul 2>&1";
-#ifndef _WIN32
-    cmd1 = bin + " play --ofdm=3 > /dev/null 2>&1";
-#endif
-    int code_invalid = std::system(cmd1.c_str());
-    TEST_ASSERT(code_invalid != 0);
+    // 1. Testa aceitacao de --ofdm 1 e --ofdm 2 no subcomando play (sintaxe separada por espaco)
+    std::cout << "  [1/7] Testando play --help --ofdm 1 e --ofdm 2 (espaco)...\n";
+    TEST_ASSERT(run_cmd(bin + " play --help --ofdm 1") == 0);
+    TEST_ASSERT(run_cmd(bin + " play --help --ofdm 2") == 0);
 
-    // 2. Testa que --ofdm eh silenciosamente ignorada no subcomando scan (R2, A1)
-    std::cout << "  [2/4] Testando scan --ofdm=2 (deve ignorar silenciosamente)...\n";
-    std::string cmd2 = bin + " scan --help --ofdm=2 > nul 2>&1";
-#ifndef _WIN32
-    cmd2 = bin + " scan --help --ofdm=2 > /dev/null 2>&1";
-#endif
-    int code_scan_ignore = std::system(cmd2.c_str());
-    TEST_ASSERT(code_scan_ignore == 0);
+    // 2. Testa aceitacao de --ofdm=1 e --ofdm=2 no subcomando play (sintaxe com sinal de igual)
+    std::cout << "  [2/7] Testando play --help --ofdm=1 e --ofdm=2 (sinal de igual)...\n";
+    TEST_ASSERT(run_cmd(bin + " play --help --ofdm=1") == 0);
+    TEST_ASSERT(run_cmd(bin + " play --help --ofdm=2") == 0);
 
-    // 3. Testa que --ofdm eh silenciosamente ignorada no subcomando probe (R2, A1)
-    std::cout << "  [3/4] Testando probe --ofdm=1 (deve ignorar silenciosamente)...\n";
-    std::string cmd3 = bin + " probe --help --ofdm=1 > nul 2>&1";
-#ifndef _WIN32
-    cmd3 = bin + " probe --help --ofdm=1 > /dev/null 2>&1";
-#endif
-    int code_probe_ignore = std::system(cmd3.c_str());
-    TEST_ASSERT(code_probe_ignore == 0);
+    // 3. Testa rejeicao de valores invalidos com espaco e sinal de igual no play
+    std::cout << "  [3/7] Testando play --ofdm 3 e play --ofdm=3 (valores invalidos)...\n";
+    TEST_ASSERT(run_cmd(bin + " play --ofdm 3") != 0);
+    TEST_ASSERT(run_cmd(bin + " play --ofdm=3") != 0);
 
-    // 4. Testa que --ofdm eh silenciosamente ignorada no comando global --help (R2, A1)
-    std::cout << "  [4/4] Testando --help --ofdm=2 (deve ignorar silenciosamente)...\n";
-    std::string cmd4 = bin + " --help --ofdm=2 > nul 2>&1";
-#ifndef _WIN32
-    cmd4 = bin + " --help --ofdm=2 > /dev/null 2>&1";
-#endif
-    int code_help_ignore = std::system(cmd4.c_str());
-    TEST_ASSERT(code_help_ignore == 0);
+    // 4. Testa que --ofdm eh silenciosamente ignorada no scan (espaco e igual)
+    std::cout << "  [4/7] Testando scan --help --ofdm 2 e --ofdm=2 (deve ignorar)...\n";
+    TEST_ASSERT(run_cmd(bin + " scan --help --ofdm 2") == 0);
+    TEST_ASSERT(run_cmd(bin + " scan --help --ofdm=2") == 0);
 
-    std::cout << "[PASS] Todos os requisitos CLI de --ofdm foram validados com sucesso!\n";
+    // 5. Testa que --ofdm eh silenciosamente ignorada no probe (espaco e igual)
+    std::cout << "  [5/7] Testando probe --help --ofdm 1 e --ofdm=1 (deve ignorar)...\n";
+    TEST_ASSERT(run_cmd(bin + " probe --help --ofdm 1") == 0);
+    TEST_ASSERT(run_cmd(bin + " probe --help --ofdm=1") == 0);
+
+    // 6. Testa que --ofdm eh silenciosamente ignorada no comando global --help (espaco e igual)
+    std::cout << "  [6/7] Testando --help --ofdm 2 e --help --ofdm=2 (deve ignorar)...\n";
+    TEST_ASSERT(run_cmd(bin + " --help --ofdm 2") == 0);
+    TEST_ASSERT(run_cmd(bin + " --help --ofdm=2") == 0);
+
+    // 7. Testa bench_sync com --ofdm 2 e --ofdm=2
+    std::cout << "  [7/7] Testando bench_sync --help --ofdm 2...\n";
+    std::string bench_bin = "bench_sync";
+    std::vector<std::string> bench_candidates = {
+        "bench_sync.exe",
+        ".\\bench_sync.exe",
+        "build\\bench_sync.exe",
+        ".\\build\\bench_sync.exe",
+        "./bench_sync.exe",
+        "build/bench_sync.exe",
+        "./bench_sync",
+        "build/bench_sync"
+    };
+    for (const auto& c : bench_candidates) {
+        if (fs::exists(c)) {
+            bench_bin = fs::canonical(c).make_preferred().string();
+            break;
+        }
+    }
+    TEST_ASSERT(run_cmd(bench_bin + " --help --ofdm 2") == 0);
+
+    std::cout << "[PASS] Todos os requisitos CLI de --ofdm (espaco e igual) foram validados com sucesso!\n";
     return 0;
 }

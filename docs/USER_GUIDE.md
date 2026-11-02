@@ -95,7 +95,7 @@ O MPV abrirá diretamente carregando as otimizações de GPU de `mpv.conf`:
 - **Interpolação Temporal (`display-resample` + `oversample`):** Converte a taxa de ~15/30 fps da TV móvel para 60Hz/120Hz/144Hz da tela, gerando movimentos fluidos sem engasgos.
 - **Debanding Dinâmico:** Remove artefatos de compressão e faixas de cores em tempo real.
 
-#### 📶 Escolha do Modo de Sincronismo OFDM (`--ofdm=<1|2>`):
+#### 📶 Escolha do Modo de Sincronismo OFDM (`--ofdm <1|2>`):
 O comando `play` permite selecionar o algoritmo de sincronismo OFDM através da flag `--ofdm`:
 
 ```powershell
@@ -104,13 +104,14 @@ O comando `play` permite selecionar o algoritmo de sincronismo OFDM através da 
 
 # Modo 2 (Reforçado): Port robusto do gr-isdbt com rastreamento ativo de timing por pilotos (SP),
 # correção de desvio de frequência fracionário e inteiro (CFO) e relógio de amostragem (SCO):
-.\isdbtb_rx.exe play -c 23 --ofdm=2 --player
+.\isdbtb_rx.exe play -c 23 --ofdm 2 --player
 ```
 
 > [!NOTE]
 > **Quando usar cada modo:**
-> - **`--ofdm=1` (Padrão):** Ideal para uso diário, notebooks com economia de bateria e estações de TV com sinal estável e boa visada direta da torre transmissora.
-> - **`--ofdm=2` (Reforçado):** Recomendado quando o sinal sofre com ecos de multi-percurso (reflexo em prédios), ruído elevado, antenas internas em locais difíceis ou recepção em movimento (desvio Doppler). Exige maior capacidade de processamento da CPU.
+> - **`--ofdm 1` (Padrão):** Ideal para uso diário, notebooks com economia de bateria e estações de TV com sinal estável e boa visada direta da torre transmissora.
+> - **`--ofdm 2` (Reforçado):** Recomendado quando o sinal sofre com ecos de multi-percurso (reflexo em prédios), ruído elevado, antenas internas em locais difíceis ou recepção em movimento (desvio Doppler). Exige maior capacidade de processamento da CPU.
+> - **Flexibilidade Sintática:** Aceita tanto argumento separado por espaço (`--ofdm 1` / `--ofdm 2`) quanto com sinal de igual (`--ofdm=1` / `--ofdm=2`).
 > - **Compatibilidade:** A flag `--ofdm` é exclusiva do comando `play`. Em qualquer outro comando (`scan`, `probe`), ela é silenciosamente ignorada sem gerar erros.
 
 > [!TIP]

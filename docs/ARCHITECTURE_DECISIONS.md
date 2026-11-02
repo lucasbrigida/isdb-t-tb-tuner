@@ -1,4 +1,4 @@
-﻿# 🏛️ Registros de Decisões de Arquitetura (ADR)
+# 🏛️ Registros de Decisões de Arquitetura (ADR)
 
 Este documento registra as decisões de engenharia fundamentais tomadas durante o design do decodificador ISDB-T/ISDB-Tb, suas alternativas avaliadas, justificativas matemáticas e de implementação.
 
@@ -713,13 +713,14 @@ Entretanto, uma das diretrizes fundamentais do projeto é a **Preservação Estr
 4. **Fábrica Polimórfica (src/sync/sync_factory.cpp):**
    Injeta a instância selecionada no pipeline de demodulação sem que estágios subsequentes (equalizador, Viterbi, RS) precisem saber qual algoritmo está ativo.
 5. **Controle por Linha de Comando:**
-   - Adicionada a flag --ofdm=<1|2> exclusivamente no subcomando play.
-   - --ofdm=1 é o valor padrão.
-   - Fora do subcomando play, a flag é silenciosamente ignorada.
+   - Adicionada a flag `--ofdm` exclusivamente no subcomando `play`, aceitando tanto argumentos separados por espaço (`--ofdm 1` / `--ofdm 2`) quanto por sinal de igual (`--ofdm=1` / `--ofdm=2`).
+   - `--ofdm 1` é o valor padrão.
+   - Fora do subcomando `play`, a flag é silenciosamente ignorada.
 
 ### Consequências
-- Zero risco de regressão: --ofdm=1 garante comportamento idêntico ao histórico do projeto.
-- Disponibilidade de modo reforçado --ofdm=2 para condições adversas de RF.
+- Zero risco de regressão: `--ofdm 1` garante comportamento idêntico ao histórico do projeto.
+- Disponibilidade de modo reforçado `--ofdm 2` para condições adversas de RF.
+- Flexibilidade e ergonomia no CLI: alinhamento sintático com os demais parâmetros (`-c 18`, `-p 1234`, `-g 28.0`).
 - Separação clara de responsabilidades com desacoplamento arquitetural.
 
 ---

@@ -74,8 +74,9 @@ Qualquer agente que editar o código-fonte deve respeitar estritamente as seguin
 ### 10. Dual-Mode de Sincronismo OFDM e Preservação Estrita do Baseline (`VanDeBeekSync`)
 - O sincronizador de Van de Beek (`src/dsp/ofdm_sync.cpp` e `include/dsp/ofdm_sync.hpp`) é o baseline de referência bit-a-bit inalterado (**REGRA DE OURO**). NUNCA altere sua lógica, sua FSM tripartite ou seus limiares.
 - A abstração `IOFDMSynchronizer` permite selecionar via fábrica `make_synchronizer`:
-  - `--ofdm=1` (`VanDeBeekSync`): Adaptador puro sobre a implementação existente.
-  - `--ofdm=2` (`RobustGRISDBTSync`): Port nativo de `gr-isdbt` (`src/sync/robust_grisdbt_sync.cpp`) com refinamento SP, CFO, SCO e FSM com histerese.
+  - `--ofdm 1` (`VanDeBeekSync`): Adaptador puro sobre a implementação existente.
+  - `--ofdm 2` (`RobustGRISDBTSync`): Port nativo de `gr-isdbt` (`src/sync/robust_grisdbt_sync.cpp`) com refinamento SP, CFO, SCO e FSM com histerese.
+- **Sintaxe da Flag:** Suporta tanto `--ofdm 1` / `--ofdm 2` (com espaço) quanto `--ofdm=1` / `--ofdm=2` (com sinal de igual).
 - **Regra da Flag:** `--ofdm` é exclusiva do comando `play`. Em qualquer outro comando (`scan`, `probe`), ela DEVE ser silenciosamente ignorada sem gerar erros.
 
 ### 11. Compilação Dual-Architecture (`TARGET_ARCH=x64` e `TARGET_ARCH=x86`)
@@ -249,7 +250,7 @@ Executados em qualquer ambiente sem necessidade de hardware SDR conectado (`ctes
 12. `test_frequency_plan`: Valida cálculo e sintonia de frequências UHF (canais 14 a 69) conforme ABNT NBR 15601.
 13. `test_channel_manager`: Valida operações de persistência e busca no `channels.json`.
 14. `test_psi_parser`: Valida resolução de nomes de emissoras via SDT e geração periódica de PAT de fallback.
-15. `test_cli_ofdm_flag`: Valida parsing da flag `--ofdm=<1|2>`, rejeição de valores inválidos e tolerância fora de `play`.
+15. `test_cli_ofdm_flag`: Valida parsing da flag `--ofdm` (`--ofdm 1`, `--ofdm 2`, `--ofdm=1`, `--ofdm=2`), rejeição de valores inválidos e tolerância fora de `play`.
 16. `test_sync_regression_scan`: Garante que o scanner não sofra regressão e opere sob o baseline de Van de Beek.
 17. `test_bench_ascii_table`: Valida a formatação de tabelas ASCII para exportação de dados de benchmark.
 18. `test_regression_ofdm1`: Teste de regressão determinístico do baseline Van de Beek sobre captura real de RF.

@@ -32,9 +32,9 @@ Universal native CLI decoder and player for ISDB-T / ISDB-Tb (1-Seg) digital TV 
 - `scan`: Two-pass deep channel scan across UHF frequencies (14 to 69) with automatic SDT station naming.
 - `list`: Display saved channels from `channels.json`.
 - `play`: Tune to a channel by number or station name, stream live MPEG-TS over UDP, and optionally launch embedded MPV (`--player`).
-  - `--ofdm=1` (Default): Lightweight Van de Beek baseline.
-  - `--ofdm=2`: Robust mode (gr-isdbt port) for weak, multi-path, or Doppler signals.
-  - Note: `--ofdm` only applies to `play` and is silently ignored on other subcommands.
+  - `--ofdm 1` (Default): Lightweight Van de Beek baseline.
+  - `--ofdm 2`: Robust mode (gr-isdbt port) for weak, multi-path, or Doppler signals.
+  - Note: Accepts both space (`--ofdm 1` / `--ofdm 2`) and equals (`--ofdm=1` / `--ofdm=2`) syntax. `--ofdm` only applies to `play` and is silently ignored on other subcommands.
 
 ## Build and Testing
 - Build system: CMake 3.20+ with MinGW-w64 (`w64devkit`) / GCC / MSVC.
@@ -59,7 +59,7 @@ Universal native CLI decoder and player for ISDB-T / ISDB-Tb (1-Seg) digital TV 
   12. `FrequencyPlan`: Frequency synthesis and carrier calculations for all 14–69 UHF channels.
   13. `ChannelManager`: In-memory operations and JSON persistence (`channels.json`).
   14. `PsiParser`: MPEG-TS PAT, PMT, and SDT parsing with station name extraction.
-  15. `CliOfdmFlag`: CLI parsing of `--ofdm=<1|2>` flag and silent ignoring outside `play`.
+  15. `CliOfdmFlag`: CLI parsing of `--ofdm` flag (`--ofdm 1`, `--ofdm 2`, `--ofdm=1`, `--ofdm=2`) and silent ignoring outside `play`.
   16. `SyncRegressionScan`: Non-regression verification of channel scanner under Van de Beek baseline.
   17. `BenchAsciiTable`: ASCII table formatting for benchmark telemetry reports.
   18. `RegressionOfdm1`: Van de Beek baseline regression test on reference broadcast dataset.

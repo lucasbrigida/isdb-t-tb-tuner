@@ -99,29 +99,31 @@ Abra o PowerShell ou Prompt de Comando (CMD) na pasta descompactada:
 # 4. Sintonizar um canal (ex: Canal 23) e abrir automaticamente o player MPV integrado:
 .\isdbtb_rx.exe play -c 23 --player
 
-# 5. Sintonizar no modo de sincronismo reforçado (--ofdm=2) para sinais fracos ou com reflexos:
-.\isdbtb_rx.exe play -c 23 --ofdm=2 --player
+# 5. Sintonizar no modo de sincronismo reforçado (--ofdm 2) para sinais fracos ou com reflexos:
+.\isdbtb_rx.exe play -c 23 --ofdm 2 --player
 
 # 6. Sintonizar com exibição do status detalhado de sinal em tempo real (-v / --verbose):
 .\isdbtb_rx.exe play -c 23 --player -v
 ```
 
-#### 📶 Escolha do Algoritmo de Sincronismo (`--ofdm=<N>`):
+#### 📶 Escolha do Algoritmo de Sincronismo (`--ofdm <1|2>`):
 O subcomando `play` permite escolher o algoritmo de sincronização OFDM através da flag `--ofdm`:
 
 ```text
-Uso: play [--ofdm=<modo>]
+Uso: play [--ofdm <1|2>]
 
-  --ofdm=1   Modo padrão. Mais leve e econômico (Van de Beek ML baseline).
-  --ofdm=2   Modo reforçado. Mantém a imagem estável com sinal
+  --ofdm 1   Modo padrão. Mais leve e econômico (Van de Beek ML baseline).
+  --ofdm 2   Modo reforçado. Mantém a imagem estável com sinal
              fraco, muito reflexo ou em movimento. Usa mais
              processamento.
 
 Sem a opção, o modo 1 é usado.
+Também aceita a sintaxe com sinal de igual (--ofdm=1 ou --ofdm=2).
 --ofdm só vale para 'play' e é ignorada nos demais comandos.
 
 Exemplos:
   play -c 23 --player
+  play -c 23 --ofdm 2 --player
   play -c 23 --ofdm=2 --player
 ```
 
@@ -190,7 +192,7 @@ cmake --build build_x86 -j
 
 #### Opções de Compilação no CMake
 - **`-DTARGET_ARCH=x64` / `-DTARGET_ARCH=x86`** _(Padrão: `auto`)_: Define a arquitetura do binário (`-m64` ou `-m32 -msse2 -mfpmath=sse`).
-- **`-DISDBT_ENABLE_GRISDBT_SYNC=ON`** _(Padrão: OFF)_: Habilita o algoritmo de sincronização robusto do `gr-isdbt` (`--ofdm=2`).
+- **`-DISDBT_ENABLE_GRISDBT_SYNC=ON`** _(Padrão: OFF)_: Habilita o algoritmo de sincronização robusto do `gr-isdbt` (`--ofdm 2` ou `--ofdm=2`).
 - **`-DCMAKE_BUILD_TYPE=Release`**: Ativa otimização `-O3 -DNDEBUG` (GCC/Clang) ou `/O2 /DNDEBUG` (MSVC), desativando assertions em runtime.
 - **`-DISDBT_ENABLE_FAST_MATH=ON`** _(Padrão: OFF)_: Adiciona `-ffast-math` ou `/fp:fast` para acelerar vetorizações AVX2/FMA no cálculo de métricas e NCO.
 - **Interprocedural Optimization (IPO / LTO)**: Detectado e habilitado automaticamente para builds de Release caso suportado pelo compilador (`CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON`).
@@ -220,7 +222,7 @@ Os 20 testes determinísticos cobrem:
 12. `FrequencyPlan`: Síntese de frequências e cálculo de portadoras para todos os canais UHF 14 a 69.
 13. `ChannelManager`: Operações em memória e persistência JSON (`channels.json`) entre plataformas.
 14. `PsiParser`: Parsers de MPEG-TS PAT, PMT e SDT com resolução de emissoras e síntese de PAT de fallback.
-15. `CliOfdmFlag`: Validação de parsing de linha de comando da flag `--ofdm=<1|2>`, rejeição estrita de valores inválidos e descarte silencioso fora de `play`.
+15. `CliOfdmFlag`: Validação de parsing de linha de comando da flag `--ofdm` (`--ofdm 1`, `--ofdm 2`, `--ofdm=1`, `--ofdm=2`), rejeição estrita de valores inválidos e descarte silencioso fora de `play`.
 16. `SyncRegressionScan`: Garantia de não-regressão do scanner, operando estritamente sob Van de Beek baseline.
 17. `BenchAsciiTable`: Formatador de tabelas ASCII para relatórios de telemetria e benchmark.
 18. `RegressionOfdm1`: Teste de regressão do modo Van de Beek baseline ancorado na amostra de referência de TV aberta.

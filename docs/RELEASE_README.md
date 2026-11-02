@@ -67,8 +67,8 @@ Sintoniza o canal e abre **automaticamente** a janela do player MPV embutido com
 # Reproduzir canal 23 com abertura automática do MPV (Modo padrão, leve):
 .\isdbtb_rx.exe play -c 23 --player
 
-# Reproduzir com modo de sincronismo reforçado (--ofdm=2) para sinais fracos ou com reflexos:
-.\isdbtb_rx.exe play -c 23 --ofdm=2 --player
+# Reproduzir com modo de sincronismo reforçado (--ofdm 2) para sinais fracos ou com reflexos:
+.\isdbtb_rx.exe play -c 23 --ofdm 2 --player
 
 # Ajustar ganho manual (se estiver muito próximo à antena de transmissão):
 .\isdbtb_rx.exe play -c 23 -g 28.0 --player
@@ -81,8 +81,9 @@ Sintoniza o canal e abre **automaticamente** a janela do player MPV embutido com
 ```
 
 > 📶 **Opções de Sincronismo OFDM (`--ofdm`):**
-> - `--ofdm=1` *(Padrão)*: Modo leve e econômico. Mais suave na CPU.
-> - `--ofdm=2`: Modo reforçado. Mantém a imagem estável com sinal fraco, muito reflexo ou em movimento. Usa mais processamento.
+> - `--ofdm 1` *(Padrão)*: Modo leve e econômico. Mais suave na CPU.
+> - `--ofdm 2`: Modo reforçado. Mantém a imagem estável com sinal fraco, muito reflexo ou em movimento. Usa mais processamento.
+> - *Aceita tanto sintaxe com espaço (`--ofdm 1` / `--ofdm 2`) quanto com sinal de igual (`--ofdm=1` / `--ofdm=2`).*
 > - *A flag `--ofdm` é exclusiva de `play` e é ignorada nos demais comandos.*
 
 > 💡 **Fechamento Automático:** O processo do MPV está vinculado a um *Job Object* do Windows. Ao fechar a CLI (pressionando `Ctrl+C` ou fechando a janela do console), o player MPV fecha instantaneamente sem deixar processos órfãos em segundo plano.
@@ -140,7 +141,7 @@ O MPV embutido nesta release foi pré-configurado especificamente para aprimorar
 - **Solução:**
   1. Observe o console da CLI: aguarde a indicação `TMCC: LOCK` e `TS do Ar: > 0 pkts`. O desentrelaçador de tempo convolucional do ISDB-T requer cerca de 1 a 2 segundos de sinal contínuo para reconstruir os primeiros quadros válidos de vídeo.
   2. Pressione a tecla `i` no MPV para verificar o fluxo de entrada.
-  3. Caso o sinal tenha muitos reflexos ou desvanecimento, experimente o modo reforçado: `.\isdbtb_rx.exe play -c <canal> --ofdm=2 --player`.
+  3. Caso o sinal tenha muitos reflexos ou desvanecimento, experimente o modo reforçado: `.\isdbtb_rx.exe play -c <canal> --ofdm 2 --player`.
 
 ### P5: Posso reproduzir o fluxo no VLC Media Player em vez do MPV?
 - **Sim!** O decodificador transmite o fluxo MPEG-TS padrão via UDP no formato de 1316 bytes (7 pacotes TS de 188B):

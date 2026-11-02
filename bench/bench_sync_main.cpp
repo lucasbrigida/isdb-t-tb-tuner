@@ -20,21 +20,30 @@ int main(int argc, char** argv) {
         std::string arg = argv[i];
         if (arg == "--compare") {
             compare_mode = true;
+        } else if (arg == "--ofdm" && i + 1 < argc) {
+            ofdm_mode = std::stoi(argv[++i]);
         } else if (arg.rfind("--ofdm=", 0) == 0) {
             ofdm_mode = std::stoi(arg.substr(7));
+        } else if ((arg == "--repeat" || arg == "-r") && i + 1 < argc) {
+            repeat_count = std::stoi(argv[++i]);
         } else if (arg.rfind("--repeat=", 0) == 0) {
             repeat_count = std::stoi(arg.substr(9));
+        } else if (arg == "--segment-of" && i + 1 < argc) {
+            segment_sec = std::stod(argv[++i]);
         } else if (arg.rfind("--segment-of=", 0) == 0) {
             segment_sec = std::stod(arg.substr(13));
+        } else if ((arg == "--input" || arg == "-i") && i + 1 < argc) {
+            iq_path = argv[++i];
         } else if (arg.rfind("--input=", 0) == 0) {
             iq_path = arg.substr(8);
         } else if (arg == "--help" || arg == "-h") {
             std::cout << "Uso: bench_sync [opcoes]\n"
-                      << "  --ofdm=<1|2>         Executa benchmark para o modo especificado (padrao 1)\n"
-                      << "  --compare            Compara ofdm=1 vs ofdm=2 com tabela ASCII\n"
-                      << "  --repeat=<N>         Executa N repeticoes e calcula media (ex: --repeat=5)\n"
-                      << "  --segment-of=<seg>   Segmenta amostra em janelas temporais de <seg> segundos\n"
-                      << "  --input=<caminho>    Caminho da amostra IQ (padrao samples/ch18_2min_iq.cu8)\n";
+                      << "  --ofdm <1|2>         Executa benchmark para o modo especificado (padrao: 1)\n"
+                      << "                       (tambem aceita --ofdm=1 ou --ofdm=2)\n"
+                      << "  --compare            Compara ofdm 1 vs ofdm 2 com tabela ASCII\n"
+                      << "  --repeat <N>         Executa N repeticoes e calcula media (ex: --repeat 5)\n"
+                      << "  --segment-of <seg>   Segmenta amostra em janelas temporais de <seg> segundos\n"
+                      << "  --input <caminho>    Caminho da amostra IQ (padrao samples/ch18_2min_iq.cu8)\n";
             return 0;
         }
     }
