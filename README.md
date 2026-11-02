@@ -144,7 +144,6 @@ Para compilação nativa no Windows com máxima velocidade e sem a sobrecarga de
 No terminal do Windows com ambiente MinGW-w64 (ex: `w64devkit`):
 
 ```powershell
-# 1. Configurar o projeto com CMake em modo Release
 # 1. Configurar o projeto com CMake em modo Release (-O3, -DNDEBUG e IPO/LTO habilitados automaticamente)
 cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
 
@@ -152,7 +151,7 @@ cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
 # Opcional: habilitar otimização de ponto flutuante rápido (-ffast-math / /fp:fast)
 cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DISDBT_ENABLE_FAST_MATH=ON
 
-# 2. Compilar o executável principal e a suíte completa de 10 testes unitários
+# 3. Compilar o executável principal e a suíte completa de 10 testes unitários
 cmake --build build -j
 ```
 
@@ -164,7 +163,7 @@ cmake --build build -j
 - **`-DISDBT_ENABLE_FAST_MATH=ON`** _(Padrão: OFF)_: Adiciona `-ffast-math` ou `/fp:fast` para acelerar vetorizações AVX2/FMA no cálculo de métricas e NCO.
 - **Interprocedural Optimization (IPO / LTO)**: Detectado e habilitado automaticamente para builds de Release caso suportado pelo compilador (`CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON`).
 
-### 2.3 Suíte de Testes Determinísticos (CTest - 10/10 Testes)
+### 2.3 Suíte de Testes Determinísticos (CTest - 14/14 Testes)
 
 O projeto conta com testes unitários matemáticos que rodam em frações de segundo e não dependem de rádio físico conectado:
 

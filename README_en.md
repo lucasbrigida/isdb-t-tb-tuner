@@ -145,7 +145,6 @@ For native Windows compilation with maximum speed and without the bloat of heavy
 In a Windows terminal with MinGW-w64 (e.g. `w64devkit`):
 
 ```powershell
-# 1. Configure CMake in Release mode
 # 1. Configure CMake in Release mode (-O3, -DNDEBUG, and IPO/LTO enabled automatically)
 cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
 
@@ -153,7 +152,7 @@ cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
 # Optional: enable fast floating-point optimizations (-ffast-math / /fp:fast)
 cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DISDBT_ENABLE_FAST_MATH=ON
 
-# 2. Build the main executable and the full 10-test unit test suite
+# 3. Build the main executable and the full 14-test unit test suite
 cmake --build build -j
 ```
 
@@ -165,7 +164,7 @@ cmake --build build -j
 - **`-DISDBT_ENABLE_FAST_MATH=ON`** _(Default: OFF)_: Injects `-ffast-math` or `/fp:fast` to enable aggressive AVX2/FMA vectorization across MMSE equalization, NCO phase accumulation, and soft metric calculations.
 - **Interprocedural Optimization (IPO / LTO)**: Automatically checked and enabled for Release configurations (`CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON`), allowing cross-translation-unit inlining of hot-path functions (`ReedSolomon::gf_mul`, `FixedDelayLine::push_and_get`, `SpscCaptureQueue::try_acquire_read`).
 
-### 2.3 Deterministic Unit Test Suite (CTest - 10/10 Tests Passed)
+### 2.3 Deterministic Unit Test Suite (CTest - 14/14 Tests Passed)
 
 All core physical layer and FEC blocks feature deterministic mathematical test suites that run in fractions of a second without requiring physical radio hardware:
 

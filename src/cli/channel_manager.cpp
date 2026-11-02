@@ -20,7 +20,8 @@ std::string ChannelManager::get_default_config_path() {
 #endif
 }
 
-ChannelManager::ChannelManager() : config_path_(get_default_config_path()) {
+ChannelManager::ChannelManager(const std::string& custom_path)
+    : config_path_(custom_path.empty() ? get_default_config_path() : custom_path) {
     load();
 }
 
@@ -106,13 +107,15 @@ const ChannelInfo* ChannelManager::find_by_number(int ch_num) const {
 }
 
 const ChannelInfo* ChannelManager::find_by_name(const std::string& name_query) const {
-    std::string q = name_query;
-    std::transform(q.begin(), q.end(), q.begin(), ::tolower);
+    if (name_query.empty()) return nullptr;
+
+    std::string query_lower = name_query;
+    std::transform(query_lower.begin(), query_lower.end(), query_lower.begin(), ::tolower);
 
     for (const auto& ch : channels_) {
-        std::string n = ch.name;
-        std::transform(n.begin(), n.end(), n.begin(), ::tolower);
-        if (n.find(q) != std::string::npos) {
+        std::string ch_lower = ch.name;
+        std::transform(ch_lower.begin(), ch_lower.end(), ch_lower.begin(), ::tolower);
+        if (ch_lower.find(query_lower) != std::string::npos) {
             return &ch;
         }
     }

@@ -19,7 +19,7 @@ struct ChannelInfo {
 
 class ChannelManager {
 public:
-    ChannelManager();
+    explicit ChannelManager(const std::string& custom_path = "");
 
     bool load();
     bool save();
@@ -31,7 +31,6 @@ public:
     const ChannelInfo* find_by_number(int ch_num) const;
     const ChannelInfo* find_by_name(const std::string& name_query) const;
 
-
     static std::string get_default_config_path();
 
 private:
@@ -40,4 +39,3 @@ private:
 };
 
 } // namespace isdbt
-

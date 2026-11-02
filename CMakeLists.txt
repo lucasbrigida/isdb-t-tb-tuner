@@ -61,6 +61,14 @@ link_directories(
 # Sources
 set(SOURCES
     src/main.cpp
+    src/radio/frequency_plan.cpp
+    src/radio/rtlsdr_device.cpp
+    src/platform/platform_utils.cpp
+    src/cli/cmd_probe.cpp
+    src/cli/cmd_scan.cpp
+    src/cli/cmd_list.cpp
+    src/cli/cmd_play.cpp
+    src/cli/channel_manager.cpp
     src/dsp/reed_solomon.cpp
     src/dsp/descrambler.cpp
     src/dsp/viterbi_decoder.cpp
@@ -69,7 +77,6 @@ set(SOURCES
     src/streaming/udp_streamer.cpp
     src/mpegts/psi_parser.cpp
     src/mpegts/ts_generator.cpp
-    src/cli/channel_manager.cpp
 )
 
 add_executable(isdbtb_rx ${SOURCES})
@@ -155,6 +162,21 @@ add_executable(test_sync_state_and_csi
 )
 target_link_libraries(test_sync_state_and_csi PRIVATE ${DSP_EXTERNAL_LIBS})
 
+add_executable(test_frequency_plan
+    tests/test_frequency_plan.cpp
+    src/radio/frequency_plan.cpp
+)
+
+add_executable(test_channel_manager
+    tests/test_channel_manager.cpp
+    src/cli/channel_manager.cpp
+)
+
+add_executable(test_psi_parser
+    tests/test_psi_parser.cpp
+    src/mpegts/psi_parser.cpp
+)
+
 # CTest Integration
 enable_testing()
 add_test(NAME ReedSolomon COMMAND test_reed_solomon)
@@ -168,6 +190,9 @@ add_test(NAME SpscQueue COMMAND test_spsc_queue)
 add_test(NAME DelayLine COMMAND test_delay_line)
 add_test(NAME ResetRecovery COMMAND test_reset_recovery)
 add_test(NAME SyncStateAndCsi COMMAND test_sync_state_and_csi)
+add_test(NAME FrequencyPlan COMMAND test_frequency_plan)
+add_test(NAME ChannelManager COMMAND test_channel_manager)
+add_test(NAME PsiParser COMMAND test_psi_parser)
 
 if(WIN32)
     target_link_libraries(isdbtb_rx PRIVATE ws2_32 shell32)
