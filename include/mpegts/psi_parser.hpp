@@ -40,6 +40,11 @@ public:
     }
 
     /**
+     * @brief Retorna true se ja houver ao menos um PMT conhecido mapeado.
+     */
+    bool has_pmt() const noexcept { return !pmt_pids_.empty(); }
+
+    /**
      * @brief Constroi um pacote MPEG-TS PAT (PID 0x0000) de 188 bytes mapeando o servico 1-Seg
      *        descoberto (ex: PMT em PID 0x1FC8), necessario para que players como o VLC
      *        descubram automaticamente o programa em recepcao parcial ISDB-Tb.
@@ -47,6 +52,12 @@ public:
      * @return true se ja houver um PMT conhecido e o pacote PAT foi gerado.
      */
     bool build_pat_packet(uint8_t* out_ts188);
+
+    /**
+     * @brief Limpa todos os servicos e mapeamentos acumulados e incrementa o numero de versao
+     *        da PAT para forcar o demuxer do player (VLC/MPV) a re-sincronizar os novos streams.
+     */
+    void reset();
 
 private:
     void parse_pat(const uint8_t* payload, size_t len);
@@ -56,6 +67,7 @@ private:
     std::map<uint16_t, ProgramService> services_; // service_id -> ProgramService
     std::map<uint16_t, uint16_t> pmt_pids_;       // pmt_pid -> service_id
     uint8_t pat_cc_ = 0;
+    uint8_t pat_version_ = 1;
 };
 
 } // namespace isdbt
