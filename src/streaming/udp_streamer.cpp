@@ -1,6 +1,7 @@
 #include "streaming/udp_streamer.hpp"
 #include <iostream>
 #include <array>
+#include <cstring>
 
 #ifdef _WIN32
     #include <winsock2.h>
@@ -116,6 +117,42 @@ void UdpStreamer::flush() {
     sendto(s, reinterpret_cast<const char*>(buffer_.data()), static_cast<int>(buffer_.size()), 0,
            reinterpret_cast<sockaddr*>(&dest_addr), sizeof(dest_addr));
     buffer_.clear();
+}
+
+void UdpStreamer::send_discontinuity_burst() {
+    if (!is_running_) return;
+    flush(); // Envia quaisquer pacotes pendentes antes da descontinuidade
+
+    // Pacote MPEG-TS de 188 bytes com flag de descontinuidade no campo de adaptacao:
+    // Sync(0x47), PID 0x0000, adaptation_field_control = 0x20 (somente adaptacao),
+    // adaptation_length = 183, discontinuity_indicator = 1 (bit 7 = 0x80), seguido de 182 bytes 0xFF
+    uint8_t disc_pkt[TS_PACKET_SIZE];
+    std::memset(disc_pkt, 0xFF, TS_PACKET_SIZE);
+    disc_pkt[0] = 0x47;
+    disc_pkt[1] = 0x00;
+    disc_pkt[2] = 0x00;
+    disc_pkt[3] = 0x20; // adaptation only
+    disc_pkt[4] = 183;  // adaptation field length
+    disc_pkt[5] = 0x80; // discontinuity_indicator = 1
+
+    for (size_t i = 0; i < PACKETS_PER_UDP; ++i) {
+        buffer_.insert(buffer_.end(), disc_pkt, disc_pkt + TS_PACKET_SIZE);
+    }
+    flush();
+}
+
+void UdpStreamer::send_null_burst(size_t packet_count) {
+    if (!is_running_) return;
+    uint8_t null_pkt[TS_PACKET_SIZE];
+    std::memset(null_pkt, 0xFF, TS_PACKET_SIZE);
+    null_pkt[0] = 0x47;
+    null_pkt[1] = 0x1F;
+    null_pkt[2] = 0xFF;
+    null_pkt[3] = 0x10; // payload only, CC = 0
+
+    for (size_t i = 0; i < packet_count; ++i) {
+        send_ts_packet(null_pkt);
+    }
 }
 
 std::string UdpStreamer::url() const {
