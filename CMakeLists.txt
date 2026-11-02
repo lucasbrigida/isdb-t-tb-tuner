@@ -5,9 +5,34 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+if(WIN32)
+    add_compile_definitions(_WIN32_WINNT=0x0600)
+endif()
+
 # Opcoes de otimizacao para builds de Release
 option(ISDBT_ENABLE_FAST_MATH "Habilitar otimizacao de ponto flutuante rapido (-ffast-math / /fp:fast)" OFF)
 option(ISDBT_ENABLE_GRISDBT_SYNC "Habilitar algoritmo de sincronizacao robusto do gr-isdbt (--ofdm=2)" OFF)
+set(TARGET_ARCH "auto" CACHE STRING "Arquitetura alvo: auto, x64 ou x86")
+
+if(TARGET_ARCH STREQUAL "x86" OR TARGET_ARCH STREQUAL "32")
+    message(STATUS "Configurando compilacao para 32 bits (x86 / -m32)")
+    add_compile_options(-m32 -msse2 -mfpmath=sse)
+    add_link_options(-m32)
+    set(IS_32BIT TRUE)
+elseif(TARGET_ARCH STREQUAL "x64" OR TARGET_ARCH STREQUAL "64")
+    message(STATUS "Configurando compilacao para 64 bits (x64 / -m64)")
+    add_compile_options(-m64)
+    add_link_options(-m64)
+    set(IS_32BIT FALSE)
+else()
+    if(CMAKE_SIZEOF_VOID_P EQUAL 4)
+        set(IS_32BIT TRUE)
+        message(STATUS "Arquitetura detectada automaticamente: 32 bits (x86)")
+    else()
+        set(IS_32BIT FALSE)
+        message(STATUS "Arquitetura detectada automaticamente: 64 bits (x64)")
+    endif()
+endif()
 
 if(ISDBT_ENABLE_GRISDBT_SYNC)
     add_compile_definitions(ISDBT_ENABLE_GRISDBT_SYNC=1)
@@ -309,18 +334,38 @@ if(WIN32)
         )
     endif()
 
-    if(EXISTS "${SETUP_DIR}/librtlsdr.dll")
-        list(APPEND DLLS_TO_COPY
-            "${SETUP_DIR}/librtlsdr.dll"
-            "${SETUP_DIR}/libusb-1.0.dll"
-            "${SETUP_DIR}/libwinpthread-1.dll"
-        )
-    elseif(EXISTS "${RTLSDR_ROOT}/x64/rtlsdr.dll")
-        list(APPEND DLLS_TO_COPY
-            "${RTLSDR_ROOT}/x64/rtlsdr.dll"
-            "${RTLSDR_ROOT}/x64/pthreadVC2.dll"
-            "${RTLSDR_ROOT}/x64/msvcr100.dll"
-        )
+    if(IS_32BIT)
+        if(EXISTS "${SETUP_DIR}/x86/librtlsdr.dll")
+            list(APPEND DLLS_TO_COPY "${SETUP_DIR}/x86/librtlsdr.dll")
+            if(EXISTS "${SETUP_DIR}/x86/libusb-1.0.dll")
+                list(APPEND DLLS_TO_COPY "${SETUP_DIR}/x86/libusb-1.0.dll")
+            endif()
+            if(EXISTS "${SETUP_DIR}/x86/libwinpthread-1.dll")
+                list(APPEND DLLS_TO_COPY "${SETUP_DIR}/x86/libwinpthread-1.dll")
+            endif()
+        elseif(EXISTS "${SETUP_DIR}/librtlsdr.dll")
+            list(APPEND DLLS_TO_COPY "${SETUP_DIR}/librtlsdr.dll")
+        endif()
+    else()
+        if(EXISTS "${SETUP_DIR}/x64/librtlsdr.dll")
+            list(APPEND DLLS_TO_COPY
+                "${SETUP_DIR}/x64/librtlsdr.dll"
+                "${SETUP_DIR}/x64/libusb-1.0.dll"
+                "${SETUP_DIR}/x64/libwinpthread-1.dll"
+            )
+        elseif(EXISTS "${SETUP_DIR}/librtlsdr.dll")
+            list(APPEND DLLS_TO_COPY
+                "${SETUP_DIR}/librtlsdr.dll"
+                "${SETUP_DIR}/libusb-1.0.dll"
+                "${SETUP_DIR}/libwinpthread-1.dll"
+            )
+        elseif(EXISTS "${RTLSDR_ROOT}/x64/rtlsdr.dll")
+            list(APPEND DLLS_TO_COPY
+                "${RTLSDR_ROOT}/x64/rtlsdr.dll"
+                "${RTLSDR_ROOT}/x64/pthreadVC2.dll"
+                "${RTLSDR_ROOT}/x64/msvcr100.dll"
+            )
+        endif()
     endif()
 
     if(DLLS_TO_COPY)

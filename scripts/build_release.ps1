@@ -4,30 +4,37 @@
 
 .DESCRIPTION
     Este script automatiza:
-    1. A validação da plataforma escolhida (suporte atual: Windows x64).
-    2. A extração da versão a partir de CMakeLists.txt.
-    3. A compilação do projeto em modo Release (CMake / MinGW).
-    4. A execução da suíte de testes unitários determinísticos (CTest).
-    5. A verificação e coleta de dependências, utilitários (Zadig, MPV), scripts e licença (GPLv3).
-    6. O empacotamento do arquivo .zip em releases/<plataforma>/yyyymmdd_v<versao>.zip.
-    7. A validação estrita do conteúdo do .zip gerado (integridade de arquivos e tamanhos).
-    8. O cálculo e exibição do hash SHA-256.
+    1. A validação da plataforma escolhida (suporte atual: Windows).
+    2. O suporte à compilação multi-arquitetura: 64 bits (x64) e 32 bits (x86).
+    3. A extração da versão a partir de CMakeLists.txt.
+    4. A compilação do projeto em modo Release (CMake / MinGW) para cada arquitetura.
+    5. A execução da suíte de testes unitários determinísticos (CTest).
+    6. A verificação e coleta de dependências de 32 e 64 bits (RTL-SDR, Zadig, MPV), scripts e licença (GPLv3).
+    7. O empacotamento dos arquivos .zip em releases/<plataforma>/yyyymmdd_v<versao>_<arch>.zip.
+    8. A validação estrita do conteúdo e cabeçalhos PE (x86-64 vs i386) dos .zip gerados.
+    9. O cálculo e exibição do hash SHA-256 de cada release.
 
 .PARAMETER Platform
     Plataforma de destino: 'windows' (padrão), 'linux' ou 'macos'.
+
+.PARAMETER Arch
+    Arquitetura de destino: 'all' (padrão, gera ambos os zips), 'x64' ou 'x86'.
 
 .PARAMETER SkipTests
     Pula a execução dos testes unitários CTest.
 
 .PARAMETER SkipBuild
-    Pula a compilação do executável caso os binários já estejam prontos em build/.
+    Pula a compilação do executável caso os binários já estejam prontos.
 
 .PARAMETER Clean
-    Limpa o diretório build/ antes de compilar.
+    Limpa os diretórios de build antes de compilar.
 
 .EXAMPLE
-    .\scripts\build_release.ps1 -Platform windows
-    .\scripts\build_release.ps1 -Platform windows -SkipTests
+    .\scripts\build_release.ps1
+    .\scripts\build_release.ps1 -Arch all
+    .\scripts\build_release.ps1 -Arch x64
+    .\scripts\build_release.ps1 -Arch x86
+    .\scripts\build_release.ps1 -Platform windows -Arch all -SkipTests
 #>
 
 [CmdletBinding()]
@@ -35,6 +42,10 @@ param(
     [Parameter(Position = 0)]
     [ValidateSet('windows', 'linux', 'macos')]
     [string]$Platform = 'windows',
+
+    [Parameter(Position = 1)]
+    [ValidateSet('all', 'x64', 'x86', '64', '32')]
+    [string]$Arch = 'all',
 
     [switch]$SkipTests,
     [switch]$SkipBuild,
@@ -49,16 +60,26 @@ $repoRoot = (Resolve-Path "$PSScriptRoot\..").Path
 Set-Location $repoRoot
 
 Write-Host "`n==============================================================================" -ForegroundColor Cyan
-Write-Host "  ISDB-T / ISDB-Tb Tuner Player - Automação de Release ($Platform)" -ForegroundColor Cyan
+Write-Host "  ISDB-T / ISDB-Tb Tuner Player - Automação de Release ($Platform - $Arch)" -ForegroundColor Cyan
 Write-Host "==============================================================================`n" -ForegroundColor Cyan
 
 # 1. Validação de Plataforma
 if ($Platform -ne 'windows') {
     Write-Host "[INFO] Plataforma selecionada: '$Platform'" -ForegroundColor Yellow
-    Write-Host "[AVISO] O ambiente atual suporta compilação e empacotamento nativo no Windows x64." -ForegroundColor Yellow
+    Write-Host "[AVISO] O ambiente atual suporta compilação e empacotamento nativo no Windows (x64 e x86)." -ForegroundColor Yellow
     Write-Host "[AVISO] O empacotamento nativo para $Platform requer um host correspondente ou toolchain dedicado." -ForegroundColor Yellow
     Write-Host "[INFO] O diretório 'releases/$Platform' está pronto para futuras releases." -ForegroundColor Green
     exit 0
+}
+
+# Normaliza lista de arquiteturas
+$targetArchs = @()
+if ($Arch -eq 'all') {
+    $targetArchs = @('x64', 'x86')
+} elseif ($Arch -in @('x64', '64')) {
+    $targetArchs = @('x64')
+} elseif ($Arch -in @('x86', '32')) {
+    $targetArchs = @('x86')
 }
 
 # 2. Obtenção da Versão e Data
@@ -70,212 +91,239 @@ if (Test-Path "CMakeLists.txt") {
     }
 }
 $date = Get-Date -Format 'yyyyMMdd'
-$releaseName = "${date}_v${version}"
-$zipFileName = "${releaseName}.zip"
 $releasesDir = Join-Path $repoRoot "releases\$Platform"
-$zipPath = Join-Path $releasesDir $zipFileName
-$stagingDir = Join-Path $repoRoot "build\release_staging"
-
 New-Item -ItemType Directory -Force -Path $releasesDir | Out-Null
 
-Write-Host "⚙️  Metadados da Release:" -ForegroundColor White
+Write-Host "⚙️  Metadados Globais da Release:" -ForegroundColor White
 Write-Host "   - Versão do Projeto: $version" -ForegroundColor Gray
 Write-Host "   - Data do Build:     $date" -ForegroundColor Gray
-Write-Host "   - Arquivo Alvo:      $zipPath" -ForegroundColor Gray
+Write-Host "   - Arquiteturas Alvo: $($targetArchs -join ', ')" -ForegroundColor Gray
+Write-Host "   - Diretório Release: $releasesDir" -ForegroundColor Gray
 Write-Host ""
 
-# 3. Limpeza opcional
-if ($Clean) {
-    Write-Host "🧹 Limpando diretório build/..." -ForegroundColor Yellow
-    if (Test-Path "build") {
-        Remove-Item -Recurse -Force "build"
-    }
-}
-
-# 4. Compilação Release
-if (-not $SkipBuild) {
-    if (-not (Test-Path "build")) {
-        Write-Host "🔨 Configurando CMake (MinGW Makefiles, Release)..." -ForegroundColor Cyan
-        cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
-        if ($LASTEXITCODE -ne 0) { throw "Falha na configuração do CMake." }
-    }
-    Write-Host "🔨 Compilando isdbtb_rx..." -ForegroundColor Cyan
-    cmake --build build -j
-    if ($LASTEXITCODE -ne 0) { throw "Falha na compilação do executável." }
-} else {
-    Write-Host "⏩ Compilação ignorada (-SkipBuild ativo)." -ForegroundColor Yellow
-}
-
-# 5. Execução dos Testes Unitários
-if (-not $SkipTests) {
-    Write-Host "🧪 Executando suíte de testes unitários (CTest)..." -ForegroundColor Cyan
-    ctest --test-dir build --output-on-failure
-    if ($LASTEXITCODE -ne 0) {
-        throw "Erro: Um ou mais testes unitários falharam! A release foi cancelada."
-    }
-    Write-Host "✅ Todos os testes foram aprovados com 100% de sucesso!" -ForegroundColor Green
-} else {
-    Write-Host "⏩ Testes unitários ignorados (-SkipTests ativo)." -ForegroundColor Yellow
-}
-
-# 6. Verificação de Arquivos Obrigatórios
-Write-Host "`n🔍 Verificando integridade das dependências e ferramentas..." -ForegroundColor Cyan
-
-$requiredSourceFiles = @(
-    "build\isdbtb_rx.exe",
-    "build\librtlsdr.dll",
-    "build\libusb-1.0.dll",
-    "build\libwinpthread-1.dll",
-    "LICENSE",
-    "scripts\play_mpv.bat",
-    "tools\mpv\mpv.exe",
-    "tools\mpv\mpv.conf",
-    "tools\mpv\d3dcompiler_43.dll"
-)
-
-foreach ($file in $requiredSourceFiles) {
-    if (-not (Test-Path $file)) {
-        throw "Erro: Arquivo obrigatório não encontrado: $file"
-    }
-}
-
-# Checa ou baixa o zadig.exe se ausente
-$zadigPath = "tools\zadig.exe"
-if (-not (Test-Path $zadigPath)) {
-    Write-Host "⬇️  Zadig não encontrado localmente. Baixando Zadig 2.9 oficial..." -ForegroundColor Yellow
-    New-Item -ItemType Directory -Force -Path "tools" | Out-Null
-    curl.exe -L -o $zadigPath https://github.com/pbatard/libwdi/releases/download/v1.5.1/zadig-2.9.exe
-    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $zadigPath)) {
-        throw "Erro ao baixar o utilitário Zadig."
-    }
-}
-Write-Host "✅ Todas as ferramentas e dependências estão presentes." -ForegroundColor Green
-
-# 7. Montagem do Diretório de Staging
-Write-Host "`n📦 Montando estrutura da release em staging..." -ForegroundColor Cyan
-if (Test-Path $stagingDir) {
-    Remove-Item -Recurse -Force $stagingDir
-}
-New-Item -ItemType Directory -Force -Path "$stagingDir\scripts", "$stagingDir\tools\mpv" | Out-Null
-
-Copy-Item "build\isdbtb_rx.exe" "$stagingDir\"
-if (Test-Path "build\librtlsdr.dll") {
-    Copy-Item "build\librtlsdr.dll" "$stagingDir\"
-    Copy-Item "build\libusb-1.0.dll" "$stagingDir\"
-    Copy-Item "build\libwinpthread-1.dll" "$stagingDir\"
-} else {
-    Copy-Item "tools\rtl-sdr\librtlsdr.dll" "$stagingDir\"
-    Copy-Item "tools\rtl-sdr\libusb-1.0.dll" "$stagingDir\"
-    Copy-Item "tools\rtl-sdr\libwinpthread-1.dll" "$stagingDir\"
-}
-Copy-Item $zadigPath "$stagingDir\zadig.exe"
-Copy-Item "LICENSE" "$stagingDir\LICENSE"
-
-# Copia README da release
-if (Test-Path "docs\RELEASE_README.md") {
-    Copy-Item "docs\RELEASE_README.md" "$stagingDir\README.md"
-} elseif (Test-Path "README.md") {
-    Copy-Item "README.md" "$stagingDir\README.md"
-} else {
-    throw "Arquivo README.md não encontrado para inclusão na release."
-}
-
-if (Test-Path "README_en.md") {
-    Copy-Item "README_en.md" "$stagingDir\README_en.md"
-}
-
-# Scripts
-Copy-Item "scripts\play_mpv.bat" "$stagingDir\scripts\"
-if (Test-Path "scripts\play_mpv.ps1") {
-    Copy-Item "scripts\play_mpv.ps1" "$stagingDir\scripts\"
-}
-
-# Ferramentas MPV
-Copy-Item "tools\mpv\mpv.exe" "$stagingDir\tools\mpv\"
-Copy-Item "tools\mpv\mpv.conf" "$stagingDir\tools\mpv\"
-Copy-Item "tools\mpv\d3dcompiler_43.dll" "$stagingDir\tools\mpv\"
-
-# 8. Criação do Arquivo ZIP
-Write-Host "🗜️  Comprimindo arquivos para $zipPath..." -ForegroundColor Cyan
-if (Test-Path $zipPath) {
-    Remove-Item -Force $zipPath
-}
-
-# Utiliza a API nativa .NET ZipFile para garantir 100% de compatibilidade com o Windows Explorer (evita prefixo './' do bsdtar que faz o Explorer mostrar pasta vazia)
-Add-Type -AssemblyName System.IO.Compression.FileSystem
-[System.IO.Compression.ZipFile]::CreateFromDirectory($stagingDir, $zipPath, [System.IO.Compression.CompressionLevel]::Optimal, $false)
-
-if (-not (Test-Path $zipPath)) {
-    throw "Erro ao criar o arquivo ZIP da release."
-}
-
-# 9. Validação Estrita do Conteúdo do Arquivo ZIP Gerado
-Write-Host "`n🔎 Validando conteúdo do arquivo .zip gerado..." -ForegroundColor Cyan
-
-Add-Type -AssemblyName System.IO.Compression.FileSystem
-$zipArchive = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $zipPath).Path)
-
-$expectedEntries = @{
-    "isdbtb_rx.exe"               = 500000;   # > 500 KB
-    "librtlsdr.dll"               = 50000;    # > 50 KB
-    "libusb-1.0.dll"              = 50000;    # > 50 KB
-    "libwinpthread-1.dll"         = 20000;    # > 20 KB
-    "zadig.exe"                   = 1000000;  # > 1 MB
-    "LICENSE"                     = 10000;    # > 10 KB
-    "README.md"                   = 2000;     # > 2 KB
-    "README_en.md"                = 2000;     # > 2 KB
-    "scripts/play_mpv.bat"        = 200;      # > 200 bytes
-    "tools/mpv/mpv.exe"           = 50000000; # > 50 MB
-    "tools/mpv/mpv.conf"          = 500;      # > 500 bytes
-    "tools/mpv/d3dcompiler_43.dll"= 1000000;  # > 1 MB
-}
-
-$zipEntriesMap = @{}
-foreach ($entry in $zipArchive.Entries) {
-    $normalized = $entry.FullName.Replace('\', '/').TrimStart('./')
-    if (-not [string]::IsNullOrWhiteSpace($normalized) -and -not $normalized.EndsWith('/')) {
-        $zipEntriesMap[$normalized] = $entry.Length
-    }
-}
-$zipArchive.Dispose()
-
-$validationFailed = $false
-foreach ($expectedKey in $expectedEntries.Keys) {
-    if (-not $zipEntriesMap.ContainsKey($expectedKey)) {
-        Write-Host "❌ ARQUIVO AUSENTE NO ZIP: $expectedKey" -ForegroundColor Red
-        $validationFailed = $true
-    } else {
-        $size = $zipEntriesMap[$expectedKey]
-        $minSize = $expectedEntries[$expectedKey]
-        if ($size -lt $minSize) {
-            Write-Host "❌ ARQUIVO COM TAMANHO ANÔMALO: $expectedKey ($size bytes < $minSize bytes)" -ForegroundColor Red
-            $validationFailed = $true
-        } else {
-            Write-Host "  ✓ $expectedKey ($([math]::Round($size / 1KB, 1)) KB)" -ForegroundColor Green
+# 3. Garantir Dependências Externas Necessárias (Zadig, RTL-SDR e MPV)
+function Ensure-GlobalDependencies {
+    # 3.1 Zadig (universal 32/64 bits)
+    $zadigPath = "tools\zadig.exe"
+    if (-not (Test-Path $zadigPath)) {
+        Write-Host "⬇️  Zadig não encontrado localmente. Baixando Zadig 2.9 oficial..." -ForegroundColor Yellow
+        New-Item -ItemType Directory -Force -Path "tools" | Out-Null
+        curl.exe -L -o $zadigPath https://github.com/pbatard/libwdi/releases/download/v1.5.1/zadig-2.9.exe
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path $zadigPath)) {
+            throw "Erro ao baixar o utilitário Zadig."
         }
     }
+
+    # 3.2 RTL-SDR x64
+    New-Item -ItemType Directory -Force -Path "tools\rtl-sdr\x64" | Out-Null
+    if (Test-Path "tools\rtl-sdr\librtlsdr.dll") {
+        Copy-Item "tools\rtl-sdr\*.dll" "tools\rtl-sdr\x64\" -Force
+    }
+
+    # 3.3 RTL-SDR x86
+    New-Item -ItemType Directory -Force -Path "tools\rtl-sdr\x86" | Out-Null
+    if (-not (Test-Path "tools\rtl-sdr\x86\librtlsdr.dll")) {
+        Write-Host "⬇️  Baixando librtlsdr.dll oficial de 32 bits..." -ForegroundColor Yellow
+        $w32Zip = "tools\rtl-sdr\x86\rtlsdr_w32.zip"
+        curl.exe -L -o $w32Zip https://github.com/librtlsdr/librtlsdr/releases/download/v0.9.0/rtlsdr-bin-w32_dlldep.zip
+        tar.exe -xf $w32Zip -C "tools\rtl-sdr\x86"
+        Remove-Item -Force $w32Zip
+    }
+
+    # 3.4 MPV x86
+    New-Item -ItemType Directory -Force -Path "tools\mpv\x86" | Out-Null
+    if (-not (Test-Path "tools\mpv\x86\mpv.exe")) {
+        $mpv32Archive = "tools\mpv\x86\mpv32.7z"
+        if (-not (Test-Path $mpv32Archive)) {
+            Write-Host "⬇️  Baixando MPV oficial de 32 bits (i686)..." -ForegroundColor Yellow
+            curl.exe -L -o $mpv32Archive "https://sourceforge.net/projects/mpv-player-windows/files/32bit/mpv-i686-20261101-git-48fca90e8c.7z/download"
+        }
+        if (Test-Path $mpv32Archive) {
+            Write-Host "📦 Extraindo MPV 32 bits..." -ForegroundColor Cyan
+            tar.exe -xf $mpv32Archive -C "tools\mpv\x86"
+        }
+    }
+    if ((Test-Path "tools\mpv\mpv.conf") -and -not (Test-Path "tools\mpv\x86\mpv.conf")) {
+        Copy-Item "tools\mpv\mpv.conf" "tools\mpv\x86\mpv.conf" -Force
+    }
 }
 
-if ($validationFailed) {
-    throw "Erro: Falha na validação do pacote .zip gerado! Um ou mais arquivos obrigatórios estão corrompidos ou ausentes."
+Ensure-GlobalDependencies
+
+# 4. Função Principal de Build, Teste e Empacotamento para cada Arquitetura
+function Build-And-Package-Release([string]$targetArch) {
+    Write-Host "`n==============================================================================" -ForegroundColor Magenta
+    Write-Host "  Processando Arquitetura: $targetArch" -ForegroundColor Magenta
+    Write-Host "==============================================================================" -ForegroundColor Magenta
+
+    $buildDir = "build_$targetArch"
+    $stagingDir = "$buildDir\release_staging"
+    $zipArchTag = if ($targetArch -eq 'x64') { 'win64' } else { 'win32' }
+    $zipFileName = "${date}_v${version}_${zipArchTag}.zip"
+    $zipPath = Join-Path $releasesDir $zipFileName
+
+    # Limpeza opcional
+    if ($Clean -and (Test-Path $buildDir)) {
+        Write-Host "🧹 Limpando diretório $buildDir..." -ForegroundColor Yellow
+        Remove-Item -Recurse -Force $buildDir
+    }
+
+    # Compilação
+    if (-not $SkipBuild) {
+        if (-not (Test-Path $buildDir)) {
+            Write-Host "🔨 Configurando CMake ($targetArch, Release)..." -ForegroundColor Cyan
+            cmake -S . -B $buildDir -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DTARGET_ARCH=$targetArch -DISDBT_ENABLE_GRISDBT_SYNC=ON
+            if ($LASTEXITCODE -ne 0) { throw "Falha na configuração do CMake para $targetArch." }
+        }
+        Write-Host "🔨 Compilando isdbtb_rx ($targetArch)..." -ForegroundColor Cyan
+        cmake --build $buildDir -j
+        if ($LASTEXITCODE -ne 0) { throw "Falha na compilação do executável para $targetArch." }
+    } else {
+        Write-Host "⏩ Compilação ignorada (-SkipBuild ativo)." -ForegroundColor Yellow
+    }
+
+    # Testes Unitários
+    if (-not $SkipTests) {
+        Write-Host "🧪 Executando testes unitários CTest ($targetArch)..." -ForegroundColor Cyan
+        ctest --test-dir $buildDir --output-on-failure -E BenchSync
+        if ($LASTEXITCODE -ne 0) {
+            throw "Erro: Um ou mais testes unitários falharam para $targetArch! Release abortada."
+        }
+        Write-Host "✅ Testes unitários para $targetArch aprovados com sucesso!" -ForegroundColor Green
+    } else {
+        Write-Host "⏩ Testes unitários ignorados (-SkipTests ativo)." -ForegroundColor Yellow
+    }
+
+    # Montagem do Staging
+    Write-Host "`n📦 Montando release $targetArch em staging ($stagingDir)..." -ForegroundColor Cyan
+    if (Test-Path $stagingDir) {
+        Remove-Item -Recurse -Force $stagingDir
+    }
+    New-Item -ItemType Directory -Force -Path "$stagingDir\scripts", "$stagingDir\tools\mpv" | Out-Null
+
+    # Executável principal
+    $mainExe = "$buildDir\isdbtb_rx.exe"
+    if (-not (Test-Path $mainExe)) {
+        throw "Erro: Executável principal não encontrado em $mainExe"
+    }
+    Copy-Item $mainExe "$stagingDir\"
+
+    # DLLs de RTL-SDR de acordo com a arquitetura
+    if ($targetArch -eq 'x64') {
+        if (Test-Path "$buildDir\librtlsdr.dll") {
+            Copy-Item "$buildDir\*.dll" "$stagingDir\" -Force
+        } else {
+            Copy-Item "tools\rtl-sdr\x64\*.dll" "$stagingDir\" -Force
+        }
+    } else {
+        if (Test-Path "$buildDir\librtlsdr.dll") {
+            Copy-Item "$buildDir\librtlsdr.dll" "$stagingDir\" -Force
+        } else {
+            Copy-Item "tools\rtl-sdr\x86\librtlsdr.dll" "$stagingDir\" -Force
+        }
+    }
+
+    # Ferramenta MPV
+    if ($targetArch -eq 'x64') {
+        Copy-Item "tools\mpv\mpv.exe" "$stagingDir\tools\mpv\"
+        Copy-Item "tools\mpv\mpv.conf" "$stagingDir\tools\mpv\"
+        if (Test-Path "tools\mpv\d3dcompiler_43.dll") {
+            Copy-Item "tools\mpv\d3dcompiler_43.dll" "$stagingDir\tools\mpv\"
+        }
+    } else {
+        Copy-Item "tools\mpv\x86\mpv.exe" "$stagingDir\tools\mpv\"
+        Copy-Item "tools\mpv\x86\mpv.conf" "$stagingDir\tools\mpv\"
+        if (Test-Path "tools\mpv\x86\d3dcompiler_43.dll") {
+            Copy-Item "tools\mpv\x86\d3dcompiler_43.dll" "$stagingDir\tools\mpv\"
+        }
+    }
+
+    # Zadig, Licença e Documentação
+    Copy-Item "tools\zadig.exe" "$stagingDir\zadig.exe"
+    Copy-Item "LICENSE" "$stagingDir\LICENSE"
+    if (Test-Path "docs\RELEASE_README.md") {
+        Copy-Item "docs\RELEASE_README.md" "$stagingDir\README.md"
+    } elseif (Test-Path "README.md") {
+        Copy-Item "README.md" "$stagingDir\README.md"
+    }
+    if (Test-Path "README_en.md") {
+        Copy-Item "README_en.md" "$stagingDir\README_en.md"
+    }
+    Copy-Item "scripts\play_mpv.bat" "$stagingDir\scripts\"
+    if (Test-Path "scripts\play_mpv.ps1") {
+        Copy-Item "scripts\play_mpv.ps1" "$stagingDir\scripts\"
+    }
+
+    # Compressão ZIP (.NET ZipFile)
+    Write-Host "🗜️  Comprimindo arquivos para $zipPath..." -ForegroundColor Cyan
+    if (Test-Path $zipPath) {
+        Remove-Item -Force $zipPath
+    }
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [System.IO.Compression.ZipFile]::CreateFromDirectory($stagingDir, $zipPath, [System.IO.Compression.CompressionLevel]::Optimal, $false)
+
+    if (-not (Test-Path $zipPath)) {
+        throw "Erro ao criar o arquivo ZIP da release ($zipPath)."
+    }
+
+    # Validação Estrita do Conteúdo e Arquitetura PE
+    Write-Host "🔎 Validando integridade e arquitetura PE do .zip gerado..." -ForegroundColor Cyan
+    $expectedPeArch = if ($targetArch -eq 'x64') { 'pei-x86-64' } else { 'pei-i386' }
+
+    $exeArchOut = objdump.exe -f "$stagingDir\isdbtb_rx.exe" 2>&1 | Out-String
+    if ($exeArchOut -notmatch $expectedPeArch) {
+        throw "Erro Crítico: isdbtb_rx.exe não possui a arquitetura esperada $expectedPeArch!"
+    }
+    Write-Host "  ✓ Arquitetura PE de isdbtb_rx.exe confirmada: $expectedPeArch" -ForegroundColor Green
+
+    $mpvArchOut = objdump.exe -f "$stagingDir\tools\mpv\mpv.exe" 2>&1 | Out-String
+    if ($mpvArchOut -notmatch $expectedPeArch) {
+        throw "Erro Crítico: tools/mpv/mpv.exe não possui a arquitetura esperada $expectedPeArch!"
+    }
+    Write-Host "  ✓ Arquitetura PE de tools/mpv/mpv.exe confirmada: $expectedPeArch" -ForegroundColor Green
+
+    # Limpeza de staging
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $stagingDir
+
+    # Resumo
+    $zipItem = Get-Item $zipPath
+    $zipSizeMB = [math]::Round($zipItem.Length / 1MB, 2)
+    $hash = (Get-FileHash $zipPath -Algorithm SHA256).Hash
+
+    $script:ReleaseResults.Add([PSCustomObject]@{
+        Arch    = $targetArch
+        Tag     = $zipArchTag
+        File    = $zipItem.Name
+        Path    = $zipPath
+        SizeMB  = $zipSizeMB
+        Bytes   = $zipItem.Length
+        Hash    = $hash
+    })
 }
-Write-Host "✅ Validação de integridade do .zip aprovada com sucesso!" -ForegroundColor Green
 
-# 10. Limpeza do Diretório de Staging
-Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $stagingDir
+# 5. Execução do Loop de Releases
+$script:ReleaseResults = [System.Collections.Generic.List[object]]::new()
+foreach ($a in $targetArchs) {
+    Build-And-Package-Release -targetArch $a
+}
 
-# 11. Hash Criptográfico e Sumário
-$zipItem = Get-Item $zipPath
-$zipSizeMB = [math]::Round($zipItem.Length / 1MB, 2)
-$hash = (Get-FileHash $zipPath -Algorithm SHA256).Hash
-
+# 6. Sumário Final
 Write-Host "`n==============================================================================" -ForegroundColor Green
-Write-Host "  🎉 RELEASE GERADA E VALIDADA COM SUCESSO!" -ForegroundColor Green
+Write-Host "  🎉 TODAS AS RELEASES FORAM GERADAS E VALIDADAS COM SUCESSO!" -ForegroundColor Green
 Write-Host "==============================================================================" -ForegroundColor Green
-Write-Host "  Plataforma:  $Platform" -ForegroundColor White
-Write-Host "  Arquivo:     $($zipItem.Name)" -ForegroundColor White
-Write-Host "  Caminho:     $zipPath" -ForegroundColor White
-Write-Host "  Tamanho:     $zipSizeMB MB ($($zipItem.Length) bytes)" -ForegroundColor White
-Write-Host "  SHA-256:     $hash" -ForegroundColor Yellow
+foreach ($r in $script:ReleaseResults) {
+    $rArch = $r.Arch
+    $rTag = $r.Tag
+    $rFile = $r.File
+    $rPath = $r.Path
+    $rSizeMB = $r.SizeMB
+    $rBytes = $r.Bytes
+    $rHash = $r.Hash
+    Write-Host "  [Release $rArch / $rTag]" -ForegroundColor White
+    Write-Host "    Arquivo:  $rFile" -ForegroundColor Gray
+    Write-Host "    Caminho:  $rPath" -ForegroundColor Gray
+    Write-Host "    Tamanho:  ${rSizeMB} MB (${rBytes} bytes)" -ForegroundColor Gray
+    Write-Host "    SHA-256:  $rHash" -ForegroundColor Yellow
+    Write-Host ""
+}
 Write-Host "==============================================================================`n" -ForegroundColor Green
-

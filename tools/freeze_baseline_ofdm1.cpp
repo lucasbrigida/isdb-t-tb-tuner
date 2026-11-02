@@ -17,6 +17,9 @@
 #ifdef _WIN32
 #include <windows.h>
 #include <wincrypt.h>
+#ifndef CALG_SHA_256
+#define CALG_SHA_256 0x0000800c
+#endif
 #else
 #include <openssl/sha.h>
 #endif

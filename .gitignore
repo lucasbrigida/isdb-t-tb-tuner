@@ -1,5 +1,7 @@
 # Build directories
 build/
+build*/
+releases/
 deps/
 channels.m3u
 .agents/

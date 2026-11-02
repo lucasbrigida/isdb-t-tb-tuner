@@ -65,6 +65,17 @@ static void signal_handler(int) {
     stop_player();
 }
 
+#ifdef _WIN32
+static BOOL WINAPI console_ctrl_handler(DWORD sig) {
+    if (sig == CTRL_C_EVENT || sig == CTRL_CLOSE_EVENT) {
+        g_running = false;
+        stop_player();
+        return TRUE;
+    }
+    return FALSE;
+}
+#endif
+
 void setup_platform() {
 #ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);
@@ -79,14 +90,7 @@ void setup_platform() {
         }
     }
 
-    SetConsoleCtrlHandler([](DWORD sig) -> BOOL {
-        if (sig == CTRL_C_EVENT || sig == CTRL_CLOSE_EVENT) {
-            g_running = false;
-            stop_player();
-            return TRUE;
-        }
-        return FALSE;
-    }, TRUE);
+    SetConsoleCtrlHandler(console_ctrl_handler, TRUE);
 #else
     std::signal(SIGINT, signal_handler);
     std::signal(SIGTERM, signal_handler);
@@ -97,9 +101,15 @@ bool launch_mpv(uint16_t udp_port) {
 #ifdef _WIN32
     std::string mpv_bin = "tools\\mpv\\mpv.exe";
     std::string conf_dir = "tools\\mpv";
-    if (!std::filesystem::exists(mpv_bin)) {
+    if (sizeof(void*) == 4 && std::filesystem::exists("tools\\mpv\\x86\\mpv.exe")) {
+        mpv_bin = "tools\\mpv\\x86\\mpv.exe";
+        conf_dir = "tools\\mpv\\x86";
+    } else if (!std::filesystem::exists(mpv_bin)) {
         auto root = std::filesystem::current_path();
-        if (std::filesystem::exists(root / "tools" / "mpv" / "mpv.exe")) {
+        if (sizeof(void*) == 4 && std::filesystem::exists(root / "tools" / "mpv" / "x86" / "mpv.exe")) {
+            mpv_bin = (root / "tools" / "mpv" / "x86" / "mpv.exe").string();
+            conf_dir = (root / "tools" / "mpv" / "x86").string();
+        } else if (std::filesystem::exists(root / "tools" / "mpv" / "mpv.exe")) {
             mpv_bin = (root / "tools" / "mpv" / "mpv.exe").string();
             conf_dir = (root / "tools" / "mpv").string();
         }

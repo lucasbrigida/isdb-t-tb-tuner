@@ -1,4 +1,4 @@
-# 📺 ISDB-T / ISDB-Tb One-Seg Receiver & Real-Time Player (Windows x64)
+# 📺 ISDB-T / ISDB-Tb One-Seg Receiver & Real-Time Player (Windows x64 / x86)
 
 Receptor de TV Digital aberta (**ISDB-T / ISDB-Tb / SBTVD**) para dongles **RTL-SDR** (RTL2832U com tuners R820T/R828D/E4000) com player **MPV embutido** e **interpolação de resolução e movimento em tempo real**.
 
