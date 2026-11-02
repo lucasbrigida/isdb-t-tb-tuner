@@ -64,8 +64,11 @@ Exibe a lista de emissoras salvas na varredura:
 ### 4. Reproduzir Canal com MPV Integrado (`play`)
 Sintoniza o canal e abre **automaticamente** a janela do player MPV embutido com interpolação de resolução e movimento ativada:
 ```powershell
-# Reproduzir canal 23 com abertura automática do MPV:
+# Reproduzir canal 23 com abertura automática do MPV (Modo padrão, leve):
 .\isdbtb_rx.exe play -c 23 --player
+
+# Reproduzir com modo de sincronismo reforçado (--ofdm=2) para sinais fracos ou com reflexos:
+.\isdbtb_rx.exe play -c 23 --ofdm=2 --player
 
 # Ajustar ganho manual (se estiver muito próximo à antena de transmissão):
 .\isdbtb_rx.exe play -c 23 -g 28.0 --player
@@ -76,6 +79,12 @@ Sintoniza o canal e abre **automaticamente** a janela do player MPV embutido com
 # Exibir status de telemetria em tempo real (RSSI, SNR, erros RS):
 .\isdbtb_rx.exe play -c 23 --player -v
 ```
+
+> 📶 **Opções de Sincronismo OFDM (`--ofdm`):**
+> - `--ofdm=1` *(Padrão)*: Modo leve e econômico. Mais suave na CPU.
+> - `--ofdm=2`: Modo reforçado. Mantém a imagem estável com sinal fraco, muito reflexo ou em movimento. Usa mais processamento.
+> - *A flag `--ofdm` é exclusiva de `play` e é ignorada nos demais comandos.*
+
 > 💡 **Fechamento Automático:** O processo do MPV está vinculado a um *Job Object* do Windows. Ao fechar a CLI (pressionando `Ctrl+C` ou fechando a janela do console), o player MPV fecha instantaneamente sem deixar processos órfãos em segundo plano.
 
 ---
@@ -131,6 +140,7 @@ O MPV embutido nesta release foi pré-configurado especificamente para aprimorar
 - **Solução:**
   1. Observe o console da CLI: aguarde a indicação `TMCC: LOCK` e `TS do Ar: > 0 pkts`. O desentrelaçador de tempo convolucional do ISDB-T requer cerca de 1 a 2 segundos de sinal contínuo para reconstruir os primeiros quadros válidos de vídeo.
   2. Pressione a tecla `i` no MPV para verificar o fluxo de entrada.
+  3. Caso o sinal tenha muitos reflexos ou desvanecimento, experimente o modo reforçado: `.\isdbtb_rx.exe play -c <canal> --ofdm=2 --player`.
 
 ### P5: Posso reproduzir o fluxo no VLC Media Player em vez do MPV?
 - **Sim!** O decodificador transmite o fluxo MPEG-TS padrão via UDP no formato de 1316 bytes (7 pacotes TS de 188B):
@@ -152,4 +162,3 @@ O MPV embutido nesta release foi pré-configurado especificamente para aprimorar
 - **librtlsdr / libusb:** Drivers de código aberto para dispositivos baseados em RTL2832U (GNU GPLv2+ / LGPLv2.1+).
 - **MPV:** Player multimídia de alta precisão (GNU GPLv2+).
 - **Zadig:** Utilitário para instalação de drivers USB no Windows (GNU GPLv3).
-

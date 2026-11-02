@@ -1,4 +1,4 @@
-# 🏛️ Registros de Decisões de Arquitetura (ADR)
+﻿# 🏛️ Registros de Decisões de Arquitetura (ADR)
 
 Este documento registra as decisões de engenharia fundamentais tomadas durante o design do decodificador ISDB-T/ISDB-Tb, suas alternativas avaliadas, justificativas matemáticas e de implementação.
 
@@ -35,6 +35,10 @@ Este documento registra as decisões de engenharia fundamentais tomadas durante 
 - [ADR 021 (Consolidated Refactoring ADR-010): Máquina de Estados Tripartite para Sincronismo Temporal OFDM (Acquisition, Tracking, LostLock)](#adr-021-refatoração-consolidada-adr-010-máquina-de-estados-tripartite-para-sincronismo-temporal-ofdm-acquisition-tracking-lostlock)
 - [ADR 022 (Consolidated Refactoring ADR-011): Tabela Direta de 64 KB em O(1) para Multiplicações em GF(2^8) no Reed-Solomon](#adr-022-refatoração-consolidada-adr-011-tabela-direta-de-64-kb-em-o1-para-multiplicações-em-campo-de-galois-gf28-no-reed-solomon-rs204-188)
 - [ADR 023 (Consolidated Refactoring ADR-012): Otimizações de Compilação de Produção (IPO/LTO, -O3, -DNDEBUG e FAST_MATH)](#adr-023-refatoração-consolidada-adr-012-otimizações-de-compilação-de-produção-ipolto--o3--dndebug-e-isdbt_enable_fast_math)
+
+### Fase 4: Sincronismo OFDM Avançado e Distribuição Multi-Arquitetura (ADR 024 – 025)
+- [ADR 024: Abstração de Sincronizador OFDM (IOFDMSynchronizer), Dual-Mode (--ofdm=1 Van de Beek vs --ofdm=2 Robust GRISDBT Sync) e Preservação Estrita do Baseline](#adr-024-abstração-de-sincronizador-ofdm-iofdmsynchronizer-dual-mode---ofdm1-van-de-beek-vs---ofdm2-robust-grisdbt-sync-e-preservação-estrita-do-baseline)
+- [ADR 025: Suporte Dual-Architecture (x86 32-bit e x64 64-bit) no CMake, MPV i686 Embutido e Automação de Releases Independentes](#adr-025-suporte-dual-architecture-x86-32-bit-e-x64-64-bit-no-cmake-mpv-i686-embutido-e-automação-de-releases-independentes)
 
 ---
 
@@ -685,4 +689,65 @@ Estruturar o sistema de compilação em `CMakeLists.txt` com as seguintes flags 
 ### Consequências
 - Código binário compacto, com inlining agressivo entre todos os módulos de DSP.
 - Execução suave e estável mesmo em CPUs de baixo consumo energético (Intel Celeron, mini-PCs ou Raspberry Pi 4/5).
+---
 
+## ADR 024: Abstração de Sincronizador OFDM (IOFDMSynchronizer), Dual-Mode (--ofdm=1 Van de Beek vs --ofdm=2 Robust GRISDBT Sync) e Preservação Estrita do Baseline
+
+### Contexto
+O algoritmo de sincronização OFDM original baseia-se no estimador de máxima verossimilhança (ML) de Van de Beek, operando via correlação de prefixo cíclico com FSM tripartite (Acquisition, Tracking $\pm 4$, LostLock). Embora muito eficiente computacionalmente, em ambientes de recepção com atenuação severa, desvanecimento Rayleigh multi-percurso intenso ou deslocamento Doppler (veículos em movimento), a correlação de prefixo cíclico pode sofrer dispersão temporal, retardando a recuperação de sincronismo. O projeto acadêmico de referência git-artes/gr-isdbt adota uma estratégia robusta com rastreamento contínuo de pilotos dispersos (SP), correção de desvio de frequência fracionário e inteiro (CFO), acumulação de desvio de relógio de amostragem (SCO) e histerese de re-bloqueio após 3 símbolos consecutivos válidos.
+
+Entretanto, uma das diretrizes fundamentais do projeto é a **Preservação Estrita do Baseline**: o algoritmo original de Van de Beek jamais pode sofrer regressão ou alteração de comportamento, devendo permanecer bit-a-bit idêntico e selecionável como padrão.
+
+### Decisão
+1. **Interface Abstrata Polimórfica (include/sync/iofdm_synchronizer.h):**
+   Criar a classe base abstrata pura IOFDMSynchronizer com os métodos virtuais process(), state() e eset().
+2. **Implementação do Baseline (VanDeBeekSync):**
+   Atuar estritamente como um Adaptador (*Adapter Pattern*) sobre a classe existente OfdmSync, mantendo src/dsp/ofdm_sync.cpp e include/dsp/ofdm_sync.hpp **100% inalterados**.
+3. **Implementação Robusta Portada (RobustGRISDBTSync):**
+   Reimplementar de forma nativa e autocontida (sem GNU Radio, boost ou pmt) as etapas do isdb_t_sync_impl.cc do gr-isdbt:
+   - Aquisição coarse por correlação de prefixo cíclico;
+   - Refinamento fino de timing por pilotos dispersos (SP);
+   - Estimação de CFO inteiro via TMCC e fracionário via SP;
+   - Rastreamento contínuo de SCO por deriva de fase acumulada;
+   - FSM de re-sincronização com histerese de 3 símbolos consecutivos.
+4. **Fábrica Polimórfica (src/sync/sync_factory.cpp):**
+   Injeta a instância selecionada no pipeline de demodulação sem que estágios subsequentes (equalizador, Viterbi, RS) precisem saber qual algoritmo está ativo.
+5. **Controle por Linha de Comando:**
+   - Adicionada a flag --ofdm=<1|2> exclusivamente no subcomando play.
+   - --ofdm=1 é o valor padrão.
+   - Fora do subcomando play, a flag é silenciosamente ignorada.
+
+### Consequências
+- Zero risco de regressão: --ofdm=1 garante comportamento idêntico ao histórico do projeto.
+- Disponibilidade de modo reforçado --ofdm=2 para condições adversas de RF.
+- Separação clara de responsabilidades com desacoplamento arquitetural.
+
+---
+
+## ADR 025: Suporte Dual-Architecture (x86 32-bit e x64 64-bit) no CMake, MPV i686 Embutido e Automação de Releases Independentes
+
+### Contexto
+Embora sistemas modernos Windows operem predominantemente em arquiteturas de 64 bits (x64), uma parcela expressiva de hardware legado, sistemas industriais embarcados, terminais portáteis e receptores antigos ainda utilizam Windows de 32 bits (x86 / i686). O receptor foi inicialmente compilado exclusivamente para 64 bits, e a biblioteca librtlsdr.dll e o reprodutor MPV embutidos eram binários de 64 bits, impossibilitando a execução em sistemas x86.
+
+### Decisão
+1. **Configuração Multi-Arquitetura no CMake (CMakeLists.txt):**
+   - Introduzir a opção TARGET_ARCH (x64, x86, uto).
+   - Para x64: aplicar -m64.
+   - Para x86: aplicar -m32 -msse2 -mfpmath=sse (garantindo consistência de aritmética de ponto flutuante IEEE-754 com registros XMM em vez do antigo coprocessador x87 de 80 bits).
+   - Injetar a definição _WIN32_WINNT=0x0600 em builds Windows para declaração uniforme de APIs de rede (inet_pton) e criptografia WinCrypt (CALG_SHA_256).
+2. **Isolamento de DLLs e Executáveis por Arquitetura:**
+   - `tools/rtl-sdr/x64/` e `tools/rtl-sdr/x86/`: DLLs oficiais e utilitários isolados para cada ABI.
+   - `tools/mpv/` e `tools/mpv/x86/`: Distribuições portáteis completas do MPV para 64 bits e 32 bits oficial (mpv-i686).
+   - O código-fonte em src/platform/platform_utils.cpp detecta em runtime sizeof(void*) == 4 e aciona prioritariamente `tools\mpv\x86\mpv.exe`.
+3. **Compatibilidade de ABI Win32 em x86:**
+   - Funções de callback do kernel Win32 (como SetConsoleCtrlHandler) exigem a convenção __stdcall em x86. Substituída a lambda anônima por uma função estática declarada com a macro WINAPI.
+4. **Pipeline Automatizado de Release (scripts/build_release.ps1):**
+   - Parâmetro -Arch all (padrão), x64 ou x86.
+   - Execução automática de CTest em ambas as arquiteturas.
+   - Montagem de staging isolado e geração de pacotes zip independentes: yyyymmdd_v1.0.0_win64.zip e yyyymmdd_v1.0.0_win32.zip.
+   - Validação estrita via objdump -f inspecionando se os executáveis dentro do pacote correspondem a pei-x86-64 ou pei-i386.
+
+### Consequências
+- Cobertura universal de plataformas Windows (Windows 7/8/10/11 tanto em x64 quanto em x86).
+- Pacotes de release 100% autocontidos, portáteis e sem dependências externas instaladas no sistema.
+- Garantia matemática de que o código compila e passa em 100% dos testes determinísticos em ambas as larguras de palavra (32 e 64 bits).
