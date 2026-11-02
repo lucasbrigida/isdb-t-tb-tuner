@@ -5,7 +5,7 @@
 int main(int argc, char** argv) {
     isdbt::setup_platform();
 
-    CLI::App app{"\033[1;36mISDB-T / ISDB-Tb Universal SDR Receiver & Player\033[0m"};
+    CLI::App app{"ISDB-T / ISDB-Tb Universal SDR Receiver & Player"};
 
     // 1. Subcomando PROBE
     auto sc_probe = app.add_subcommand("probe", "Inspeciona os dongles RTL-SDR conectados e o ambiente DSP");
