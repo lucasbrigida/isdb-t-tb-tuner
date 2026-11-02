@@ -98,7 +98,7 @@ bool PsiParser::build_pat_packet(uint8_t* out_ts188) {
     sec[2] = 0x0D;
     sec[3] = static_cast<uint8_t>((prog_num >> 8) & 0xFF); // transport_stream_id
     sec[4] = static_cast<uint8_t>(prog_num & 0xFF);
-    sec[5] = 0xC3; // version 1 (difere da PAT do standby sintetico, forcando o VLC a re-mapear), current_next = 1
+    sec[5] = 0xC0 | static_cast<uint8_t>((pat_version_ & 0x1F) << 1) | 0x01; // version dinamica (notifica o demuxer em troca de canal)
     sec[6] = 0x00; // section_number = 0
     sec[7] = 0x00; // last_section_number = 0
     sec[8] = static_cast<uint8_t>((prog_num >> 8) & 0xFF); // program_number
@@ -112,6 +112,12 @@ bool PsiParser::build_pat_packet(uint8_t* out_ts188) {
     sec[14] = static_cast<uint8_t>((crc >> 8) & 0xFF);
     sec[15] = static_cast<uint8_t>(crc & 0xFF);
     return true;
+}
+
+void PsiParser::reset() {
+    services_.clear();
+    pmt_pids_.clear();
+    pat_version_ = (pat_version_ + 1) & 0x1F;
 }
 
 void PsiParser::parse_pat(const uint8_t* payload, size_t len) {
@@ -142,9 +148,13 @@ void PsiParser::parse_pmt(uint16_t pmt_pid, const uint8_t* payload, size_t len) 
     if (table_id != 0x02) return; // PMT table_id = 0x02
 
     uint16_t service_id = (static_cast<uint16_t>(payload[3]) << 8) | payload[4];
+    bool is_new = (pmt_pids_.find(pmt_pid) == pmt_pids_.end() || pmt_pids_[pmt_pid] != service_id);
     services_[service_id].service_id = service_id;
     services_[service_id].pmt_pid = pmt_pid;
     pmt_pids_[pmt_pid] = service_id;
+    if (is_new) {
+        pat_version_ = (pat_version_ + 1) & 0x1F;
+    }
 
     size_t program_info_len = (((static_cast<size_t>(payload[10] & 0x0F)) << 8) | payload[11]);
 
@@ -198,9 +208,22 @@ void PsiParser::parse_sdt(const uint8_t* payload, size_t len) {
                         uint8_t svc_name_len = payload[p];
                         p += 1;
                         if (p + svc_name_len <= len) {
-                            std::string svc_name(reinterpret_cast<const char*>(payload + p), svc_name_len);
-                            services_[service_id].service_id = service_id;
-                            services_[service_id].service_name = svc_name;
+                            std::string clean_name;
+                            for (size_t k = 0; k < svc_name_len; ++k) {
+                                uint8_t c = payload[p + k];
+                                // Descarta caracteres de controle ARIB/DVB (< 0x20 como 0x0E Shift-Out e 0x7F DEL)
+                                if (c >= 0x20 && c != 0x7F) {
+                                    clean_name.push_back(static_cast<char>(c));
+                                }
+                            }
+                            size_t start_pos = clean_name.find_first_not_of(" \t");
+                            if (start_pos != std::string::npos && start_pos > 0) {
+                                clean_name = clean_name.substr(start_pos);
+                            }
+                            if (!clean_name.empty()) {
+                                services_[service_id].service_id = service_id;
+                                services_[service_id].service_name = clean_name;
+                            }
                         }
                     }
                 }
