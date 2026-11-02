@@ -10,9 +10,12 @@
     #include <shellapi.h>
     #include <io.h>
     #include <fcntl.h>
+    #include <conio.h>
 #else
     #include <unistd.h>
     #include <signal.h>
+    #include <termios.h>
+    #include <sys/select.h>
 #endif
 
 namespace isdbt {
@@ -25,6 +28,18 @@ static HANDLE g_player_job = NULL;
 #else
 static pid_t g_player_pid = 0;
 #endif
+
+void print_cli_header() {
+    std::cout <<
+"██╗███████╗██████╗ ██████╗    ████████╗ ██╗████████╗██████╗ \n"
+"██║██╔════╝██╔══██╗██╔══██╗   ╚══██╔══╝██╔╝╚══██╔══╝██╔══██╗\n"
+"██║███████╗██║  ██║██████╔╝█████╗██║  ██╔╝    ██║   ██████╔╝\n"
+"██║╚════██║██║  ██║██╔══██╗╚════╝██║ ██╔╝     ██║   ██╔══██╗\n"
+"██║███████║██████╔╝██████╔╝      ██║██╔╝      ██║   ██████╔╝\n"
+"╚═╝╚══════╝╚═════╝ ╚═════╝       ╚═╝╚═╝       ╚═╝   ╚═════╝ \n"
+"Repositorio: https://github.com/lucasbrigida/isdb_t_isdb_tb_tuner_player\n"
+"Licenca:     GNU General Public License v3.0 (GPL-3.0)\n\n";
+}
 
 void stop_player() {
 #ifdef _WIN32
@@ -52,14 +67,8 @@ static void signal_handler(int) {
 
 void setup_platform() {
 #ifdef _WIN32
-    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
-    if (hOut != INVALID_HANDLE_VALUE) {
-        DWORD dwMode = 0;
-        if (GetConsoleMode(hOut, &dwMode)) {
-            dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
-            SetConsoleMode(hOut, dwMode);
-        }
-    }
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
     SetConsoleCtrlHandler([](DWORD sig) -> BOOL {
         if (sig == CTRL_C_EVENT || sig == CTRL_CLOSE_EVENT) {
             g_running = false;
@@ -85,8 +94,8 @@ bool launch_mpv(uint16_t udp_port) {
             conf_dir = (root / "tools" / "mpv").string();
         }
     }
-    std::string cmdline = "\"" + mpv_bin + "\" --config-dir=\"" + conf_dir + "\" udp://127.0.0.1:" + std::to_string(udp_port);
-    std::cout << "\033[1;35m[MPV] Disparando player com interpolacao em tempo real: " << cmdline << "\033[0m\n";
+    std::string cmdline = "\"" + mpv_bin + "\" --config-dir=\"" + conf_dir + "\" --input-ipc-server=\\\\.\\pipe\\isdbtb_mpv udp://127.0.0.1:" + std::to_string(udp_port);
+    std::cout << "[MPV] Disparando player com interpolacao em tempo real: " << cmdline << "\n";
 
     STARTUPINFOA si{};
     si.cb = sizeof(si);
@@ -108,16 +117,13 @@ bool launch_mpv(uint16_t udp_port) {
     );
 
     if (!ok) {
-        std::cerr << "\033[1;31m[ERRO] Falha ao iniciar MPV (" << mpv_bin << "). Execute manualmente .\\scripts\\play_mpv.bat\033[0m\n";
+        std::cerr << "[ERRO] Falha ao iniciar MPV (" << mpv_bin << "). Execute manualmente .\\scripts\\play_mpv.bat\n";
         return false;
     }
 
     g_player_process = pi.hProcess;
     CloseHandle(pi.hThread);
 
-    // Vincula o processo do MPV a um Job Object do Windows configurado com JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE.
-    // Isso garante pelo proprio kernel do Windows que o MPV sera fechado instantaneamente caso a CLI
-    // seja encerrada por Ctrl+C, fechamento de janela do console ou encerramento do processo.
     g_player_job = CreateJobObjectA(NULL, NULL);
     if (g_player_job) {
         JOBOBJECT_EXTENDED_LIMIT_INFORMATION jeli{};
@@ -128,11 +134,62 @@ bool launch_mpv(uint16_t udp_port) {
     return true;
 #else
     std::string cmd = "mpv --config-dir=tools/mpv udp://127.0.0.1:" + std::to_string(udp_port) + " &";
-    std::cout << "\033[1;35m[MPV] Disparando: " << cmd << "\033[0m\n";
+    std::cout << "[MPV] Disparando: " << cmd << "\n";
     int ret = std::system(cmd.c_str());
     return (ret == 0);
 #endif
 }
 
-} // namespace isdbt
+bool reload_mpv_player(uint16_t udp_port) {
+#ifdef _WIN32
+    HANDLE hPipe = CreateFileA(
+        "\\\\.\\pipe\\isdbtb_mpv",
+        GENERIC_WRITE,
+        0,
+        NULL,
+        OPEN_EXISTING,
+        0,
+        NULL
+    );
+    if (hPipe == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+    std::string cmd = "{\"command\": [\"loadfile\", \"udp://127.0.0.1:" + std::to_string(udp_port) + "\", \"replace\"]}\n";
+    DWORD written = 0;
+    WriteFile(hPipe, cmd.data(), static_cast<DWORD>(cmd.size()), &written, NULL);
+    CloseHandle(hPipe);
+    return true;
+#else
+    (void)udp_port;
+    return false;
+#endif
+}
 
+bool console_kbhit() {
+#ifdef _WIN32
+    return (_kbhit() != 0);
+#else
+    struct timeval tv = {0, 0};
+    fd_set fds;
+    FD_ZERO(&fds);
+    FD_SET(STDIN_FILENO, &fds);
+    return (select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv) > 0);
+#endif
+}
+
+int console_getch() {
+#ifdef _WIN32
+    return _getch();
+#else
+    struct termios oldt, newt;
+    tcgetattr(STDIN_FILENO, &oldt);
+    newt = oldt;
+    newt.c_lflag &= ~(ICANON | ECHO);
+    tcsetattr(STDIN_FILENO, TCSANOW, &newt);
+    int ch = getchar();
+    tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+    return ch;
+#endif
+}
+
+} // namespace isdbt
