@@ -16,7 +16,8 @@ int cmd_list();
 
 // 4. Subcomando PLAY: Sintoniza um canal e transmite via UDP para o player
 int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_port,
-             int dev_idx, bool test_pattern = false, double gain_db = 28.0, bool auto_player = false);
+             int dev_idx, bool test_pattern = false, double gain_db = 28.0, bool auto_player = false,
+             bool verbose = false);
 
 } // namespace isdbt
 

@@ -29,6 +29,7 @@ int main(int argc, char** argv) {
     bool test_pattern = false;
     double tuner_gain = 28.0;
     bool auto_player = false;
+    bool verbose = false;
     auto sc_play = app.add_subcommand("play", "Sintoniza um canal e transmite via UDP para o player");
     sc_play->add_option("-c,--channel", play_ch, "Numero do canal (ex: 14, 28, 30)");
     sc_play->add_option("-n,--name", play_name, "Nome da emissora (ex: GLOBO, RECORD)");
@@ -36,6 +37,7 @@ int main(int argc, char** argv) {
     sc_play->add_flag("-t,--test-pattern", test_pattern, "Transmite padrao de teste para diagnostico de rede");
     sc_play->add_option("-g,--gain", tuner_gain, "Ganho do sintonizador em dB (padrao: 28.0 dB, evita saturacao)");
     sc_play->add_flag("--player", auto_player, "Abre automaticamente o player MPV integrado com interpolacao em tempo real");
+    sc_play->add_flag("-v,--verbose", verbose, "Exibe linha de status detalhada em tempo real (RSSI, OFDM, TMCC, SNR, TS)");
     sc_play->add_option("-d,--device", dev_idx, "Indice do dongle RTL-SDR (padrao 0)");
 
     app.require_subcommand(1); // Exige ao menos um subcomando
@@ -49,7 +51,7 @@ int main(int argc, char** argv) {
     } else if (sc_list->parsed()) {
         return isdbt::cmd_list();
     } else if (sc_play->parsed()) {
-        return isdbt::cmd_play(play_ch, play_name, udp_port, dev_idx, test_pattern, tuner_gain, auto_player);
+        return isdbt::cmd_play(play_ch, play_name, udp_port, dev_idx, test_pattern, tuner_gain, auto_player, verbose);
     }
 
     return 0;

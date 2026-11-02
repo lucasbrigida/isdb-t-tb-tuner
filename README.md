@@ -96,7 +96,12 @@ Abra o PowerShell ou Prompt de Comando (CMD) na pasta descompactada:
 
 # 4. Sintonizar um canal (ex: Canal 23) e abrir automaticamente o player MPV integrado:
 .\isdbtb_rx.exe play -c 23 --player
+
+# 5. Sintonizar com exibição do status detalhado de sinal em tempo real (-v / --verbose):
+.\isdbtb_rx.exe play -c 23 --player -v
 ```
+
+> 💡 **Modo Detalhado (`-v`, `--verbose`):** Por padrão, a interface do comando `play` mantém um visual limpo e estático. Use `-v` ou `--verbose` para exibir a linha de telemetria e status em tempo real (RSSI, lock OFDM/TMCC, SNR, pacotes TS e taxas de correção RS).
 
 > 💡 **Encerramento Sincronizado:** O player MPV é gerenciado por um _Job Object_ do kernel do Windows. Ao fechar o terminal da CLI ou pressionar `Ctrl+C`, o player fecha instantaneamente sem deixar processos órfãos em segundo plano.
 

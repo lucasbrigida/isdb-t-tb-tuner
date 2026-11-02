@@ -72,6 +72,9 @@ Sintoniza o canal e abre **automaticamente** a janela do player MPV embutido com
 
 # Utilizar porta UDP customizada:
 .\isdbtb_rx.exe play -c 23 -p 1234 --player
+
+# Exibir status de telemetria em tempo real (RSSI, SNR, erros RS):
+.\isdbtb_rx.exe play -c 23 --player -v
 ```
 > 💡 **Fechamento Automático:** O processo do MPV está vinculado a um *Job Object* do Windows. Ao fechar a CLI (pressionando `Ctrl+C` ou fechando a janela do console), o player MPV fecha instantaneamente sem deixar processos órfãos em segundo plano.
 

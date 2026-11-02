@@ -112,9 +112,15 @@ Se preferir executar o receptor e o player em terminais separados:
    - **MPV:** Execute `.\scripts\play_mpv.bat` (ou duplo clique no arquivo).
    - **VLC:** Execute no menu **Mídia** > **Abrir Fluxo de Rede** (`Ctrl + N`) o endereço `udp://@127.0.0.1:1234` com Cache de Rede configurado em 2000 ms.
 
-Durante a exibição, o terminal atualiza os dados em tempo real:
+#### Modo Detalhado (-v / --verbose):
+Adicione `-v` ou `--verbose` para exibir a telemetria do sinal RF e do decodificador em tempo real:
+```powershell
+.\build\isdbtb_rx.exe play -c 23 --player -v
+```
+
+Durante a exibição com `-v`, o terminal atualiza os dados em tempo real acima da lista de canais:
 ```text
-[Status] RSSI: -1.8 dBFS | OFDM: LOCK (0.98) | TMCC: LOCK | TS: 542 pkts | Drop: 0 | BAND HD
+[Status] Ch 23 | RSSI: -6.9 dBFS | OFDM: LOCK (0.98) | TMCC: LOCK | SNR: 18.5 dB | TS: 542 pkts (RS: 0 corr / 0 drop) | Drop: 0 | BAND HD
 ```
 Para encerrar a transmissão, pressione **Ctrl + C** no terminal.
 

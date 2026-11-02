@@ -77,78 +77,42 @@ static void reset_play_reception_stream(
     }
 }
 
-static int get_prev_channel(const std::vector<ChannelInfo>& list, int current_ch) {
-    if (list.empty()) {
-        int prev = current_ch - 1;
-        return (prev >= 14) ? prev : 69;
-    }
-    for (size_t i = 0; i < list.size(); ++i) {
-        if (list[i].channel_number == current_ch) {
-            return (i > 0) ? list[i - 1].channel_number : list.back().channel_number;
+static void print_players_box(const std::string& vlc_url) {
+    const int inner_width = 84;
+    std::string h_border = "+" + std::string(inner_width + 2, '-') + "+";
+
+    auto print_line = [inner_width](const std::string& text) {
+        std::cout << "| " << text;
+        if (static_cast<int>(text.length()) < inner_width) {
+            std::cout << std::string(inner_width - text.length(), ' ');
         }
-    }
-    return list.front().channel_number;
+        std::cout << " |\n";
+    };
+
+    std::cout << h_border << "\n";
+    print_line("Reprodutores de Video Disponiveis:");
+    print_line("  1. MPV Player com Interpolacao em Tempo Real (Recomendado):");
+    print_line("     Execute: .\\scripts\\play_mpv.bat (ou .\\scripts\\play_mpv.ps1)");
+    print_line("  2. VLC Media Player:");
+    std::string vlc_line = "     URL: " + vlc_url + " | Cache: --network-caching=2000 --clock-jitter=1000";
+    print_line(vlc_line);
+    std::cout << h_border << "\n\n";
 }
 
-static int get_next_channel(const std::vector<ChannelInfo>& list, int current_ch) {
-    if (list.empty()) {
-        int next = current_ch + 1;
-        return (next <= 69) ? next : 14;
+static std::string format_channel_line(const ChannelInfo& ch, bool is_selected, bool is_active) {
+    std::stringstream ss;
+    ss << (is_selected ? "  -> " : "     ")
+       << "[" << std::setw(2) << ch.channel_number << "] "
+       << pad_string(ch.name, 22) << " ("
+       << std::fixed << std::setprecision(3) << (ch.frequency_hz / 1e6) << " MHz)";
+    if (is_active) {
+        ss << "  \033[1;32m[AO VIVO]\033[0m";
     }
-    for (size_t i = 0; i < list.size(); ++i) {
-        if (list[i].channel_number == current_ch) {
-            return (i + 1 < list.size()) ? list[i + 1].channel_number : list.front().channel_number;
-        }
-    }
-    return list.front().channel_number;
-}
-
-static int show_interactive_channel_menu(const std::vector<ChannelInfo>& list, int current_ch) {
-    std::cout << "\n\n========================================================\n";
-    std::cout << "                 MENU DE CANAIS SALVOS                  \n";
-    std::cout << "========================================================\n";
-    if (list.empty()) {
-        std::cout << "Nenhum canal salvo na lista. Pressione qualquer tecla para voltar.\n";
-        console_getch();
-        return -1;
-    }
-    for (size_t i = 0; i < list.size(); ++i) {
-        const auto& ch = list[i];
-        bool is_curr = (ch.channel_number == current_ch);
-        std::stringstream freq_ss;
-        freq_ss << std::fixed << std::setprecision(1) << (ch.frequency_hz / 1e6) << " MHz";
-        std::cout << (is_curr ? " -> " : "    ")
-                  << "[" << std::setw(2) << ch.channel_number << "] "
-                  << pad_string(ch.name, 22) << " ("
-                  << freq_ss.str() << ")\n";
-    }
-    std::cout << "--------------------------------------------------------\n";
-    std::cout << "Digite o numero do canal desejado (ou Enter para cancelar): " << std::flush;
-
-    std::string input;
-    while (g_running) {
-        int c = console_getch();
-        if (c == '\r' || c == '\n') {
-            std::cout << "\n";
-            break;
-        } else if (c == 8 || c == 127) { // Backspace
-            if (!input.empty()) {
-                input.pop_back();
-                std::cout << "\b \b" << std::flush;
-            }
-        } else if (c >= '0' && c <= '9') {
-            input.push_back(static_cast<char>(c));
-            std::cout << static_cast<char>(c) << std::flush;
-        }
-    }
-    if (input.empty()) return -1;
-    return std::atoi(input.c_str());
+    return ss.str();
 }
 
 int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_port,
-             int dev_idx, bool test_pattern, double gain_db, bool auto_player) {
-    print_cli_header();
-
+             int dev_idx, bool test_pattern, double gain_db, bool auto_player, bool verbose) {
 #ifdef _WIN32
     SetPriorityClass(GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS);
 #endif
@@ -181,39 +145,7 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
         return 1;
     }
 
-    std::cout << "========================================================\n";
-    std::cout << "  SINTONIZANDO: " << ch_name << " (" << (freq_hz / 1e6) << " MHz)\n";
-    std::cout << "========================================================\n";
-
-    UdpStreamer streamer("127.0.0.1", udp_port);
-    if (!streamer.start()) {
-        return 1;
-    }
-
-    if (test_pattern) {
-        TsGenerator ts_gen;
-        std::vector<std::vector<uint8_t>> standby_packets;
-        ts_gen.get_standby_block(standby_packets);
-        for (auto &pkt : standby_packets) {
-            streamer.send_ts_packet(pkt.data());
-        }
-        streamer.flush();
-    }
-
-    std::cout << "Reprodutores de Video Disponiveis:\n";
-    std::cout << "  1. MPV Player com Interpolacao em Tempo Real (Recomendado):\n";
-    std::cout << "     Execute: .\\scripts\\play_mpv.bat (ou .\\scripts\\play_mpv.ps1)\n";
-    std::cout << "  2. VLC Media Player:\n";
-    std::cout << "     URL: " << streamer.url() << " | Cache: --network-caching=2000 --clock-jitter=1000\n";
-    if (auto_player) {
-        launch_mpv(udp_port);
-    }
-    std::cout << "  [DSP Engine] Pipeline: Fila SPSC Lock-Free (64 slots) | Linhas de Atraso Estaticas | GF Fast O(1)\n\n";
-
-    std::cout << "Comandos interativos de navegacao:\n";
-    std::cout << "  [Seta Cima / k] Canal Anterior    [Seta Baixo / j] Proximo Canal\n";
-    std::cout << "  [m] Menu de Selecao de Canais     [q / Ctrl+C] Sair\n\n";
-
+    // 1. Inicializa o hardware RTL-SDR ANTES de desenhar a interface
     rtlsdr_dev_t* dev = nullptr;
     if (rtlsdr_open(&dev, static_cast<uint32_t>(dev_idx)) != 0) {
         std::cerr << "[ERRO] Falha ao abrir dongle RTL-SDR #" << dev_idx << "\n";
@@ -228,6 +160,114 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
     rtlsdr_set_tuner_gain(dev, gain_tenths);
     rtlsdr_set_agc_mode(dev, 0);
     safe_set_freq(dev, freq_hz);
+
+    // 2. Inicializa o streamer UDP
+    UdpStreamer streamer("127.0.0.1", udp_port);
+    if (!streamer.start()) {
+        rtlsdr_close(dev);
+        return 1;
+    }
+
+    if (test_pattern) {
+        TsGenerator ts_gen;
+        std::vector<std::vector<uint8_t>> standby_packets;
+        ts_gen.get_standby_block(standby_packets);
+        for (auto &pkt : standby_packets) {
+            streamer.send_ts_packet(pkt.data());
+        }
+        streamer.flush();
+    }
+
+    // 3. Limpa a tela para eliminar mensagens de inicializacao do driver librtlsdr
+    std::cout << "\033[2J\033[H" << std::flush;
+
+    // 4. Exibe cabecalho e reprodutores de video
+    print_cli_header();
+    print_players_box(streamer.url());
+    if (auto_player) {
+        launch_mpv(udp_port);
+    }
+
+    constexpr int VISIBLE_CHANNELS = 8;
+    std::vector<ChannelInfo> channels = saved_channels;
+    const bool has_scroll = channels.size() > VISIBLE_CHANNELS;
+    const int visible_count = channels.empty() ? 1 : std::min(static_cast<int>(channels.size()), VISIBLE_CHANNELS);
+
+    int selected_index = 0;
+    for (size_t i = 0; i < channels.size(); ++i) {
+        if (channels[i].channel_number == active_channel_num) {
+            selected_index = static_cast<int>(i);
+            break;
+        }
+    }
+
+    int window_start = 0;
+    auto update_window = [&]() {
+        if (!has_scroll) {
+            window_start = 0;
+            return;
+        }
+        if (selected_index < window_start) {
+            window_start = selected_index;
+        } else if (selected_index >= window_start + visible_count) {
+            window_start = selected_index - visible_count + 1;
+        }
+        int max_start = std::max(0, static_cast<int>(channels.size()) - visible_count);
+        window_start = std::clamp(window_start, 0, max_start);
+    };
+    update_window();
+
+    // 1 (Canais) + (top ind) + visible_count + (bot ind) + 2 (\nComandos...)
+    const int channel_section_lines = 1 + (has_scroll ? 1 : 0) + visible_count + (has_scroll ? 1 : 0) + 2;
+    const int dynamic_lines = (verbose ? 2 : 0) + channel_section_lines;
+
+    std::string last_status_str;
+    if (verbose) {
+        std::stringstream ss;
+        ss << "[Status] Ch " << active_channel_num << " | Aguardando sinal RF...";
+        last_status_str = ss.str();
+    }
+
+    auto render_dynamic_ui = [&](bool move_up) {
+        if (move_up) {
+            std::cout << "\033[" << dynamic_lines << "F";
+        }
+        if (verbose) {
+            std::cout << "\033[2K" << last_status_str << "\n\033[2K\n";
+        }
+        std::cout << "\033[2KCanais\n";
+        if (channels.empty()) {
+            std::cout << "\033[2K  Nenhum canal salvo. Execute scan para realizar a busca de canais\n";
+        } else {
+            if (has_scroll) {
+                if (window_start > 0) {
+                    std::cout << "\033[2K  ▲ (mais " << window_start << " canais acima)\n";
+                } else {
+                    std::cout << "\033[2K\n";
+                }
+            }
+            for (int i = 0; i < visible_count; ++i) {
+                int idx = window_start + i;
+                bool is_sel = (idx == selected_index);
+                bool is_act = (channels[idx].channel_number == active_channel_num);
+                std::cout << "\033[2K" << format_channel_line(channels[idx], is_sel, is_act) << "\n";
+            }
+            if (has_scroll) {
+                int rem = static_cast<int>(channels.size()) - (window_start + visible_count);
+                if (rem > 0) {
+                    std::cout << "\033[2K  ▼ (mais " << rem << " canais abaixo)\n";
+                } else {
+                    std::cout << "\033[2K\n";
+                }
+            }
+        }
+        std::cout << "\033[2K\n";
+        std::cout << "\033[2KComandos: [Setas Cima/Baixo] Navegar | [Enter] Sintonizar | [q] Sair\n";
+        std::cout << std::flush;
+    };
+
+    // 5. Renderizacao inicial consistente
+    render_dynamic_ui(false);
 
     const size_t chunk_samples = 32768;
     const size_t chunk_bytes = chunk_samples * 2;
@@ -544,69 +584,109 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
     auto last_render_time = std::chrono::steady_clock::now();
     bool channel_name_learned = false;
 
+    // Oculta o cursor durante a execucao para evitar piscamento
+    std::cout << "\033[?25l" << std::flush;
+
     while (g_running) {
         if (console_kbhit()) {
             int key = console_getch();
-            int new_channel = -1;
+            bool need_redraw = false;
 
             if (key == 'q' || key == 'Q') {
                 g_running = false;
                 break;
             } else if (key == 'k' || key == 'K') {
-                new_channel = get_prev_channel(mgr.get_channels(), active_channel_num);
+                if (!channels.empty()) {
+                    selected_index = (selected_index > 0) ? (selected_index - 1) : static_cast<int>(channels.size() - 1);
+                    update_window();
+                    need_redraw = true;
+                }
             } else if (key == 'j' || key == 'J') {
-                new_channel = get_next_channel(mgr.get_channels(), active_channel_num);
+                if (!channels.empty()) {
+                    selected_index = (selected_index + 1 < static_cast<int>(channels.size())) ? (selected_index + 1) : 0;
+                    update_window();
+                    need_redraw = true;
+                }
             } else if (key == 0 || key == 224) {
                 int ext = console_getch();
                 if (ext == 72) { // Seta para Cima
-                    new_channel = get_prev_channel(mgr.get_channels(), active_channel_num);
+                    if (!channels.empty()) {
+                        selected_index = (selected_index > 0) ? (selected_index - 1) : static_cast<int>(channels.size() - 1);
+                        update_window();
+                        need_redraw = true;
+                    }
                 } else if (ext == 80) { // Seta para Baixo
-                    new_channel = get_next_channel(mgr.get_channels(), active_channel_num);
+                    if (!channels.empty()) {
+                        selected_index = (selected_index + 1 < static_cast<int>(channels.size())) ? (selected_index + 1) : 0;
+                        update_window();
+                        need_redraw = true;
+                    }
                 }
-            } else if (key == 'm' || key == 'M') {
-                // Abre o menu; enquanto o usuario escolhe, a dsp_worker_thread CONTINUA TRANSMITINDO!
-                new_channel = show_interactive_channel_menu(mgr.get_channels(), active_channel_num);
+            } else if (key == 27) { // ANSI escape sequence no Linux (\033[A ou \033[B)
+                if (console_kbhit()) {
+                    int c2 = console_getch();
+                    if (c2 == '[') {
+                        int c3 = console_getch();
+                        if (c3 == 'A') { // Up
+                            if (!channels.empty()) {
+                                selected_index = (selected_index > 0) ? (selected_index - 1) : static_cast<int>(channels.size() - 1);
+                                update_window();
+                                need_redraw = true;
+                            }
+                        } else if (c3 == 'B') { // Down
+                            if (!channels.empty()) {
+                                selected_index = (selected_index + 1 < static_cast<int>(channels.size())) ? (selected_index + 1) : 0;
+                                update_window();
+                                need_redraw = true;
+                            }
+                        }
+                    }
+                }
+            } else if (key == '\r' || key == '\n') {
+                if (!channels.empty() && selected_index >= 0 && selected_index < static_cast<int>(channels.size())) {
+                    int new_channel = channels[selected_index].channel_number;
+                    if (new_channel != active_channel_num && is_valid_channel(new_channel)) {
+                        active_channel_num = new_channel;
+                        freq_hz = get_channel_freq(active_channel_num);
+                        const auto* info = mgr.find_by_number(active_channel_num);
+                        ch_name = (info != nullptr) ? info->name : ("Canal " + std::to_string(active_channel_num));
+
+                        // 1. Envia burst de descontinuidade MPEG-TS para players externos (VLC/MPV)
+                        streamer.send_discontinuity_burst();
+
+                        // 2. Solicita retune a reader_thread
+                        retune_in_progress.store(true, std::memory_order_release);
+                        retune_target_freq_hz.store(freq_hz, std::memory_order_release);
+                        while (retune_in_progress.load(std::memory_order_acquire) && g_running) {
+                            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                        }
+
+                        // 3. Solicita reset ao pipeline de DSP
+                        dsp_reset_done.store(false, std::memory_order_release);
+                        dsp_reset_requested.store(true, std::memory_order_release);
+                        while (!dsp_reset_done.load(std::memory_order_acquire) && g_running) {
+                            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                        }
+
+                        // 4. Se o MPV player automatico estiver ativo, notifica recarga via IPC sem fechar janela
+                        if (auto_player) {
+                            reload_mpv_player(udp_port);
+                        }
+
+                        channel_name_learned = false;
+                        last_render_time = std::chrono::steady_clock::now();
+                        update_window();
+                        need_redraw = true;
+                    }
+                }
             }
 
-            if (new_channel > 0 && new_channel != active_channel_num && is_valid_channel(new_channel)) {
-                active_channel_num = new_channel;
-                freq_hz = get_channel_freq(active_channel_num);
-                const auto* info = mgr.find_by_number(active_channel_num);
-                ch_name = (info != nullptr) ? info->name : ("Canal " + std::to_string(active_channel_num));
-
-                std::stringstream freq_ss;
-                freq_ss << std::fixed << std::setprecision(3) << (freq_hz / 1e6) << " MHz";
-                std::cout << "\n\n>>> Sintonizando: Canal " << active_channel_num << " (" << ch_name
-                          << " - " << freq_ss.str() << ")...\n\n";
-
-                // 1. Envia burst de descontinuidade MPEG-TS para players externos (VLC/MPV)
-                streamer.send_discontinuity_burst();
-
-                // 2. Solicita retune a reader_thread
-                retune_in_progress.store(true, std::memory_order_release);
-                retune_target_freq_hz.store(freq_hz, std::memory_order_release);
-                while (retune_in_progress.load(std::memory_order_acquire) && g_running) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
-                }
-
-                // 3. Solicita reset ao pipeline de DSP
-                dsp_reset_done.store(false, std::memory_order_release);
-                dsp_reset_requested.store(true, std::memory_order_release);
-                while (!dsp_reset_done.load(std::memory_order_acquire) && g_running) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
-                }
-
-                // 4. Se o MPV player automatico estiver ativo, notifica recarga via IPC sem fechar janela
-                if (auto_player) {
-                    reload_mpv_player(udp_port);
-                }
-
-                channel_name_learned = false;
-                last_render_time = std::chrono::steady_clock::now();
+            if (need_redraw) {
+                render_dynamic_ui(true);
             }
         }
 
-        // Renderiza linha de status formatada e limpa
+        // Renderiza linha de status formatada e limpa (apenas se verbose estiver ativado)
         auto now = std::chrono::steady_clock::now();
         if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_render_time).count() >= 300) {
             PlaybackStatusSnapshot snap;
@@ -625,34 +705,39 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
                 mgr.save();
                 channel_name_learned = true;
                 ch_name = snap.service_name;
+                for (auto& c : channels) {
+                    if (c.channel_number == active_channel_num) {
+                        c.name = snap.service_name;
+                        break;
+                    }
+                }
+                render_dynamic_ui(true);
+            } else if (verbose) {
+                std::stringstream status_ss;
+                status_ss << "[Status] Ch " << active_channel_num << " | RSSI: " << std::fixed << std::setprecision(1) << snap.rssi_dbfs << " dBFS | "
+                          << "OFDM: " << (snap.ofdm_locked ? "LOCK" : "SYNC") << " (" << std::setprecision(2) << snap.peak_corr << ") | "
+                          << "TMCC: " << (snap.tmcc_locked ? "LOCK" : "SYNC") << " | "
+                          << "SNR: " << std::fixed << std::setprecision(1) << snap.snr_db << " dB | "
+                          << "TS: " << snap.air_packets << " pkts (RS: " << snap.rs_corrected << " corr / " << snap.rs_dropped << " drop)"
+                          << " | Drop: " << snap.drop_blocks;
+
+                std::string display_name = !snap.service_name.empty() ? snap.service_name : ch_name;
+                if (!display_name.empty()) {
+                    status_ss << " | " << display_name;
+                }
+
+                last_status_str = status_ss.str();
+                render_dynamic_ui(true);
             }
 
-            std::stringstream status_ss;
-            status_ss << "[Status] Ch " << active_channel_num << " | RSSI: " << std::fixed << std::setprecision(1) << snap.rssi_dbfs << " dBFS | "
-                      << "OFDM: " << (snap.ofdm_locked ? "LOCK" : "SYNC") << " (" << std::setprecision(2) << snap.peak_corr << ") | "
-                      << "TMCC: " << (snap.tmcc_locked ? "LOCK" : "SYNC") << " | "
-                      << "SNR: " << std::fixed << std::setprecision(1) << snap.snr_db << " dB | "
-                      << "TS: " << snap.air_packets << " pkts (RS: " << snap.rs_corrected << " corr / " << snap.rs_dropped << " drop)"
-                      << " | Drop: " << snap.drop_blocks;
-
-            std::string display_name = !snap.service_name.empty() ? snap.service_name : ch_name;
-            if (!display_name.empty()) {
-                status_ss << " | " << display_name;
-            }
-
-            std::string status_line = status_ss.str();
-            if (status_line.length() < 100) {
-                status_line += std::string(100 - status_line.length(), ' ');
-            }
-            std::cout << "\r" << status_line << "\r" << std::flush;
             last_render_time = now;
         }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
 
-    // Sequencia limpa de encerramento
-    std::cout << "\n\n[Encerrando] Fechando player, dongle RTL-SDR e encerrando stream UDP...\n";
+    // Restaura o cursor do terminal
+    std::cout << "\033[?25h\n\n[Encerrando] Fechando player, dongle RTL-SDR e encerrando stream UDP...\n";
     reader_running.store(false, std::memory_order_release);
     dsp_running.store(false, std::memory_order_release);
     g_running = false;

@@ -97,7 +97,12 @@ Open PowerShell or the Command Prompt (CMD) in the extracted folder:
 
 # 4. Tune a channel (e.g., Channel 23) and automatically open the embedded MPV player:
 .\isdbtb_rx.exe play -c 23 --player
+
+# 5. Tune with detailed real-time telemetry and signal status (-v / --verbose):
+.\isdbtb_rx.exe play -c 23 --player -v
 ```
+
+> 💡 **Verbose Mode (`-v`, `--verbose`):** By default, the `play` command keeps a clean and static display. Pass `-v` or `--verbose` to display real-time signal metrics and DSP status (RSSI, OFDM/TMCC lock, SNR, TS packets, and RS correction stats).
 
 > 💡 **Synchronized Process Lifecycle:** The MPV player process is managed via a Windows kernel _Job Object_. When you exit the CLI (by pressing `Ctrl+C` or closing the terminal window), the player closes instantly without leaving orphan background processes.
 

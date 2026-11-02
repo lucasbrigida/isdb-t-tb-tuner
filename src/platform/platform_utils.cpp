@@ -69,6 +69,16 @@ void setup_platform() {
 #ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
+
+    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (hOut != INVALID_HANDLE_VALUE) {
+        DWORD dwMode = 0;
+        if (GetConsoleMode(hOut, &dwMode)) {
+            dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+            SetConsoleMode(hOut, dwMode);
+        }
+    }
+
     SetConsoleCtrlHandler([](DWORD sig) -> BOOL {
         if (sig == CTRL_C_EVENT || sig == CTRL_CLOSE_EVENT) {
             g_running = false;
@@ -95,7 +105,6 @@ bool launch_mpv(uint16_t udp_port) {
         }
     }
     std::string cmdline = "\"" + mpv_bin + "\" --config-dir=\"" + conf_dir + "\" --input-ipc-server=\\\\.\\pipe\\isdbtb_mpv udp://127.0.0.1:" + std::to_string(udp_port);
-    std::cout << "[MPV] Disparando player com interpolacao em tempo real: " << cmdline << "\n";
 
     STARTUPINFOA si{};
     si.cb = sizeof(si);
@@ -134,7 +143,6 @@ bool launch_mpv(uint16_t udp_port) {
     return true;
 #else
     std::string cmd = "mpv --config-dir=tools/mpv udp://127.0.0.1:" + std::to_string(udp_port) + " &";
-    std::cout << "[MPV] Disparando: " << cmd << "\n";
     int ret = std::system(cmd.c_str());
     return (ret == 0);
 #endif
