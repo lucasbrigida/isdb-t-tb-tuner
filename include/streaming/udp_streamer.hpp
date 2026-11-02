@@ -73,6 +73,21 @@ public:
     size_t pending_packets() const;
 
     /**
+     * @brief Envia um datagrama UDP de 1316 bytes (7 pacotes TS) com a flag de
+     *        descontinuidade (discontinuity_indicator = 1) no campo de adaptacao.
+     *        Informa o demuxer do MPV e VLC que o relogio de PCR e os timestamps
+     *        (PTS/DTS) foram reiniciados devido a troca de canal.
+     */
+    void send_discontinuity_burst();
+
+    /**
+     * @brief Envia pacotes nulos MPEG-TS (PID 0x1FFF) para manter o socket UDP
+     *        alimentado (keep-alive) durante a transicao de sintonia.
+     * @param packet_count Quantidade de pacotes nulos a enviar (padrao 7 = 1 datagrama).
+     */
+    void send_null_burst(size_t packet_count = 7);
+
+    /**
      * @brief Retorna a URL completa formatada para abertura direta no VLC Media Player.
      * Exemplo: "udp://@127.0.0.1:1234"
      */
