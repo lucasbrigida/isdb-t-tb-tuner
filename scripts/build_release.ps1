@@ -135,8 +135,8 @@ function Ensure-GlobalDependencies {
     if (-not (Test-Path "tools\mpv\x86\mpv.exe")) {
         $mpv32Archive = "tools\mpv\x86\mpv32.7z"
         if (-not (Test-Path $mpv32Archive)) {
-            Write-Host "⬇️  Baixando MPV oficial de 32 bits (i686)..." -ForegroundColor Yellow
-            curl.exe -L -o $mpv32Archive "https://sourceforge.net/projects/mpv-player-windows/files/32bit/mpv-i686-20261101-git-48fca90e8c.7z/download"
+            Write-Host "⬇️  Baixando MPV oficial estável de 32 bits (i686 v0.41.0)..." -ForegroundColor Yellow
+            curl.exe -L -o $mpv32Archive "https://sourceforge.net/projects/mpv-player-windows/files/release/mpv-0.41.0-i686.7z/download"
         }
         if (Test-Path $mpv32Archive) {
             Write-Host "📦 Extraindo MPV 32 bits..." -ForegroundColor Cyan
@@ -281,6 +281,13 @@ function Build-And-Package-Release([string]$targetArch) {
         throw "Erro Crítico: tools/mpv/mpv.exe não possui a arquitetura esperada $expectedPeArch!"
     }
     Write-Host "  ✓ Arquitetura PE de tools/mpv/mpv.exe confirmada: $expectedPeArch" -ForegroundColor Green
+
+    # Teste de fumaça: executa mpv --version no staging para garantir que não ocorram crashes ou erros de OpenSSL
+    $mpvSmokeOut = & "$stagingDir\tools\mpv\mpv.exe" --version 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0 -or $mpvSmokeOut -match "assertion failed" -or $mpvSmokeOut -match "OpenSSL internal error") {
+        throw "Erro Crítico: tools/mpv/mpv.exe falhou no teste de fumaça: $mpvSmokeOut"
+    }
+    Write-Host "  ✓ Teste de fumaça do MPV ($targetArch) aprovado sem erros de runtime/OpenSSL" -ForegroundColor Green
 
     # Limpeza de staging
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $stagingDir

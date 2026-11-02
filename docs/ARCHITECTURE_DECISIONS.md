@@ -747,6 +747,9 @@ Embora sistemas modernos Windows operem predominantemente em arquiteturas de 64 
    - Execução automática de CTest em ambas as arquiteturas.
    - Montagem de staging isolado e geração de pacotes zip independentes: yyyymmdd_v1.0.0_win64.zip e yyyymmdd_v1.0.0_win32.zip.
    - Validação estrita via objdump -f inspecionando se os executáveis dentro do pacote correspondem a pei-x86-64 ou pei-i386.
+5. **Estabilidade de Releases do MPV 32 bits (i686) e Smoke Test:**
+   - Adotada estritamente a release estável oficial `mpv-0.41.0-i686` em substituição aos snapshots diários de desenvolvimento (`git`), prevenindo regressões de compilador upstream (como a falha de asserção `OpenSSL internal error: assertion failed: lock != NULL`).
+   - Integrado teste de fumaça automatizado no pipeline de release que executa `mpv.exe --version` e valida código de saída zero sem erros de OpenSSL antes do empacotamento final.
 
 ### Consequências
 - Cobertura universal de plataformas Windows (Windows 7/8/10/11 tanto em x64 quanto em x86).
