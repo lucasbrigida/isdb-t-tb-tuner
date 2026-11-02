@@ -181,6 +181,10 @@ void OneSegDemodulator::reset() {
     latest_snr_db_ = 0.0;
     average_snr_db_ = 0.0;
     viterbi_.reset();
+    viterbi_.set_code_rate(CodeRate::RATE_1_2);
+    code_rate_ = CodeRate::RATE_1_2;
+    modulation_ = CarrierModulation::QPSK;
+    time_interleave_I_ = 4;
     descrambler_.reset();
     viterbi_byte_stream_.clear();
     viterbi_stream_offset_ = 0;
