@@ -5,6 +5,7 @@ Zero fragile dependencies, works directly with rtlsdr.dll
 """
 import os
 import sys
+import time
 import ctypes
 import numpy as np
 
@@ -56,7 +57,7 @@ lib.rtlsdr_reset_buffer.restype = ctypes.c_int
 lib.rtlsdr_read_sync.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int, ctypes.POINTER(ctypes.c_int)]
 lib.rtlsdr_read_sync.restype = ctypes.c_int
 
-def calibrate(device_index=0, sample_rate=2048000, freq_hz=473142857, num_samples=131072):
+def calibrate(device_index=0, sample_rate=2031746, freq_hz=473142857, num_samples=131072):
     count = lib.rtlsdr_get_device_count()
     if count == 0:
         print("[ERRO] Nenhum RTL-SDR encontrado.", file=sys.stderr)
@@ -70,9 +71,11 @@ def calibrate(device_index=0, sample_rate=2048000, freq_hz=473142857, num_sample
 
     try:
         lib.rtlsdr_set_sample_rate(dev, sample_rate)
-        lib.rtlsdr_set_center_freq(dev, freq_hz)
         lib.rtlsdr_set_tuner_gain_mode(dev, 0) # AGC auto
         lib.rtlsdr_reset_buffer(dev)
+        lib.rtlsdr_set_center_freq(dev, freq_hz)
+        lib.rtlsdr_reset_buffer(dev)
+        time.sleep(0.1)  # 100 ms PLL stabilization delay (Erro 10, Erro 14, ADR 016)
 
         buf_size = num_samples * 2 # 2 bytes per complex sample (I and Q, uint8)
         raw_buf = ctypes.create_string_buffer(buf_size)

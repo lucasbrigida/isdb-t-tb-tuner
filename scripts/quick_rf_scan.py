@@ -4,6 +4,7 @@ Quick RF spectrum check on Brazilian UHF channels (14 to 45)
 """
 import os
 import sys
+import time
 import ctypes
 import numpy as np
 
@@ -55,7 +56,7 @@ def scan_rf():
         return
 
     try:
-        sample_rate = 2048000
+        sample_rate = 2031746
         lib.rtlsdr_set_sample_rate(dev, sample_rate)
         lib.rtlsdr_set_tuner_gain_mode(dev, 0) # AGC
 
@@ -73,8 +74,10 @@ def scan_rf():
 
         for ch in range(14, 46):
             freq_hz = int((470 + (ch - 14) * 6 + 3 + 1/7) * 1e6)
+            lib.rtlsdr_reset_buffer(dev)
             lib.rtlsdr_set_center_freq(dev, freq_hz)
             lib.rtlsdr_reset_buffer(dev)
+            time.sleep(0.1)  # 100 ms PLL stabilization delay (Erro 10, Erro 14, ADR 016)
             lib.rtlsdr_read_sync(dev, raw_buf, buf_size, ctypes.byref(n_read))
 
             data = np.frombuffer(raw_buf.raw[:n_read.value], dtype=np.uint8).astype(np.float32)

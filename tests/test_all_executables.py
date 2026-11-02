@@ -129,6 +129,41 @@ def main():
         check_fn=lambda out, err: ("SIM!" in out and "Pico:" in out, "Sincronismo nao travou nas amostras reais")
     )
 
+    exe_oneseg_e2e = os.path.join(BUILD_DIR, "test_oneseg_e2e.exe")
+    run_test(
+        "test_oneseg_e2e.exe (Demodulador 1-Seg End-to-End)",
+        [exe_oneseg_e2e],
+        check_fn=lambda out, err: ("Demodulador 1-Seg completou a recuperacao 100% exata" in out, "Teste E2E falhou")
+    )
+
+    exe_spsc_queue = os.path.join(BUILD_DIR, "test_spsc_queue.exe")
+    run_test(
+        "test_spsc_queue.exe (Fila SPSC Lock-Free e Deteccao de Gaps)",
+        [exe_spsc_queue],
+        check_fn=lambda out, err: ("Todos os testes da Fila SPSC passaram" in out, "Fila SPSC falhou")
+    )
+
+    exe_delay_line = os.path.join(BUILD_DIR, "test_delay_line.exe")
+    run_test(
+        "test_delay_line.exe (Linhas de Atraso Estaticas Fixed/Dynamic)",
+        [exe_delay_line],
+        check_fn=lambda out, err: ("Todos os testes de DelayLine passaram" in out, "DelayLine falhou")
+    )
+
+    exe_reset_recovery = os.path.join(BUILD_DIR, "test_reset_recovery.exe")
+    run_test(
+        "test_reset_recovery.exe (Recuperacao e Resets Coordenados)",
+        [exe_reset_recovery],
+        check_fn=lambda out, err: ("Teste de recuperacao apos descontinuidade passou" in out, "Recuperacao de reset falhou")
+    )
+
+    exe_sync_csi = os.path.join(BUILD_DIR, "test_sync_state_and_csi.exe")
+    run_test(
+        "test_sync_state_and_csi.exe (Sync State Machine e Ponderacao CSI 128)",
+        [exe_sync_csi],
+        check_fn=lambda out, err: ("Todos os testes de CSI e Sync State Machine passaram" in out, "CSI ou State Machine falhou")
+    )
+
     # 2. Testes dos Subcomandos de isdbtb_rx.exe
     exe_main = os.path.join(BUILD_DIR, "isdbtb_rx.exe")
 

@@ -49,11 +49,36 @@ Qualquer agente que editar o código-fonte deve respeitar estritamente as seguin
 - Linux: `~/.config/isdbtb_rx/channels.json`
 - **Regra:** Use sempre a classe `ChannelManager` e `std::filesystem` para manipular caminhos.
 
+### 5. Fila SPSC Lock-Free e Resets Coordenados de NCO
+- O desacoplamento entre a leitura USB e o processamento DSP **DEVE** utilizar `SpscCaptureQueue<64>` com ring buffer estático pré-alocado.
+- A fila monitora números de sequência monotônicos e sinaliza lacunas (`discontinuity_before`).
+- **Regra:** Se uma descontinuidade temporal ocorrer, acione `reset_reception_stream` para descarregar `stream_iq_buf` e reiniciar as fases do NCO. Nunca permita que o sincronizador tente computar correlação temporal sobre saltos de amostras.
+
+### 6. Zero Alocações no Heap no Loop Quente de DSP
+- Todas as estruturas de retardo de desentrelaçamento utilizam contêineres contíguos circulares de capacidade fixa: `FixedDelayLine<T, MaxCapacity>` (para Forney $12 \times 187$ bytes e bits $4 \times 120$ floats) e `DynamicDelayLine<T>` (com pré-alocação estática única na inicialização para os 384 ramos de tempo).
+- Todos os buffers temporários de `process_symbol` em `OneSegDemodulator` são membros de classe pré-alocados em `std::array`.
+- O buffer de bytes de Viterbi avança via ponteiro deslizante (`viterbi_stream_offset_`), sem `erase(begin, begin + 204)`.
+- **Regra:** Nenhuma chamada a `malloc`, `new`, `std::vector::erase` ou `std::deque` é permitida durante o processamento contínuo de símbolos.
+
+### 7. Ponderação CSI Centrada em 128 com Sincronismo de Retardo de Bits
+- O demapeamento euclidiano de constelação é calculado sobre os dados equalizados puros (preservando limiares em 16QAM).
+- Soft-bits são normalizados entre 0 e 255 com valor neutro 128 (`constants::SOFT_NEUTRAL`).
+- Os pesos de confiabilidade CSI $W_l$ atravessam linhas de atraso idênticas às dos dados (`time_csi_delay_lines_` e `bit_csi_delay_lines_`, sofrendo os mesmos 120 símbolos de atraso no MSB).
+- **Regra:** A escala é calculada estritamente como `128 + clamp(W * (soft - 128), -128, +127)`, garantindo que subportadoras em desvanecimento ($W \to 0$) convirjam exatamente para 128 (apagamento na Trellis).
+
+### 8. Máquina de Estados Tripartite de Sincronismo OFDM
+- O sincronizador `OfdmSync` opera em 3 estados: `Acquisition` (busca exaustiva dos 4 intervalos de guarda com folding), `Tracking` (rastreamento estreito em janela de $\pm 4$ amostras em torno de $d_{\text{expected}}$) e `LostLock` (histerese de 3 falhas consecutivas antes de reverter a `Acquisition`).
+- **Regra:** Em regime de rastreamento, nunca recalcule exaustivamente todos os intervalos de guarda em cada bloco de amostras.
+
+### 9. Multiplicação em $GF(2^8)$ em $O(1)$ sem Branches no Reed-Solomon
+- As operações de campo finito no decodificador $RS(204, 188)$ utilizam a tabela direta bidimensional pré-calculada `gf_mul_table_[256][256]` (64 KB).
+- **Regra:** Nunca introduza branches condicionais (`if (a == 0 || b == 0)`) ou consultas indiretas com logs no laço quente de Berlekamp-Massey, Chien Search e Forney.
+
 ---
 
 ## 🛡️ 3. Histórico de Erros Corrigidos e Regras de Conformidade com `git-artes/gr-isdbt` ("NÃO REPITA ESTES ERROS")
 
-Durante a auditoria e desenvolvimento do decodificador contra a implementação de referência [`git-artes/gr-isdbt`](https://github.com/git-artes/gr-isdbt) e em testes reais com sinais do ar, 12 erros críticos foram identificados, corrigidos e documentados. **Nenhum agente futuro deve reintroduzir qualquer um dos padrões incorretos abaixo:**
+Durante a auditoria e desenvolvimento do decodificador contra a implementação de referência [`git-artes/gr-isdbt`](https://github.com/git-artes/gr-isdbt) e em testes reais com sinais do ar, 20 erros críticos foram identificados, corrigidos e documentados. **Nenhum agente futuro deve reintroduzir qualquer um dos padrões incorretos abaixo:**
 
 ### Erro 1: Tap Invertido no LFSR do PRBS dos Pilotos (`X^11 + X^2 + 1`)
 - ❌ **O que estava errado:** O gerador PRBS de 11 bits (`reg = 0x7FF`) deslocava para a direita (`reg >> 1`), mas fazia XOR com `reg >> 9` pensando em $1 + X^9 + X^{11}$. Isso invertia a polaridade de ~50% dos pilotos dispersos (SP) e destruía a estimativa de canal.
@@ -145,29 +170,81 @@ Durante a auditoria e desenvolvimento do decodificador contra a implementação 
      - **Passo 1 (Triagem Rápida de RF, ~35ms por canal):** Exige limiar mais rigoroso (`RSSI >= -13.0 dBFS` e pico de correlação de CP `>= 0.60`). Canais com apenas ruído são descartados instantaneamente em ~35ms.
      - **Passo 2 (Resolução Profunda de Nome via SDT):** Apenas os canais candidatos reais que passaram no Passo 1 são sintonizados com thread dedicada de captura (`reader_thread`) e decodificação OFDM/MPEG-TS. O parser de PSI/SI monitora a tabela SDT (PID `0x0011`) com timeout máximo de 3.0s, interrompendo antecipadamente assim que o nome da emissora é obtido.
 
+### Erro 15: Alocações Dinâmicas no Loop Quente de DSP e Fragmentação por `std::deque` nos Desentrelaçadores
+- ❌ **O que estava errado:** O desentrelaçador de tempo (384 ramos), de bits (4 ramos) e convolucional Forney (12 ramos) utilizavam `std::deque` alocando dinamicamente nós individuais no heap a cada push e pop. Além disso, no método central `process_symbol`, estruturas intermediárias (`equalized_`, `data_carriers_`, `freq_deint_`, `time_deint_`) eram alocadas em vetores locais a cada chamada. Isso gerava dezenas de milhares de chamadas a `malloc`/`free` por segundo, fragmentação severa de memória, poluição da cache L1/L2 e saltos de latência.
+- ✅ **Como é o correto (`delay_line.hpp` / `oneseg_demodulator.hpp`):**
+  1. `FixedDelayLine<T, MaxCapacity>` baseada em array circular estático contíguo (`std::array<T, MaxCapacity>`) com zero alocação no heap para Forney ($12 \times 187$ bytes) e bits ($4 \times 120$ floats).
+  2. `DynamicDelayLine<T>` com alocação estática única na inicialização (`std::vector<T>::assign`) para os 384 ramos de tempo.
+  3. Todos os buffers de cálculo em `OneSegDemodulator` (`seg_carriers_`, `channel_h_`, `equalized_`, `csi_weight_`, `data_carriers_`, `data_csi_`, `freq_deint_`, `freq_csi_`, `time_deint_`, `time_csi_`) são membros pré-alocados de tamanho fixo em `std::array`. Zero alocações ocorrem no caminho crítico por símbolo!
+
+### Erro 16: Consumo Ineficiente de Buffer com `std::vector::erase` no Fluxo Viterbi
+- ❌ **O que estava errado:** A cada bloco de 204 bytes processado, o decodificador executava `viterbi_byte_stream_.erase(viterbi_byte_stream_.begin(), viterbi_byte_stream_.begin() + 204)`. Esse método realizava um `memmove` compulsório de todo o restante do buffer para a posição 0, gerando sobrecarga massiva de cópia de memória em $O(N)$ a cada pacote.
+- ✅ **Como é o correto (`oneseg_demodulator.cpp`):** Utilizar ponteiro de leitura deslizante via offset (`viterbi_stream_offset_`). O acesso aos dados é feito em $O(1)$ somando `viterbi_byte_stream_.data() + viterbi_stream_offset_`. Apenas quando o offset acumulado ultrapassa 4096 bytes e mais da metade do buffer, realiza-se uma única compactação residual (`std::memmove`), amortizando o custo de cópia para praticamente zero.
+
+### Erro 17: Ponderação CSI Pré-Demapeador sem Sincronismo de Atraso Temporal de Bits
+- ❌ **O que estava errado:** O fator CSI era multiplicado diretamente nas coordenadas I/Q da constelação equalizada antes do cálculo de soft-decision. No padrão 16QAM, o limiar euclidiano é $b_0 = TH - |Im|$; ao multiplicar $Im$ por $W_l$, o limiar geométrico $TH$ era distorcido. Além disso, os bits passam pelo desentrelaçador de bits (onde o MSB sofre atraso de 120 símbolos em relação ao LSB), mas o peso CSI aplicado ao MSB correspondia ao símbolo atual, gerando descompasso temporal total entre o peso CSI e o bit físico desentrelaçado.
+- ✅ **Como é o correto (`oneseg_demodulator.cpp`):**
+  1. O demapeamento euclidiano é computado sobre as amostras equalizadas puras, gerando decisões suaves centradas no valor neutro 128 (`constants::SOFT_NEUTRAL`).
+  2. Os pesos CSI trafegam por linhas de atraso idênticas (`time_csi_delay_lines_` e `bit_csi_delay_lines_`), sofrendo exatamente o mesmo retardo de 120 símbolos no MSB que os dados.
+  3. A escala é aplicada diretamente aos soft-bits:
+     \[
+     \text{soft\_scaled} = 128 + \text{clamp}\left(W_l \cdot (\text{soft\_orig} - 128),\; -128,\; +127\right)
+     \]
+     Subportadoras atenuadas ($W_l \to 0$) convergem suavemente para 128 (apagamento perfeito na métrica da Trellis), sem distorção geométrica de constelação.
+
+### Erro 18: Busca Exaustiva Contínua de Prefixo Cíclico sem Máquina de Estados Tripartite
+- ❌ **O que estava errado:** A cada chamada de `find_symbol_boundary`, o estimador de Van de Beek testava exaustivamente todos os 4 intervalos de guarda possíveis (1/16, 1/8, 1/4, 1/32) e varria dezenas de milhares de amostras, desperdiçando mais de 70% do tempo de CPU em cálculos redundantes quando o receptor já estava perfeitamente sincronizado.
+- ✅ **Como é o correto (`ofdm_sync.hpp` / `ofdm_sync.cpp`):**
+  Implementar uma máquina de estados com 3 modos operacionais:
+  - `SyncState::Acquisition`: Realiza a busca inicial exaustiva e detecta o intervalo de guarda ótimo.
+  - `SyncState::Tracking`: Uma vez estabelecido o lock, fixa o intervalo de guarda detectado e restringe a busca a uma janela estreita de $\pm 4$ amostras (`TRACK_RADIUS`) em torno da fronteira temporal predita (`expected_first_d_`), acelerando a execução em mais de $5\times$.
+  - `SyncState::LostLock`: Se o sincronismo falhar por 3 blocos consecutivos (`MAX_CONSECUTIVE_FAILURES`), o estado transiciona para `LostLock` e reverte imediatamente para `Acquisition` na próxima leitura.
+
+### Erro 19: Multiplicação em $GF(2^8)$ com Branching e Tabelas Indiretas no Reed-Solomon
+- ❌ **O que estava errado:** A rotina `gf_mul(a, b)` continha condicionais (`if (a == 0 || b == 0) return 0;`) e realizava múltiplos acessos indiretos `exp_table_[log_table_[a] + log_table_[b]]`. Em polinômios de grau $t=8$ (Berlekamp-Massey, Chien Search e Forney), esses branches e acessos indiretos causavam dezenas de milhares de stalls de CPU por segundo.
+- ✅ **Como é o correto (`reed_solomon.hpp` / `reed_solomon.cpp`):**
+  Pré-computar na inicialização uma tabela bidimensional direta de 64 KB (`uint8_t gf_mul_table_[256][256]`). A multiplicação passa a ser um único acesso indexado $O(1)$ sem branch prediction:
+  ```cpp
+  inline uint8_t gf_mul(uint8_t a, uint8_t b) const noexcept {
+      return gf_mul_table_[a][b];
+  }
+  ```
+  A tabela de 64 KB cabe integralmente na cache de dados L1/L2 dos processadores modernos.
+
+### Erro 20: Fila Concorrente Bloqueante (`std::mutex`) sem Rastreamento de Sequência e Sem Reset Coordenado
+- ❌ **O que estava errado:** O desacoplamento do `reader_thread` utilizava `std::mutex`, `std::condition_variable` e `std::queue<std::vector<uint8_t>>`, incorrendo em contenção de travas e alocação dinâmica de 64 KB por bloco lido. Caso ocorresse overflow da fila, blocos de amostras eram descartados sem sinalização, deixando o sincronizador OFDM tentar calcular correlação temporal contínua sobre dados descontínuos no tempo.
+- ✅ **Como é o correto (`spsc_capture_queue.hpp` / `main.cpp`):**
+  1. Utilizar a fila circular lock-free de produtor único / consumidor único `SpscCaptureQueue<64>` com ring buffer estático pré-alocado de 64 blocos de 65536 bytes.
+  2. Cada bloco possui um número de sequência atômico de 64 bits (`sequence`) e uma flag booleana explícita `discontinuity_before`.
+  3. Quando um gap de sequência ou descontinuidade é detectado pelo consumidor, uma rotina de reset coordenado (`reset_reception_stream`) é acionada, limpando buffers residuais e reiniciando as fases do oscilador NCO para evitar propagação de erros de fase.
+
 ---
 
 ## 🧪 4. Suíte de Testes e Validações Realizadas
 
 O sistema conta com três níveis de validação automatizada e empírica:
 
-### Nível 1: Testes Unitários Determinísticos (CTest)
-Executados em qualquer ambiente sem necessidade de hardware SDR conectado:
-1. `test_reed_solomon`: Valida correção de até 8 bytes corrompidos e detecção de falha com >8 erros com Berlekamp-Massey e Forney.
+### Nível 1: Testes Unitários Determinísticos (CTest - 10/10 Testes)
+Executados em qualquer ambiente sem necessidade de hardware SDR conectado (`ctest --test-dir build --output-on-failure`):
+1. `test_reed_solomon`: Valida correção de até 8 bytes corrompidos e detecção de falha com >8 erros com Berlekamp-Massey, Chien Search e tabela $O(1)$.
 2. `test_descrambler`: Valida o LFSR de 15 bits do ISDB-T com inversão e clocking sobre o sync `0x47`.
 3. `test_viterbi`: Valida o decodificador convolucional $K=7$ contínuo com puncionamento nas taxas 1/2, 2/3, 3/4, 5/6 e 7/8.
 4. `test_fec_pipeline`: Valida a cadeia completa de FEC integrada (Viterbi -> Byte Deinterleaver -> Descrambler -> Reed-Solomon).
 5. `test_ofdm_sync`: Valida o algoritmo de Van de Beek de correlação de prefixo cíclico e correção de FFO contínuo.
 6. `test_oneseg_e2e`: Teste ponta a ponta simulado validando todo o pipeline 1-Seg com modulação QPSK, taxa 2/3, intervalo de guarda 1/8 e desentrelaçamento temporal $I=4$.
+7. `test_spsc_queue`: Valida concorrência lock-free, integridade de dados FIFO, contagem de drops e detecção de descontinuidades na fila SPSC.
+8. `test_delay_line`: Valida `FixedDelayLine` e `DynamicDelayLine` sob diferentes tamanhos de atraso, resets e zero alocação dinâmica.
+9. `test_reset_recovery`: Valida recuperação determinística do pipeline DSP e continuidade do fluxo após descontinuidades de sinal e resets coordenados.
+10. `test_sync_state_and_csi`: Valida a máquina de estados tripartite de sincronismo (`Acquisition` $\to$ `Tracking` $\to$ `LostLock`) e a escala suave de CSI centrada em 128.
 
 ### Nível 2: Validação Offline de Captura Real de RF (`live_ch23.raw`)
 - Captura de 8 MB de RF real obtida diretamente do ar na frequência 527.143 MHz (Canal 23 UHF de São Paulo).
 - Decodificou **299 pacotes MPEG-TS válidos**, travou `TMCC=1`, `IFO=-26` e extraiu os descritores da emissora `BAND HD`.
 
-### Nível 3: Validação ao Vivo em Tempo Real com Hardware RTL-SDR e VLC
+### Nível 3: Validação ao Vivo em Tempo Real com Hardware RTL-SDR e VLC/MPV
 - Hardware: RTL2832U com sintonizador Rafael Micro R820T.
-- Execução: `.\build\isdbtb_rx.exe play -c 23`
-- Resultado: Bloqueio imediato do sinal (`OFDM: LOCKED (Pico > 0.95)`, `TMCC: LOCK`, `IFO: -27`), decodificação contínua de pacotes TS e reprodução fluida de vídeo e áudio em tempo real no VLC via `udp://@127.0.0.1:1234`.
+- Execução: `.\build\isdbtb_rx.exe play -c 23 --player`
+- Resultado: Bloqueio imediato do sinal (`OFDM: LOCKED (Pico > 0.95)`, `TMCC: LOCK`, `IFO: -27`), decodificação contínua de pacotes TS e reprodução fluida de vídeo e áudio em tempo real via MPV e VLC via `udp://@127.0.0.1:1234`.
 
 ---
 
@@ -175,15 +252,18 @@ Executados em qualquer ambiente sem necessidade de hardware SDR conectado:
 
 Qualquer modelo de IA que receber tarefas neste projeto deve seguir rigorosamente as regras abaixo:
 
-1. **NUNCA altere a taxa de amostragem para 2.048 MSps:** A taxa **deve ser** sempre `2031746 S/s`.
-2. **NUNCA leia o RTL-SDR de forma síncrona no loop de DSP:** Mantenha sempre o thread de captura USB (`reader_thread`) isolado com fila concorrente para evitar buffer overflows no barramento USB.
-3. **NUNCA transmita pacotes soltos de 188 bytes via UDP:** Sempre acumule 7 pacotes completos formando datagramas de exatamente 1316 bytes.
-4. **NUNCA altere a URL padrão do VLC:** A URL deve ser sempre `udp://@127.0.0.1:1234`.
+1. **NUNCA altere a taxa de amostragem para 2.048 MSps:** A taxa **deve ser** sempre `2031746 S/s` (definida em `isdbt::constants::SAMPLE_RATE`).
+2. **NUNCA leia o RTL-SDR de forma síncrona no loop de DSP:** Mantenha sempre o thread de captura USB isolado com a fila `SpscCaptureQueue` para evitar buffer overflows no barramento USB.
+3. **NUNCA transmita pacotes soltos de 188 bytes via UDP:** Sempre acumule 7 pacotes completos formando datagramas de exatamente 1316 bytes (`constants::UDP_PACKET_SIZE`).
+4. **NUNCA altere a URL padrão do streaming local:** A URL de streaming deve ser sempre `udp://@127.0.0.1:1234`.
 5. **NUNCA injete pacotes sintéticos de teste (`TsGenerator`) em fluxo real:** Pacotes sintéticos de tela verde travam os PIDs do player e bloqueiam a visualização do canal real.
 6. **NUNCA reduza o limiar de IFO para menos de 0.60 sem histerese:** Lóbulos secundários de pilotos dispersos possuem coerência ~0.35 e prendem o receptor em frequências falsas.
 7. **NUNCA reinicie o Trellis do Viterbi a cada símbolo OFDM:** O fluxo de dados convolucional é contínuo ao longo de todo o quadro e transmissão.
 8. **NUNCA remova o delay de 100 ms após sintonizar frequência:** O PLL do R820T precisa desse tempo para travar sem gerar `[R82XX] PLL not locked!`.
 9. **NUNCA altere a frequência do tuner no RTL-SDR sem limpar os buffers USB (`rtlsdr_reset_buffer`) e aguardar estabilização do PLL:** Chamar `rtlsdr_set_center_freq` logo após leituras USB sem reset de buffer gera colisão nos endpoints de controle USB (`LIBUSB_ERROR_PIPE -9`) e trava o chip I2C R820T.
+10. **NUNCA use `std::deque` ou alocações dinâmicas no loop de processamento de símbolos:** Utilize `FixedDelayLine` ou `DynamicDelayLine` pré-alocadas para garantir previsibilidade e cache locality.
+11. **NUNCA aplique a escala de ponderação CSI antes do demapeador nem desvincule os pesos das linhas de retardo de bits:** A ponderação CSI deve ser aplicada estritamente sobre os soft-bits centrados em 128 e os pesos devem sofrer os mesmos atrasos ($120$ símbolos no MSB) que os dados.
+12. **NUNCA substitua a fila SPSC lock-free por mutexes bloqueantes ou descarte gaps de sequência sem invocar `reset_reception_stream`:** Lacunas temporais no fluxo I/Q devem resetar os buffers para evitar descontinuidade de fase no NCO.
 
 ---
 
@@ -192,13 +272,16 @@ Qualquer modelo de IA que receber tarefas neste projeto deve seguir rigorosament
 No Windows, o ambiente recomendado e homologado é o **[`w64devkit`](https://github.com/skeeto/w64devkit/releases)** (distribuição portátil MinGW-w64 com GCC, G++, GNU Make e BusyBox):
 
 ```powershell
-# Reconfigurar o CMake
+# Reconfigurar o CMake com otimizacoes de Release (-O3, -DNDEBUG e IPO/LTO automatico)
 cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
 
-# Compilar todos os executáveis
+# Opcional: habilitar otimizacao de ponto flutuante rapido (-ffast-math)
+cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DISDBT_ENABLE_FAST_MATH=ON
+
+# Compilar todos os executaveis
 cmake --build build -j
 
-# Rodar todos os testes unitários
+# Rodar todos os 10 testes unitarios
 ctest --test-dir build --output-on-failure
 
 # Diagnosticar estabilidade e integridade USB do dongle (utilitário em tools/rtl-sdr/):
@@ -214,12 +297,16 @@ ctest --test-dir build --output-on-failure
 
 | Módulo | Arquivos | Responsabilidade |
 |---|---|---|
-| **OFDM Sync** | `include/dsp/ofdm_sync.hpp`<br>`src/dsp/ofdm_sync.cpp` | Autocorrelação de prefixo cíclico (Van de Beek), rastreamento fino CP, correção de FFO contínua via SIMD VOLK, FFTW3. |
-| **1-Seg Demodulator** | `include/dsp/oneseg_demodulator.hpp`<br>`src/dsp/oneseg_demodulator.cpp` | IFO + Pilotos SP/CP ($X^{11}+X^2+1$), TMCC DBPSK com BCH(273,191), Deinterleavers (Freq/Tempo/Bit/Forney) e integração FEC. |
-| **Reed-Solomon** | `include/dsp/reed_solomon.hpp`<br>`src/dsp/reed_solomon.cpp` | Decodificador \(RS(204, 188, t=8)\) com Berlekamp-Massey, Chien Search e Forney (`FCR=0`). |
+| **Constantes Globais** | `include/dsp/constants.hpp` | Taxa de amostragem exata (2031746 S/s), neutralidade soft (128), dimensões de pacotes TS/RS e subportadoras. |
+| **Linhas de Atraso** | `include/dsp/delay_line.hpp` | `FixedDelayLine` estática e `DynamicDelayLine` para desentrelaçadores Forney, bits e tempo com zero alocação no heap. |
+| **Fila de Captura SPSC** | `include/dsp/spsc_capture_queue.hpp` | Fila circular lock-free de 64 slots com rastreamento de números de sequência e detecção de gaps. |
+| **Métricas DSP** | `include/dsp/dsp_metrics.hpp` | Estrutura de telemetria de runtime (blocos processados/descartados, resets, pacotes TS/RS, SNR, EVM). |
+| **OFDM Sync** | `include/dsp/ofdm_sync.hpp`<br>`src/dsp/ofdm_sync.cpp` | Máquina de estados (`Acquisition`, `Tracking`, `LostLock`), autocorrelação Van de Beek, rastreamento fino $\pm 4$, FFO contínuo via SIMD VOLK, FFTW3. |
+| **1-Seg Demodulator** | `include/dsp/oneseg_demodulator.hpp`<br>`src/dsp/oneseg_demodulator.cpp` | IFO + Pilotos SP/CP ($X^{11}+X^2+1$), TMCC DBPSK com BCH(273,191), Deinterleavers (Freq/Tempo/Bit/Forney) com linhas de atraso CSI paralelas, offset sliding e integração FEC. |
+| **Reed-Solomon** | `include/dsp/reed_solomon.hpp`<br>`src/dsp/reed_solomon.cpp` | Decodificador \(RS(204, 188, t=8)\) com Berlekamp-Massey, Chien Search e tabela direta 2D de multiplicação $GF(2^8)$ em $O(1)$. |
 | **Descrambler** | `include/dsp/descrambler.hpp`<br>`src/dsp/descrambler.cpp` | LFSR de 15 bits (\(1 + X^{14} + X^{15}\)) com suporte ao modo ISDB-T (por quadro OFDM) e superframe. |
-| **Viterbi** | `include/dsp/viterbi_decoder.hpp`<br>`src/dsp/viterbi_decoder.cpp` | Inner FEC convolucional contínuo \(K=7\) (`0x4F`/`0x6D`) com matriz Trellis de 64 estados e puncionamento (1/2, 2/3, 3/4, 5/6, 7/8). |
+| **Viterbi** | `include/dsp/viterbi_decoder.hpp`<br>`src/dsp/viterbi_decoder.cpp` | Inner FEC convolucional contínuo \(K=7\) (`0x4F`/`0x6D`) com buffer circular contínuo de sobreviventes e zero alocação no loop quente. |
 | **Streaming UDP** | `include/streaming/udp_streamer.hpp`<br>`src/streaming/udp_streamer.cpp` | Sockets WinSock2/POSIX enviando datagramas de 1316B para VLC via `udp://@127.0.0.1:1234`. |
 | **PSI/SI Parser** | `include/mpegts/psi_parser.hpp`<br>`src/mpegts/psi_parser.cpp` | Parser de PAT (PID 0), PMT e SDT (PID 0x0011) para capturar o nome da emissora e síntese de PAT de fallback. |
 | **Channel Manager** | `include/cli/channel_manager.hpp`<br>`src/cli/channel_manager.cpp` | Gerencia `channels.json`. |
-| **Main CLI** | `src/main.cpp` | Interface CLI11 com captura assíncrona USB multithread, estabilização de PLL e comandos `probe`, `scan`, `list` e `play`. |
+| **Main CLI** | `src/main.cpp` | Interface CLI11 com captura assíncrona USB SPSC lock-free, resets coordenados, telemetria de métricas e Job Object do MPV. |

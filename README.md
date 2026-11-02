@@ -6,10 +6,10 @@
   <img src="https://img.shields.io/badge/Hardware-RTL--SDR%20(RTL2832U)-red.svg" alt="RTL-SDR" />
   <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-brightgreen.svg" alt="Platforms" />
   <img src="https://img.shields.io/badge/Player-MPV%20Embedded-darkgreen.svg" alt="MPV Embedded" />
-  <img src="https://img.shields.io/badge/Tests-6%2F6%20Passed-success.svg" alt="CTest Passing" />
+  <img src="https://img.shields.io/badge/Tests-10%2F10%20Passed-success.svg" alt="CTest Passing" />
 </p>
 
-Receptor e decodificador digital completo de televisão aberta no padrão **ISDB-T / ISDB-Tb / SBTVD** (Brasil, Japão, Filipinas e América Latina) para dispositivos **RTL-SDR** (RTL2832U com tuners R820T/R828D/E4000). Desenvolvido em **C++ nativo de alta performance sem dependências do framework GNU Radio**, com equalização adaptativa **MMSE**, ponderação **CSI** no decodificador Viterbi, varredura inteligente de canais com identificação de nomes via **SDT** e **reprodutor MPV embutido com super-resolução e interpolação de movimento em tempo real**.
+Receptor e decodificador digital completo de televisão aberta no padrão **ISDB-T / ISDB-Tb / SBTVD** (Brasil, Japão, Filipinas e América Latina) para dispositivos **RTL-SDR** (RTL2832U com tuners R820T/R828D/E4000). Desenvolvido em **C++ nativo de alta performance sem dependências do framework GNU Radio**, com fila de captura **SPSC lock-free** com detecção atômica de descontinuidades, **zero alocações no heap** no processamento de símbolos, máquina de estados de sincronismo OFDM tripartite (**Acquisition / Tracking / LostLock**), equalização adaptativa **MMSE regularizada**, ponderação **CSI** sincronizada por linhas de retardo no decodificador Viterbi, multiplicação em $GF(2^8)$ em **$O(1)$** via tabela de 64 KB no Reed-Solomon, varredura inteligente de canais com identificação de nomes via **SDT** e **reprodutor MPV embutido com super-resolução e interpolação de movimento em tempo real**.
 
 ---
 
@@ -127,32 +127,44 @@ Para compilação nativa no Windows com máxima velocidade e sem a sobrecarga de
   - `VOLK` (operações matemáticas vetoriais com suporte a AVX2, FMA e SSE).
 - *(Opcional para automação e testes):* Python 3.8+ e PowerShell 7+.
 
-### 2.2 Como Compilar Nativamente
+### 2.2 Como Compilar Nativamente & Opções de Otimização
 No terminal do Windows com ambiente MinGW-w64 (ex: `w64devkit`):
 
 ```powershell
-# 1. Configurar o projeto com CMake em modo Release
+# 1. Configurar o projeto com CMake em modo Release (-O3, -DNDEBUG e IPO/LTO habilitados automaticamente)
 cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
 
-# 2. Compilar o executável principal e a suíte de testes unitários
+# Opcional: habilitar otimização de ponto flutuante rápido (-ffast-math / /fp:fast)
+cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DISDBT_ENABLE_FAST_MATH=ON
+
+# 2. Compilar o executável principal e a suíte completa de 10 testes unitários
 cmake --build build -j
 ```
 
-### 2.3 Suíte de Testes Determinísticos (CTest)
+#### Opções de Compilação no CMake
+- **`-DCMAKE_BUILD_TYPE=Release`**: Ativa otimização `-O3 -DNDEBUG` (GCC/Clang) ou `/O2 /DNDEBUG` (MSVC), desativando assertions em runtime.
+- **`-DISDBT_ENABLE_FAST_MATH=ON`** *(Padrão: OFF)*: Adiciona `-ffast-math` ou `/fp:fast` para acelerar vetorizações AVX2/FMA no cálculo de métricas e NCO.
+- **Interprocedural Optimization (IPO / LTO)**: Detectado e habilitado automaticamente para builds de Release caso suportado pelo compilador (`CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON`).
+
+### 2.3 Suíte de Testes Determinísticos (CTest - 10/10 Testes)
 O projeto conta com testes unitários matemáticos que rodam em frações de segundo e não dependem de rádio físico conectado:
 
 ```powershell
-# Executar todos os testes via CTest com saída detalhada em caso de falha:
+# Executar todos os 10 testes via CTest com saída detalhada em caso de falha:
 ctest --test-dir build --output-on-failure
 ```
 
 Os testes cobrem:
-1. `test_reed_solomon`: Correção de até 8 erros por pacote e detecção de falha via Berlekamp-Massey e Forney.
-2. `test_descrambler`: LFSR de dispersão de energia de 15 bits do ISDB-T com avanço sobre o sync byte `0x47`.
-3. `test_viterbi`: Decodificador convolucional $K=7$ contínuo com puncionamento (taxas 1/2, 2/3, 3/4, 5/6, 7/8).
+1. `test_reed_solomon`: Correção de até 8 erros por pacote, detecção de falha com >8 erros e multiplicação direta em $GF(2^8)$ em $O(1)$.
+2. `test_descrambler`: LFSR de dispersão de energia de 15 bits do ISDB-T com reinício de quadro e avanço sobre o sync byte `0x47`.
+3. `test_viterbi`: Decodificador convolucional $K=7$ contínuo com puncionamento (taxas 1/2, 2/3, 3/4, 5/6, 7/8) e anel de histórico estático.
 4. `test_fec_pipeline`: Cadeia completa de FEC integrada (Viterbi $\to$ Byte Deinterleaver $\to$ Descrambler $\to$ Reed-Solomon).
-5. `test_ofdm_sync`: Estimador ML de Van de Beek para sincronismo de símbolo OFDM e rastreamento de FFO.
+5. `test_ofdm_sync`: Estimador ML de Van de Beek para sincronismo de símbolo OFDM e rastreamento de FFO contínuo com SIMD.
 6. `test_oneseg_e2e`: Pipeline fim-a-fim simulado com modulação QPSK, taxa 2/3, GI 1/8 e desentrelaçamento temporal $I=4$.
+7. `test_spsc_queue`: Ring buffer SPSC lock-free (64 slots), concorrência multithread, contagem de drops e gap tracking.
+8. `test_delay_line`: Linhas de atraso estáticas `FixedDelayLine` e dinâmicas contíguas `DynamicDelayLine` com zero alocações no heap.
+9. `test_reset_recovery`: Recuperação determinística do pipeline DSP e estabilização de NCO após gaps de sequência e resets coordenados.
+10. `test_sync_state_and_csi`: Máquina de estados tripartite de sincronismo OFDM (`Acquisition` $\to$ `Tracking` $\to$ `LostLock`) e escala de ponderação CSI centrada em 128.
 
 ### 2.4 Automação de Releases (`build_release.ps1`)
 O repositório fornece um script em PowerShell para geração e verificação automática de pacotes de release:
@@ -199,12 +211,16 @@ isdb_t_isdb_tb_tuner_player/
 ├── AGENTS.md                   # Invariantes arquiteturais rígidas para IA e desenvolvedores
 ├── include/
 │   ├── dsp/                    # Algoritmos de Camada Física (OfdmSync, OneSegDemod, Viterbi, RS, etc.)
+│   │   ├── constants.hpp       # Constantes fundamentais ISDB-T (Fs = 2031746 S/s, soft neutral 128)
+│   │   ├── delay_line.hpp      # FixedDelayLine e DynamicDelayLine (zero alocações no heap)
+│   │   ├── spsc_capture_queue.hpp # Fila SPSC lock-free (64 slots) com detecção de descontinuidades
+│   │   └── dsp_metrics.hpp     # Estrutura de telemetria de runtime de DSP
 │   ├── streaming/              # UdpStreamer (transmissão de 1316 bytes para MPV/VLC)
 │   ├── mpegts/                 # Parser de tabelas PSI/SI (PAT, PMT, SDT) e gerador TS
 │   ├── cli/                    # ChannelManager e persistência JSON
 │   └── third_party/            # CLI11, nlohmann/json
 ├── src/
-│   ├── main.cpp                # Ponto de entrada CLI, captura assíncrona USB e Job Object do MPV
+│   ├── main.cpp                # Ponto de entrada CLI, captura assíncrona USB SPSC e Job Object do MPV
 │   └── ...                     # Implementações C++ dos módulos de DSP, MPEG-TS e streaming
 ├── tools/
 │   ├── zadig.exe               # Utilitário oficial de instalação de drivers WinUSB (v2.9)
@@ -221,10 +237,11 @@ isdb_t_isdb_tb_tuner_player/
 ├── scripts/
 │   ├── build_release.ps1       # Automação de build, empacotamento e validação de releases
 │   ├── play_mpv.bat            # Script auxiliar de disparo manual do player MPV
-│   └── calibrate_ppm.py        # Utilitário de calibração de oscilador local
+│   ├── quick_rf_scan.py        # Varredura rápida de potência RF na taxa exata de 2031746 S/s
+│   └── calibrate_ppm.py        # Utilitário de calibração de oscilador local na taxa exata de 2031746 S/s
 ├── releases/                   # Pacotes de release prontos para uso (windows/, linux/, macos/)
-├── docs/                       # Documentação técnica detalhada e decisões arquiteturais (ADR)
-└── tests/                      # Casos de teste determinísticos (CTest)
+├── docs/                       # Documentação técnica detalhada e decisões arquiteturais (ADR 001 a 023)
+└── tests/                      # 10 casos de teste determinísticos (CTest)
 ```
 
 ---
@@ -233,22 +250,23 @@ isdb_t_isdb_tb_tuner_player/
 
 ### 3.1 Resumo dos Algoritmos de Camada Física
 - **Taxa de Amostragem Fundamental ($2031746\text{ S/s}$):** Submúltiplo exato de $1/4$ da taxa de chip $F_{base} = 512/63\text{ MHz} \approx 8.126984\text{ MHz}$, garantindo correlação de prefixo cíclico superior a $90\%$ e FFT alinhada sem necessidade de reamostragem fracionária.
-- **Sincronismo de Símbolo OFDM & FFO (Van de Beek ML):** Autocorrelação de prefixo cíclico deslizante com compensação contínua de fase NCO acelerada por SIMD VOLK.
+- **Fila SPSC Lock-Free de Captura USB (`SpscCaptureQueue`):** Ring buffer estático de 64 blocos com semântica acquire-release, contadores atômicos de drops e sinalização explícita de gaps temporais para resets coordenados de NCO.
+- **Zero Alocações Dinâmicas no Caminho Crítico:** Eliminação completa de `std::deque` e `std::vector::erase` nos desentrelaçadores no tempo, bits e Forney, substituídos por `FixedDelayLine`, `DynamicDelayLine` e consumo por offset deslizante (`viterbi_stream_offset_`).
+- **Máquina de Estados de Sincronismo OFDM Tripartite (`SyncState`):** Alterna inteligentemente entre `Acquisition` (busca exaustiva de GI), `Tracking` (rastreamento estreito em janela de $\pm 4$ amostras) e `LostLock` (recuperação com histerese), acelerando o sincronismo em mais de $5\times$.
 - **Equalização MMSE Regularizada:** Substituição do Zero-Forcing clássico por MMSE adaptativo ($\sigma^2 = \max(10^{-5}, 0.05 \cdot P_{\text{avg}})$), evitando explosão de ruído em nulos profundos de canais seletivos em frequência.
-- **Ponderação CSI (Channel State Information) no Viterbi:** Fator de confiabilidade $W_l = \text{clamp}(|H_l|^2 / P_{\text{avg}}, 0, 2)$ atenuando métricas de subportadoras degradadas em direção ao erasure (128), proporcionando ganho de sensibilidade de **+2 a 3 dB** sob desvanecimento Rayleigh.
-- **Decodificador TMCC DBPSK + BCH(273, 191):** Rastreamento de sincronismo de quadro (204 símbolos) nas portadoras 101, 131, 286 e 349, configurando modulação e desentrelaçador temporal de forma dinâmica.
-- **Desentrelaçadores ISDB-T:** Frequência (`FREQ_PERM_MODE3` de 384 portadoras), Tempo convolucional ($I \times (95 - (5c \bmod 96))$), Bits e Forney ($I=12, M=17$).
-- **Outer FEC Reed-Solomon:** Decodificador $RS(204, 188, t=8)$ com Berlekamp-Massey, Chien Search e Forney com $FCR=0$.
+- **Ponderação CSI Centrada em 128 com Sincronismo de Atraso:** Soft-bits normalizados centrados em 128 com linhas de retardo de canal dedicadas idênticas às de dados (120 símbolos no MSB), eliminando distorção geométrica em 16QAM e proporcionando ganho de sensibilidade de **+2 a 3 dB** sob desvanecimento Rayleigh.
+- **Outer FEC Reed-Solomon com Tabela Direta de 64 KB em $O(1)$:** Multiplicações em $GF(2^8)$ executadas em um único ciclo de clock sem desvios condicionais (*branch-free*), acelerando Berlekamp-Massey, Chien Search e Forney.
+- **Decodificador TMCC DBPSK + BCH(273, 191):** Rastreamento contínuo de sincronismo de quadro (204 símbolos) nas portadoras 101, 131, 286 e 349, reconfigurando dinamicamente parâmetros de camada física em tempo real.
 
 ### 3.2 Documentação Técnica Especializada
-Para consultar aprofundamentos matemáticos, histórico de evolução e guias avançados, consulte os documentos na pasta [`docs/`](docs/):
+Para consultar aprofundamentos matemáticos, formulações teóricas e histórico completo de engenharia, consulte os documentos na pasta [`docs/`](docs/):
 
 | Documento | Conteúdo e Finalidade |
 |---|---|
-| 🏛️ [`docs/ARCHITECTURE_DECISIONS.md`](docs/ARCHITECTURE_DECISIONS.md) | **Registros de Decisões de Arquitetura (ADR 001 a 017):** Histórico completo de todos os algoritmos utilizados e substituídos (Zero-Forcing $\to$ MMSE, CSI Weighting, Two-Pass Scan, MPV Job Object, alinhamento MTU 1316B, correções contra `gr-isdbt`) e suas justificativas matemáticas. |
+| 🏛️ [`docs/ARCHITECTURE_DECISIONS.md`](docs/ARCHITECTURE_DECISIONS.md) | **Registros de Decisões de Arquitetura (ADR 001 a 023):** Histórico completo de todos os algoritmos utilizados e substituídos (SPSC Lock-Free, Zero-Allocation DelayLines, CSI Soft Centered, 3-State OFDM Sync, O(1) GF Table, LTO/IPO, MMSE, Two-Pass Scan, MPV Job Object, MTU 1316B, correções contra `gr-isdbt`) e suas justificativas matemáticas. |
 | 📖 [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) | **Manual Detalhado do Usuário:** Instruções passo a passo de configuração, comandos avançados, sintonia fina de ganho de RF e seção de solução de problemas. |
 | 📐 [`docs/blueprint_isdbt_decoder.md`](docs/blueprint_isdbt_decoder.md) | **Especificação Técnica do ISDB-T:** Parâmetros das normas ABNT NBR 15601 / 15603 e ARIB STD-B31, tabelas de entrelaçamento e taxas de transmissão. |
-| 🤖 [`AGENTS.md`](AGENTS.md) | **Guia de Orientação para Agentes de IA e Engenheiros:** Regras críticas de integridade ("Não Quebre"), lista de erros históricos a não repetir e diretivas de conformidade. |
+| 🤖 [`AGENTS.md`](AGENTS.md) | **Guia de Orientação para Agentes de IA e Engenheiros:** Regras críticas de integridade ("Não Quebre"), lista de 20 erros históricos a não repetir e 12 diretivas absolutas de conformidade. |
 
 ---
 

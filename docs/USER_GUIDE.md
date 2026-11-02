@@ -114,7 +114,7 @@ Se preferir executar o receptor e o player em terminais separados:
 
 Durante a exibição, o terminal atualiza os dados em tempo real:
 ```text
-[Status] RSSI: -1.8 dBFS | OFDM: LOCKED (Pico 0.98) | FFO: 120 Hz (IFO -26784 Hz) | TMCC: LOCK | TS do Ar: 542 pkts
+[Status] RSSI: -1.8 dBFS | OFDM: LOCK (0.98) | TMCC: LOCK | TS: 542 pkts | Drop: 0 | BAND HD
 ```
 Para encerrar a transmissão, pressione **Ctrl + C** no terminal.
 
@@ -132,3 +132,23 @@ Para encerrar a transmissão, pressione **Ctrl + C** no terminal.
 ### ❓ "Status OFDM: Ruido / Não Travado" no scanner
 - **Posicionamento da Antena:** Sinais de TV digital UHF (470–700 MHz) necessitam de antena adequada (preferencialmente perto de janelas ou externa).
 - **Extensão da antena:** Ajuste o comprimento da haste telescópica da antena para cerca de **12 a 15 cm** (correspondente a \(1/4\) de onda da faixa média de UHF ~550 MHz).
+
+---
+
+## 🏗️ 4. Compilação a partir do Código-Fonte & Testes (CTest)
+
+Para compilar o projeto em ambiente MinGW-w64 (`w64devkit`):
+
+```powershell
+# 1. Configurar o CMake em Release (otimizações -O3, -DNDEBUG e IPO/LTO ativados)
+cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
+
+# Opcional: habilitar otimização de ponto flutuante rápido
+cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DISDBT_ENABLE_FAST_MATH=ON
+
+# 2. Compilar todos os binários e executáveis de teste
+cmake --build build -j
+
+# 3. Executar os 10 testes unitários determinísticos
+ctest --test-dir build --output-on-failure
+```

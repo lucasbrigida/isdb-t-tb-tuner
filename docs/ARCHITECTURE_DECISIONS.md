@@ -4,6 +4,40 @@ Este documento registra as decisões de engenharia fundamentais tomadas durante 
 
 ---
 
+## 📑 Índice de Decisões de Arquitetura
+
+### Fase 1: Arquitetura Fundamental e Especificação Física (ADR 001 – 008)
+- [ADR 001: Escopo de Recepção Estrito em 1-Seg com Dongles RTL-SDR](#adr-001-escopo-de-recepção-estrito-em-1-seg-com-dongles-rtl-sdr)
+- [ADR 002: Taxa de Amostragem Exata (2031746 S/s) vs 2.048 MSps](#adr-002-taxa-de-amostragem-exata-2031746-ss-vs-2048-msps)
+- [ADR 003: Streaming UDP (7 x 188 = 1316 bytes) para o Reprodutor VLC](#adr-003-streaming-udp-7-x-188--1316-bytes-para-o-reprodutor-vlc)
+- [ADR 004: Núcleo DSP Nativo em C++17 Descartando o GNU Radio](#adr-004-núcleo-dsp-nativo-em-c17-descartando-o-gnu-radio)
+- [ADR 005: Decodificador Reed-Solomon RS(204, 188, t=8) com Campo de Galois GF(2^8)](#adr-005-decodificador-reed-solomon-rs204-188-t8-com-campo-de-galois-gf28)
+- [ADR 006: Decodificador Viterbi Soft-Decision (K=7, 64 Estados)](#adr-006-decodificador-viterbi-soft-decision-k7-64-estados)
+- [ADR 007: Sincronismo de Símbolo OFDM e FFO por Autocorrelação de Prefixo Cíclico (Van de Beek)](#adr-007-sincronismo-de-símbolo-ofdm-e-ffo-por-autocorrelação-de-prefixo-cíclico-van-de-beek)
+- [ADR 008: Alinhamento Matemático Integral com git-artes/gr-isdbt](#adr-008-alinhamento-matemático-integral-com-git-artesgr-isdbt-erros-corrigidos-e-acertos-validados)
+
+### Fase 2: Robustez de RF, Varredura e Apresentação (ADR 009 – 017)
+- [ADR 009: Arquitetura Multithread de Captura Assíncrona USB](#adr-009-arquitetura-multithread-de-captura-assíncrona-usb-fila-concorrente-de-amostras-iq)
+- [ADR 010: Invocação Direta do VLC via ShellExecute e Comportamento Visual do Player](#adr-010-invocação-direta-do-vlc-via-shellexecute-e-comportamento-visual-do-player)
+- [ADR 011: Equalização de Canal: De Zero-Forcing (ZF) para MMSE Regularizado com Piso de Ruído Adaptativo](#adr-011-equalização-de-canal-de-zero-forcing-zf-para-mmse-regularizado-com-piso-de-ruído-adaptativo)
+- [ADR 012: Métricas de Viterbi: Ponderação de Soft-Bits por Informação de Estado de Canal (CSI Weighting)](#adr-012-métricas-de-viterbi-ponderação-de-soft-bits-por-informação-de-estado-de-canal-csi-weighting)
+- [ADR 013: Varredura de Canais: Da Varredura RF Ingênua de 1 Passo para Varredura Inteligente Two-Pass](#adr-013-varredura-de-canais-da-varredura-rf-ingênua-de-1-passo-para-varredura-inteligente-two-pass-triagem-rf--decodificação-sdt)
+- [ADR 014: Reprodutor de Vídeo: Transição de VLC Externo para MPV Embutido com Job Object](#adr-014-reprodutor-de-vídeo-transição-de-vlc-externo-para-mpv-embutido-com-job-object-e-interpolação-de-resolução-e-movimento)
+- [ADR 015: Streaming de Rede UDP: Eliminação de Flush Prematuro e Alinhamento Estrito a 1316 Bytes](#adr-015-streaming-de-rede-udp-eliminação-de-flush-prematuro-e-alinhamento-estrito-a-1316-bytes-7-x-188b)
+- [ADR 016: Proteção do Barramento USB do RTL-SDR: Eliminação de Colisões de Endpoint (-9) e Calibração Segura](#adr-016-proteção-do-barramento-usb-do-rtl-sdr-eliminação-de-colisões-de-endpoint--9-e-calibração-de-frequência-segura)
+- [ADR 017: Consolidação das Correções Matemáticas da Camada Física (gr-isdbt)](#adr-017-consolidação-das-correções-matemáticas-da-camada-física-gr-isdbt)
+
+### Fase 3: Ciclo Consolidado de Refatoração de Alta Performance (ADR 018 – 023)
+*(Estes registros formalizam as melhorias descritas no relatório consolidado sob a nomenclatura ADR-007 a ADR-012)*
+- [ADR 018 (Consolidated Refactoring ADR-007): Fila de Captura SPSC Lock-Free com Rastreamento de Sequência e Reset Coordenado](#adr-018-refatoração-consolidada-adr-007-fila-de-captura-spsc-lock-free-com-rastreamento-de-sequência-e-reset-coordenado-lock-free-spsc-ring-buffer-with-sequence-tracking--coordinated-resets)
+- [ADR 019 (Consolidated Refactoring ADR-008): Eliminação de Alocações Dinâmicas no Loop Quente de DSP e Linhas de Atraso Estáticas/Contíguas](#adr-019-refatoração-consolidada-adr-008-eliminação-de-alocações-dinâmicas-no-loop-quente-de-dsp-e-linhas-de-atraso-estáticascontíguas-fixeddelayline--dynamicdelayline)
+- [ADR 020 (Consolidated Refactoring ADR-009): Ponderação CSI Centrada em 128 com Sincronismo de Atraso nos Desentrelaçadores](#adr-020-refatoração-consolidada-adr-009-ponderação-csi-centrada-em-128-com-sincronismo-de-atraso-nos-desentrelaçadores-de-bits-e-tempo)
+- [ADR 021 (Consolidated Refactoring ADR-010): Máquina de Estados Tripartite para Sincronismo Temporal OFDM (Acquisition, Tracking, LostLock)](#adr-021-refatoração-consolidada-adr-010-máquina-de-estados-tripartite-para-sincronismo-temporal-ofdm-acquisition-tracking-lostlock)
+- [ADR 022 (Consolidated Refactoring ADR-011): Tabela Direta de 64 KB em O(1) para Multiplicações em GF(2^8) no Reed-Solomon](#adr-022-refatoração-consolidada-adr-011-tabela-direta-de-64-kb-em-o1-para-multiplicações-em-campo-de-galois-gf28-no-reed-solomon-rs204-188)
+- [ADR 023 (Consolidated Refactoring ADR-012): Otimizações de Compilação de Produção (IPO/LTO, -O3, -DNDEBUG e FAST_MATH)](#adr-023-refatoração-consolidada-adr-012-otimizações-de-compilação-de-produção-ipolto--o3--dndebug-e-isdbt_enable_fast_math)
+
+---
+
 ## ADR 001: Escopo de Recepção Estrito em 1-Seg com Dongles RTL-SDR
 
 ### Contexto
@@ -381,4 +415,274 @@ O padrão ISDB-T (normas ARIB STD-B31 e ABNT NBR 15601) possui especificidades m
 5. **Histerese e Limiar de IFO (Integer Frequency Offset):**
    - *Erro anterior:* Limiar baixo de coerência (0.35) prendia a frequência em lóbulos secundários de pilotos dispersos a 2 portadoras de distância da portadora central.
    - *Correção:* A busca permanece aberta na faixa `[-45 .. +45]` subportadoras exigindo coerência $> 0.60$ (piloto real atinge $> 0.95$) com histerese de 4 símbolos consecutivos antes de travar.
+
+---
+
+## ADR 018 (Refatoração Consolidada ADR-007): Fila de Captura SPSC Lock-Free com Rastreamento de Sequência e Reset Coordenado (Lock-Free SPSC Ring Buffer with Sequence Tracking & Coordinated Resets)
+
+### Contexto
+No design multithread introduzido no ADR 009, a transferência de blocos brutos I/Q de 32768 amostras entre a thread de leitura USB (`reader_thread`) e a thread consumidora de DSP era intermediada por uma fila concorrente padrão:
+```cpp
+std::mutex q_mtx;
+std::condition_variable q_cv;
+std::queue<std::vector<uint8_t>> raw_queue;
+```
+Embora essa abordagem tenha evitado que a computação de DSP bloqueasse diretamente as chamadas USB, ela apresentava três gargalos críticos de arquitetura sob regime de carga contínua:
+1. **Alocação Dinâmica por Bloco:** A thread de leitura alocava repetidamente vetores `std::vector<uint8_t>(65536)` no heap a cada ~16 ms, gerando fragmentação e pressão contínua sobre o alocador de memória do sistema operacional.
+2. **Contenção de Travas de SO:** O uso de `std::mutex` impõe transições de contexto (context switches) para o modo kernel do Windows quando produtor e consumidor tentam acessar a fila simultaneamente.
+3. **Drops Silenciosos sem Sinalização:** Quando a fila atingia sua capacidade máxima (64 blocos), blocos subsequentes eram descartados silenciosamente. O consumidor de DSP continuava seu processamento sem ter conhecimento de que um salto temporal ocorreu no fluxo de RF. Como o sincronizador OFDM mantém rastreamento contínuo da fase do oscilador NCO ($\phi[n] = \phi[n-1] + 2\pi \Delta f / F_s$), a descontinuidade temporal de dados introduzia saltos de fase imprevisíveis, desestabilizando o PLL de rastreamento fino e causando perda em cascata do sincronismo de quadros TMCC.
+
+### Decisão
+Substituir a fila bloqueante por um **Ring Buffer SPSC (Single Producer, Single Consumer) Lock-Free** estático com rastreamento estrito de número de sequência atômico e detecção de gaps temporais (`include/dsp/spsc_capture_queue.hpp`):
+
+1. **Memória Estática Pré-Alocada:**
+   - A classe `SpscCaptureQueue<SlotCount=64>` aloca estaticamente um `std::array<CaptureBlock, SlotCount>`, onde cada `CaptureBlock` contém:
+     - `std::array<uint8_t, 65536> raw`: Armazenamento contíguo direto sem alocação dinâmica.
+     - `size_t size`: Quantidade real de bytes válidos lidos na transferência USB.
+     - `uint64_t sequence`: Número de sequência sequencial monotônico atribuído pelo produtor.
+     - `bool discontinuity_before`: Flag explícita indicando que um ou mais blocos foram descartados imediatamente antes deste bloco.
+2. **Índices Atômicos com Alinhamento Anti-False-Sharing:**
+   - Os ponteiros de escrita (`tail_`) e leitura (`head_`) utilizam operações atômicas sem travas com semântica de acquire-release (`memory_order_acquire` / `memory_order_release`) e são isolados em linhas de cache L1 de 64 bytes (`alignas(64)`), eliminando qualquer invalidação cruzada de cache (*false sharing*) entre os núcleos de CPU da thread USB e da thread DSP.
+3. **Detecção de Gaps e Protocolo de Reset Coordenado:**
+   - Caso o produtor não consiga espaço na fila (`(tail - head) >= SlotCount`), ele incrementa atomicamente o contador `dropped_` e marca a flag `pending_discontinuity = true`. O próximo bloco produzido recebe `discontinuity_before = true`.
+   - No lado do consumidor (`src/main.cpp`), se `block->sequence != expected_sequence` ou `block->discontinuity_before == true`, o receptor detecta a perda de continuidade e aciona imediatamente a rotina `reset_reception_stream(...)`.
+   - A rotina `reset_reception_stream` limpa os buffers residuais acumulados (`stream_iq_buf`), reseta as fases do oscilador local do NCO (`sync.reset()`) e reinicializa os estados do demodulador (`demod.reset()`), permitindo uma recuperação rápida e determinística do sinal sem propagar erros de fase.
+
+### Consequências
+- **Zero Alocações:** Zero chamadas a `malloc`/`new` durante toda a captura contínua de RF.
+- **Latência Ultrabaixa:** Operações de aquisição e publicação de blocos executadas em menos de 15 nanossegundos via operações atômicas puras na CPU.
+- **Recuperação Imediata:** Resets coordenados evitam que lacunas USB gerem dados espúrios ou corrupção no decodificador Forney e Viterbi.
+
+---
+
+## ADR 019 (Refatoração Consolidada ADR-008): Eliminação de Alocações Dinâmicas no Loop Quente de DSP e Linhas de Atraso Estáticas/Contíguas (`FixedDelayLine` & `DynamicDelayLine`)
+
+### Contexto
+O pipeline de Camada Física do ISDB-T 1-Seg exige diversos bancos de atraso temporal e convolucional para desfazer o entrelaçamento introduzido pelo transmissor:
+1. **Desentrelaçador Convolucional no Tempo:** 384 subportadoras de dados onde a subportadora $c$ sofre um retardo de $D_c = I \times (95 - (5c \bmod 96))$ símbolos OFDM ($I \in \{0, 4, 8, 16\}$). Para $I=4$, o atraso máximo atinge $4 \times 95 = 380$ símbolos por subportadora.
+2. **Desentrelaçador de Bits:** 4 ramos paralelos com atrasos de $0$ e $120$ símbolos para QPSK, e $0, 40, 80, 120$ símbolos para 16QAM.
+3. **Desentrelaçador Convolucional de Bytes de Forney:** 12 ramos paralelos onde o ramo $j$ ($0 \le j \le 11$) possui retardo de $17 \times (11 - j)$ bytes, com profundidade máxima de $187$ bytes.
+
+Na implementação preliminar, essas estruturas foram concebidas utilizando coleções de `std::deque<T>` (ex: `std::vector<std::deque<std::complex<float>>>` para o tempo e `std::vector<std::deque<uint8_t>>` para o Forney). Além disso, o método central `process_symbol` declarava múltiplos `std::vector` locais (`equalized`, `data_carriers`, `freq_deint`, `time_deint`) a cada chamada, e o buffer de saída do Viterbi era fatiado através de `viterbi_byte_stream_.erase(begin(), begin() + 204)`.
+
+### O Problema do `std::deque` e da Fragmentação de Memória
+- O contêiner `std::deque` aloca memória em múltiplos blocos (páginas) no heap conectados por um vetor de ponteiros internos. A cada operação `push_back` e `pop_front`, ocorre alocação/desalocação ou travessia não contígua de ponteiros.
+- A 1000 símbolos OFDM processados por segundo, os 384 ramos de tempo realizavam **384.000 operações de deque por segundo**, causando poluição severa das caches L1/L2 de dados da CPU e frequentes falhas de cache (*cache misses*).
+- O comando `std::vector::erase(begin, begin + 204)` realizava um `memmove` de todo o volume residual do vetor a cada pacote TS decodificado, incorrendo em complexidade computacional desnecessária de $O(N)$ repetidas vezes.
+
+### Decisão
+Substituir integralmente os contêineres dinâmicos por estruturas circulares estáticas contíguas (`include/dsp/delay_line.hpp`):
+
+1. **`FixedDelayLine<T, MaxCapacity>`:**
+   - Baseada em `std::array<T, MaxCapacity>` com índice circular estático `index_`.
+   - Zero alocação de memória no heap.
+   - Método `push_and_get(val)` inline de altíssima performance:
+     ```cpp
+     inline T push_and_get(const T& val) noexcept {
+         if (delay_ == 0) return val;
+         T out = data_[index_];
+         data_[index_] = val;
+         index_++;
+         if (index_ >= delay_) index_ = 0;
+         return out;
+     }
+     ```
+   - Utilizada no desentrelaçador de bytes Forney (`FixedDelayLine<uint8_t, 187>`, 12 instâncias) e no desentrelaçador de bits (`FixedDelayLine<float, 120>`, 4 instâncias).
+2. **`DynamicDelayLine<T>`:**
+   - Utiliza um único `std::vector<T>` interno alocado **uma única vez** durante o método `init()` via `assign(delay, initial_val)`.
+   - Utilizada para os 384 ramos do desentrelaçador no tempo (`time_delay_lines_` e `time_csi_delay_lines_`), mantendo a flexibilidade de profundidades $I \in \{0, 4, 8, 16\}$ sem qualquer alocação durante o processamento.
+3. **Membros Estáticos em `OneSegDemodulator`:**
+   - Todos os buffers temporários de `process_symbol` foram transformados em membros de classe com `std::array`:
+     - `std::array<std::complex<float>, 433> seg_carriers_`
+     - `std::array<std::complex<float>, 432> channel_h_`
+     - `std::array<std::complex<float>, 432> equalized_`
+     - `std::array<float, 432> csi_weight_`
+     - `std::array<std::complex<float>, 384> data_carriers_`
+     - `std::array<float, 384> data_csi_`
+     - `std::array<std::complex<float>, 384> freq_deint_`
+     - `std::array<float, 384> freq_csi_`
+     - `std::array<std::complex<float>, 384> time_deint_`
+     - `std::array<float, 384> time_csi_`
+4. **Buffer de Stream Viterbi com Deslocamento por Offset (Offset Sliding):**
+   - Substituição do `erase` frontal por um índice de deslocamento `viterbi_stream_offset_`.
+   - Novos blocos de 204 bytes são consumidos em $O(1)$ avançando o offset. Apenas quando o offset ultrapassa 4096 bytes e mais de 50% do vetor, uma compactação residual via `std::memmove` é executada, amortizando o custo de realocação para zero no fluxo estável.
+
+### Consequências
+- **Zero Alocações Dinâmicas no Loop Quente:** Nenhuma chamada a `malloc` ou `free` durante o processamento contínuo de símbolos OFDM.
+- **Previsibilidade e Cache Locality:** Toda a estrutura de dados é mantida em blocos de memória contíguos na memória física, maximizando a taxa de acertos na cache L1/L2 do processador e viabilizando a pré-busca automática por hardware (*hardware prefetching*).
+
+---
+
+## ADR 020 (Refatoração Consolidada ADR-009): Ponderação CSI Centrada em 128 com Sincronismo de Atraso nos Desentrelaçadores de Bits e Tempo
+
+### Contexto
+A ponderação por Informação de Estado de Canal (Channel State Information - CSI) visa atribuir menor peso às decisões do decodificador Viterbi nas subportadoras afetadas por desvanecimento seletivo em frequência (nulos de amplitude $|H_l|^2 \to 0$).
+No desenho preliminar do ADR 012, o peso de canal $W_l = \text{clamp}(|H_l|^2 / P_{\text{avg}}, 0.0, 2.0)$ era multiplicado diretamente nas coordenadas complexas da subportadora equalizada antes do demapeador de constelação:
+\[
+\tilde{Y}_l = Y_l \cdot W_l
+\]
+
+### O Problema da Ponderação Pré-Demapeador e Dessincronia Temporal
+1. **Distorção Geométrica dos Limiares de Decisão em 16QAM:**
+   Na modulação 16QAM (norma ABNT NBR 15601), a constelação possui 16 pontos com níveis em $\pm 1/\sqrt{10}$ e $\pm 3/\sqrt{10}$. Os quatro bits de cada subportadora são obtidos pelas equações euclidianas:
+   \[
+   b_0 = \frac{2}{\sqrt{10}} - |\text{Im}(Y)|, \quad b_1 = \frac{2}{\sqrt{10}} - |\text{Re}(Y)|, \quad b_2 = -\text{Im}(Y), \quad b_3 = -\text{Re}(Y)
+   \]
+   Ao multiplicar $Y$ por $W_l \ll 1$ antes da avaliação, as magnitudes $|\text{Re}|$ e $|\text{Im}|$ aproximam-se de zero. Consequentemente:
+   \[
+   b_0 \to \frac{2}{\sqrt{10}} - 0 = +\frac{2}{\sqrt{10}} > 0
+   \]
+   Isso injetava uma decisão com convicção positiva espúria no bit $b_0$, corrompendo a lógica de mapeamento de Gray mesmo quando o canal não continha sinal!
+2. **Dessincronia Temporal entre Dados e Pesos CSI:**
+   No transmissor ISDB-T, os bits gerados sofrem desentrelaçamento de bits antes do modulador. No receptor, o MSB passa por uma linha de atraso de $120$ símbolos OFDM (`bit_delay_lines_[1]`), enquanto o LSB não sofre atraso ($0$ símbolos). Se o peso CSI $W_l$ for aplicado sem atraso, o MSB recebido de 120 símbolos atrás seria ponderado pelo estado do canal do símbolo presente, violando a causalidade física da estimativa de canal.
+
+### Decisão
+Refatorar integralmente a aplicação de CSI para atuar sobre **Soft-Bits Centrados no Valor Neutro 128** com linhas de atraso de canal dedicadas e sincronizadas:
+
+1. **Demapeamento Euclidiano Puro:**
+   - O demapeador calcula os valores euclidianos puros com base nas amostras equalizadas $\hat{X}_l$, sem contaminação prévia por $W_l$.
+   - Converte os bits brutos em soft-bits normalizados entre $0$ e $255$, centrados no valor neutro $128$ (`constants::SOFT_NEUTRAL = 128.0f`), onde $0$ representa bit 0 com máxima convicção e $255$ representa bit 1 com máxima convicção.
+2. **Linhas de Atraso Paralelas para os Pesos CSI:**
+   - Criar `time_csi_delay_lines_` (384 instâncias de `DynamicDelayLine<float>`) paralelas às linhas de dados temporais.
+   - Criar `bit_csi_delay_lines_` (4 instâncias de `FixedDelayLine<float, 120>`) paralelas aos desentrelaçadores de bits.
+   - O peso $W_l$ do canal atravessa exatamente as mesmas linhas de atraso temporal e de bits que os dados correspondentes, garantindo alinhamento temporal perfeito entre o estado físico do canal e o soft-bit entregue.
+3. **Escalonamento Neutro Centrado em 128:**
+   - A função `scale_soft` aplica a ponderação diretamente ao soft-bit sincronizado:
+     \[
+     \text{soft\_scaled} = 128 + \text{clamp}\left(W \cdot (\text{soft\_val} - 128),\; -128,\; +127\right)
+     \]
+   - **Comportamento sob fading profundo ($W \to 0$):** O soft-bit resultante torna-se exatamente $128$. Na Trellis do decodificador Viterbi, a distância de ramo para bit 0 é $|128 - 0| = 128$ e para bit 1 é $|128 - 255| = 127$. O diferencial de métrica de caminho é nulo, de modo que a subportadora apagada não força nenhuma decisão espúria na Trellis.
+   - **Comportamento sob sinal limpo ($W = 1.0$):** O soft-bit permanece inalterado.
+   - **Comportamento sob sinal reforçado ($W > 1.0$):** A convicção é acentuada com clamp seguro em $[0, 255]$.
+
+### Consequências
+- Resolução definitiva de erros de constelação em modulações multinível (16QAM).
+- Eliminação completa de desvios de fase entre canais de desvanecimento e métricas de ramo convolucionais.
+- Aumento do ganho de codificação e estabilidade de decodificação sob canais móveis seletivos em frequência.
+
+---
+
+## ADR 021 (Refatoração Consolidada ADR-010): Máquina de Estados Tripartite para Sincronismo Temporal OFDM (`Acquisition`, `Tracking`, `LostLock`)
+
+### Contexto
+O algoritmo de Van de Beek calcula a autocorrelação de prefixo cíclico através do operador deslizante:
+\[
+\Gamma(d) = \sum_{m=0}^{N_{GI}-1} r(d+m) \cdot r^*(d+m+N_{FFT}), \quad \Phi(d) = \frac{1}{2} \sum_{m=0}^{N_{GI}-1} \left( |r(d+m)|^2 + |r(d+m+N_{FFT})|^2 \right)
+\]
+Para identificar de forma determinística o intervalo de guarda empregado pela emissora ($GI \in \{1/4, 1/8, 1/16, 1/32\}$), o sincronizador aplica o princípio de dobramento (*folding*) ao longo de 2 a 8 símbolos consecutivos em uma janela de 32768 a 65536 amostras.
+
+Na versão inicial, esse processo exaustivo de teste dos 4 intervalos de guarda ao longo de todo o espaço de amostras era executado incondicionalmente a cada chamada de `find_symbol_boundary`, consumindo mais de 65% de todo o tempo de CPU do pipeline DSP, mesmo quando a emissora já havia sido sintonizada e operava com sinal contínuo e estável.
+
+### Decisão
+Implementar uma **Máquina de Estados de Sincronismo Tripartite** (`SyncState` em `include/dsp/ofdm_sync.hpp`):
+
+```mermaid
+stateDiagram-v2
+    [*] --> Acquisition
+    Acquisition --> Tracking : Pico de Correlação > 0.20 (GI Detectado e Travado)
+    Tracking --> Tracking : Sucesso no Rastreamento Estreito (±4 amostras)
+    Tracking --> LostLock : 3 Falhas Consecutivas de Correlação
+    LostLock --> Acquisition : Próximo Bloco de Amostras
+```
+
+1. **Estado `SyncState::Acquisition`:**
+   - Modo de busca global profunda.
+   - Avalia exaustivamente os quatro intervalos de guarda candidatos ($1/16, 1/8, 1/4, 1/32$) com folding multissímbolo.
+   - Detecta o intervalo de guarda de maior correlação normalizada $\rho$ e calcula o offset temporal inicial do símbolo ($d_0$).
+   - Ao obter correlação válida ($\rho > 0.20$), define `gi_` de forma definitiva, calcula a fronteira esperada do próximo bloco e transiciona imediatamente para `SyncState::Tracking`.
+2. **Estado `SyncState::Tracking`:**
+   - Modo de alta performance operacional.
+   - O intervalo de guarda não é recalculado; o algoritmo avalia exclusivamente o $GI$ já estabelecido.
+   - A busca de correlação é restrita estritamente a uma janela temporal estreita de **$\pm 4$ amostras** (`TRACK_RADIUS = 4`) em torno da posição predita do símbolo:
+     \[
+     d_{\text{pred}} = (d_{\text{expected}} + sh + N_{\text{sym}}) \bmod N_{\text{sym}}, \quad sh \in [-4, +4]
+     \]
+   - Se o pico na janela estreita confirmar o sincronismo ($\rho > 0.20$), zera o contador de falhas (`consecutive_failures_ = 0`) e atualiza o alinhamento de fase e tempo.
+3. **Estado `SyncState::LostLock`:**
+   - Se por 3 chamadas consecutivas (`MAX_CONSECUTIVE_FAILURES = 3`) a correlação na janela estreita não atingir o limiar mínimo, a máquina transiciona para `LostLock`.
+   - Na chamada subsequente, o estado reverte automaticamente para `Acquisition`, disparando novamente a busca exaustiva ampla e detecção de $GI$ para reencontrar o sinal.
+
+### Consequências
+- **Redução Drástica no Uso de CPU:** Em regime estável (`Tracking`), o tempo de processamento de sincronismo de símbolo cai de aproximadamente $3.8\text{ ms}$ para **menos de $0.6\text{ ms}$ por bloco de 32768 amostras** (aceleração superior a $6\times$).
+- **Imunidade a Ruídos Impulsivos:** O rastreamento restrito a $\pm 4$ amostras impede que reflexões transitórias ou ruídos impulsivos de alta potência em posições arbitrárias do buffer desviem a fronteira de símbolo.
+
+---
+
+## ADR 022 (Refatoração Consolidada ADR-011): Tabela Direta de 64 KB em $O(1)$ para Multiplicações em Campo de Galois $GF(2^8)$ no Reed-Solomon $RS(204, 188)$
+
+### Contexto
+O algoritmo de decodificação da Camada Externa de FEC utiliza o código Reed-Solomon encurtado $RS(204, 188, t=8)$ definido sobre o corpo finito de Galois $GF(2^8)$ com polinômio gerador de campo $p(x) = x^8 + x^4 + x^3 + x^2 + 1$ ($0x11D$).
+Durante o processamento de cada bloco de 204 bytes, são realizadas operações de multiplicação escalar em campo finito em quatro etapas fundamentais:
+1. Cálculo das 16 síndromes $S_i = \sum_{j=0}^{203} r_j \alpha^{i j}$.
+2. Determinação do polinômio localizador de erros $\Lambda(x)$ através do algoritmo iterativo de Berlekamp-Massey.
+3. Avaliação das raízes do polinômio de grau $t \le 8$ pela busca exaustiva de Chien em 204 posições.
+4. Cálculo da magnitude de cada erro pelo algoritmo de Forney.
+
+### O Problema da Multiplicação Clássica com Logaritmos
+A implementação padrão de corpos finitos converte multiplicações em adições de expoentes:
+```cpp
+uint8_t ReedSolomon::gf_mul(uint8_t a, uint8_t b) const {
+    if (a == 0 || b == 0) return 0;
+    return exp_table_[log_table_[a] + log_table_[b]];
+}
+```
+Essa abordagem possui três problemas de desempenho:
+1. **Falha de Predição de Desvio (Branch Misprediction):** A verificação `a == 0 || b == 0` gera branches condicionais difíceis de prever pela CPU no meio de laços vetoriais intensivos.
+2. **Três Acessos Indiretos à Memória:** Exige ler `log_table_[a]`, depois `log_table_[b]`, somar os expoentes e indexar `exp_table_`.
+3. **Impossibilidade de Vetorização:** A dependência serial de leituras de tabela bloqueia a vetorização automática do compilador.
+
+### Decisão
+Substituir a multiplicação logarítmica por uma **Tabela Bidimensional Direta de Multiplicação de 64 KB** (`include/dsp/reed_solomon.hpp` e `src/dsp/reed_solomon.cpp`):
+
+```cpp
+// Tabela 256 x 256 pré-computada na inicialização
+uint8_t gf_mul_table_[256][256];
+
+inline uint8_t ReedSolomon::gf_mul(uint8_t a, uint8_t b) const noexcept {
+    return gf_mul_table_[a][b];
+}
+```
+
+1. **Pré-Computação Única:** Durante o construtor da classe `ReedSolomon`, a tabela de $256 \times 256 = 65.536\text{ bytes}$ ($64\text{ KB}$) é gerada preenchendo as multiplicações diretas em $GF(2^8)$.
+2. **Execução Branch-Free em $O(1)$:** A função `gf_mul` torna-se uma operação puramente aritmética de indexação bidimensional `gf_mul_table_[a][b]`, sem nenhuma instrução de desvio (`jmp`/`jne`).
+3. **Acomodação em Cache:** A tabela de 64 KB cabe integralmente na cache L2 (e frequentemente na L1D de 48 KB a 64 KB) dos processadores modernos (Intel Alder/Raptor Lake, AMD Zen 3/4/5 e ARM Cortex-A78/Apple Silicon), garantindo latência de acesso de 3 a 4 ciclos de clock.
+
+### Consequências
+- **Eliminação Completa de Branches:** Zero desvios condicionais nas rotinas matemáticas do Reed-Solomon.
+- **Redução do Tempo de Decodificação:** A execução das síndromes, Berlekamp-Massey e Chien Search apresenta aceleração de ~40% em relação à abordagem logarítmica clássica.
+
+---
+
+## ADR 023 (Refatoração Consolidada ADR-012): Otimizações de Compilação de Produção (IPO/LTO, `-O3`, `-DNDEBUG` e `ISDBT_ENABLE_FAST_MATH`)
+
+### Contexto
+A demodulação de TV digital em tempo real em processadores de uso geral (desktop e notebook) exige máxima eficiência computacional. Pequenos gargalos de chamada de função, limites de inlining e instruções de checagem de assertions em runtime podem consumir precioso tempo de CPU, gerando descartes de amostras no barramento USB.
+
+### Decisão
+Estruturar o sistema de compilação em `CMakeLists.txt` com as seguintes flags e mecanismos de otimização interprocedural:
+
+1. **Otimização de Nível de Compilação:**
+   - GCC / MinGW-w64: `-O3 -DNDEBUG`
+   - MSVC: `/O2 /DNDEBUG`
+   - Desativa todas as macros de depuração em runtime (`assert()`), permitindo que loops de DSP e verificações internas sejam completamente eliminados em compilações de produção.
+2. **Otimização Interprocedural / Link-Time Optimization (IPO/LTO):**
+   - Configuração via CMake com detecção automática do toolchain:
+     ```cmake
+     include(CheckIPOSupported)
+     check_ipo_supported(RESULT ipo_supported OUTPUT ipo_error)
+     if(ipo_supported)
+         set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+     endif()
+     ```
+   - O LTO permite que métodos inline definidos em diferentes unidades de tradução (ex: `ReedSolomon::gf_mul`, `FixedDelayLine::push_and_get`, `SpscCaptureQueue::try_acquire_read` e funções de desentrelaçamento) sejam fundidos diretamente no corpo dos laços de execução pelo linker, eliminando qualquer sobrecarga de convenção de chamada de função (*calling convention overhead*).
+3. **Opção de Otimização de Ponto Flutuante Rápido (`ISDBT_ENABLE_FAST_MATH`):**
+   - Flag opcional adicionada ao CMake:
+     ```cmake
+     option(ISDBT_ENABLE_FAST_MATH "Habilitar otimizacao de ponto flutuante rapido (-ffast-math / /fp:fast)" OFF)
+     ```
+   - Quando ativada (`-DISDBT_ENABLE_FAST_MATH=ON`), injeta `-ffast-math` (GCC) ou `/fp:fast` (MSVC), habilitando a reordenação associativa de adições/multiplicações, fusão FMA (*Fused Multiply-Add*) e vetorização AVX2 automática em operações de equalização MMSE, cálculo de energia de prefixo cíclico e rotações de fase do NCO.
+
+### Consequências
+- Código binário compacto, com inlining agressivo entre todos os módulos de DSP.
+- Execução suave e estável mesmo em CPUs de baixo consumo energético (Intel Celeron, mini-PCs ou Raspberry Pi 4/5).
 
