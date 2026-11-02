@@ -13,15 +13,15 @@ bool is_valid_channel(int channel_number) {
 
 SignalRating get_signal_rating(float rssi_dbfs) {
     if (rssi_dbfs >= -6.0f) {
-        return {"Alto (Forte)",   "\033[1;32m", "[#####]"};
+        return {"Alto (Forte)",   "", "[#####]"};
     } else if (rssi_dbfs >= -12.0f) {
-        return {"Normal (Bom)",   "\033[1;36m", "[#### ]"};
+        return {"Normal (Bom)",   "", "[#### ]"};
     } else if (rssi_dbfs >= -18.0f) {
-        return {"Moderado",       "\033[1;33m", "[###  ]"};
+        return {"Moderado",       "", "[###  ]"};
     } else if (rssi_dbfs >= -26.5f) {
-        return {"Fraco",          "\033[1;35m", "[##   ]"};
+        return {"Fraco",          "", "[##   ]"};
     } else {
-        return {"Sem Sinal",      "\033[1;30m", "[     ]"};
+        return {"Sem Sinal",      "", "[     ]"};
     }
 }
 
@@ -35,4 +35,3 @@ std::string pad_string(const std::string& str, size_t width, bool left_align) {
 }
 
 } // namespace isdbt
-
