@@ -67,6 +67,17 @@ void test_build_pat_and_crc() {
     uint8_t cc1 = pat_pkt[3] & 0x0F;
     uint8_t cc2 = pat_pkt2[3] & 0x0F;
     TEST_ASSERT(cc2 == ((cc1 + 1) & 0x0F));
+
+    // Teste de reset e incremento de versao
+    parser.reset();
+    uint8_t pat_pkt3[188];
+    TEST_ASSERT(parser.build_pat_packet(pat_pkt3));
+    TEST_ASSERT((pat_pkt3[5 + 5] & 0x3E) == (2 << 1)); // version 2
+    TEST_ASSERT(compute_mpeg2_crc32(&pat_pkt3[5], 12) ==
+                ((static_cast<uint32_t>(pat_pkt3[5 + 12]) << 24) |
+                 (static_cast<uint32_t>(pat_pkt3[5 + 13]) << 16) |
+                 (static_cast<uint32_t>(pat_pkt3[5 + 14]) << 8)  |
+                 static_cast<uint32_t>(pat_pkt3[5 + 15])));
 }
 
 void test_parse_pat_roundtrip() {
