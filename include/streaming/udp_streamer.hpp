@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <chrono>
+#include "dsp/constants.hpp"
 
 namespace isdbt {
 
@@ -85,9 +86,9 @@ private:
     std::chrono::steady_clock::time_point last_packet_time_;
 
     std::vector<uint8_t> buffer_; // Buffer acumulador de 1316 bytes
-    static constexpr size_t TS_PACKET_SIZE = 188;
+    static constexpr size_t TS_PACKET_SIZE = constants::TS_PACKET_SIZE;
     static constexpr size_t PACKETS_PER_UDP = 7;
-    static constexpr size_t UDP_PAYLOAD_SIZE = TS_PACKET_SIZE * PACKETS_PER_UDP; // 1316 bytes
+    static constexpr size_t UDP_PAYLOAD_SIZE = constants::UDP_PACKET_SIZE; // 1316 bytes
 };
 
 } // namespace isdbt

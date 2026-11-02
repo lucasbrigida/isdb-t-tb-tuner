@@ -26,6 +26,9 @@
 #include <volk/volk.h>
 #include <volk/volk_cpu.h>
 
+#include "dsp/constants.hpp"
+#include "dsp/dsp_metrics.hpp"
+#include "dsp/spsc_capture_queue.hpp"
 #include "dsp/reed_solomon.hpp"
 #include "dsp/descrambler.hpp"
 #include "dsp/viterbi_decoder.hpp"
@@ -37,7 +40,7 @@
 #include "cli/channel_manager.hpp"
 
 // Taxa de amostragem padrao exata de 1/4 da taxa base de chip ISDB-T (512 / (63 * 4) MHz)
-constexpr uint32_t ISDBT_SAMPLE_RATE = 2031746;
+constexpr uint32_t ISDBT_SAMPLE_RATE = isdbt::constants::SAMPLE_RATE;
 
 std::atomic<bool> g_running{true};
 
@@ -193,6 +196,19 @@ struct CandidateChannel {
     uint16_t service_id = 0;
 };
 
+void reset_reception_stream(
+    isdbt::OfdmSync& sync,
+    isdbt::OneSegDemodulator& demod,
+    std::vector<std::complex<float>>& stream_iq_buf,
+    std::vector<std::complex<float>>& iq_buf,
+    bool& ofdm_locked,
+    float& tracked_ffo_hz,
+    float& frac_pos,
+    std::size_t& gi_len,
+    std::size_t& sym_len,
+    int& unlock_counter,
+    isdbt::DspMetrics* metrics = nullptr);
+
 int cmd_scan(int start_ch, int end_ch, int dev_idx) {
     std::cout << "\033[1;36m========================================================\033[0m\n";
     std::cout << "\033[1;36m  VARREDURA PROFUNDA DE FREQUENCIAS ISDB-T / ISDB-Tb    \033[0m\n";
@@ -307,27 +323,44 @@ int cmd_scan(int start_ch, int end_ch, int dev_idx) {
 
         const size_t step_chunk_samples = 32768;
         const size_t step_chunk_bytes = step_chunk_samples * 2;
-        std::mutex q_mtx;
-        std::condition_variable q_cv;
-        std::queue<std::vector<uint8_t>> raw_queue;
+        auto raw_queue = std::make_unique<isdbt::SpscCaptureQueue<64>>();
         std::atomic<bool> pass2_worker_running{true};
 
         std::thread reader_thread([&]() {
 #ifdef _WIN32
             SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
 #endif
-            while (pass2_worker_running && g_running) {
-                std::vector<uint8_t> buf(step_chunk_bytes);
-                int n_read = 0;
-                int r = rtlsdr_read_sync(dev, buf.data(), static_cast<int>(buf.size()), &n_read);
-                if (r < 0 || n_read != static_cast<int>(step_chunk_bytes)) continue;
-                {
-                    std::lock_guard<std::mutex> lock(q_mtx);
-                    if (raw_queue.size() < 64) {
-                        raw_queue.push(std::move(buf));
-                    }
+            std::uint64_t sequence = 0;
+            bool pending_discontinuity = false;
+
+            while (pass2_worker_running.load(std::memory_order_relaxed) && g_running) {
+                isdbt::SpscCaptureQueue<64>::WriteView view;
+                if (!raw_queue->try_acquire_write(view)) {
+                    raw_queue->record_drop();
+                    ++sequence;
+                    pending_discontinuity = true;
+                    std::this_thread::sleep_for(std::chrono::microseconds(500));
+                    continue;
                 }
-                q_cv.notify_one();
+
+                auto* block = view.block;
+                block->sequence = sequence++;
+                block->size = 0;
+                block->discontinuity_before = pending_discontinuity;
+
+                int n_read = 0;
+                int r = rtlsdr_read_sync(dev, block->raw.data(), static_cast<int>(step_chunk_bytes), &n_read);
+                if (r < 0 || n_read != static_cast<int>(step_chunk_bytes)) {
+                    block->discontinuity_before = true;
+                    block->size = 0;
+                    pending_discontinuity = true;
+                    raw_queue->publish_write(view);
+                    continue;
+                }
+
+                block->size = static_cast<size_t>(n_read);
+                raw_queue->publish_write(view);
+                pending_discontinuity = false;
             }
         });
 
@@ -352,6 +385,9 @@ int cmd_scan(int start_ch, int end_ch, int dev_idx) {
         bool initial_symbol_found = false;
         std::string detected_name;
         uint16_t detected_service_id = 0;
+        int unlock_counter = 0;
+        std::uint64_t expected_sequence = 0;
+        bool have_expected_sequence = false;
 
         auto start_time = std::chrono::steady_clock::now();
         while (g_running) {
@@ -359,89 +395,122 @@ int cmd_scan(int start_ch, int end_ch, int dev_idx) {
                 std::chrono::steady_clock::now() - start_time).count();
             if (elapsed_ms >= 3000) break;
 
-            std::vector<uint8_t> raw_chunk;
-            {
-                std::unique_lock<std::mutex> lock(q_mtx);
-                q_cv.wait_for(lock, std::chrono::milliseconds(50), [&]() { return !raw_queue.empty() || !g_running; });
-                if (!g_running) break;
-                if (raw_queue.empty()) continue;
-                raw_chunk = std::move(raw_queue.front());
-                raw_queue.pop();
+            isdbt::SpscCaptureQueue<64>::ReadView view;
+            if (!raw_queue->try_acquire_read(view)) {
+                std::this_thread::sleep_for(std::chrono::microseconds(200));
+                continue;
             }
 
-            for (size_t i = 0; i < step_chunk_samples; ++i) {
-                float iv = (static_cast<float>(raw_chunk[2 * i + 0]) - 127.5f) / 127.5f;
-                float qv = (static_cast<float>(raw_chunk[2 * i + 1]) - 127.5f) / 127.5f;
-                cand_iq_buf[i] = std::complex<float>(iv, qv);
+            const auto& block = *view.block;
+            bool discontinuity = block.discontinuity_before;
+            if (have_expected_sequence && block.sequence != expected_sequence) {
+                discontinuity = true;
             }
 
-            auto sync_res = scan_sync.find_symbol_boundary(cand_iq_buf.data(), step_chunk_samples);
-            if (!initial_symbol_found) {
-                if (sync_res.locked) {
-                    initial_symbol_found = true;
-                    GI_LEN = static_cast<size_t>(scan_sync.gi_size());
-                    SYM_LEN = FFT_LEN + GI_LEN;
-                    frac_pos = static_cast<float>(sync_res.symbol_offset);
-                    tracked_ffo_hz = sync_res.ffo_hz;
+            expected_sequence = block.sequence + 1;
+            have_expected_sequence = true;
+
+            if (discontinuity) {
+                reset_reception_stream(scan_sync, scan_demod, stream_iq_buf, cand_iq_buf,
+                                       initial_symbol_found, tracked_ffo_hz, frac_pos,
+                                       GI_LEN, SYM_LEN, unlock_counter, nullptr);
+            }
+
+            if (block.size == step_chunk_bytes) {
+                const uint8_t* raw_data = block.raw.data();
+                for (size_t i = 0; i < step_chunk_samples; ++i) {
+                    float iv = (static_cast<float>(raw_data[2 * i + 0]) - 127.5f) / 127.5f;
+                    float qv = (static_cast<float>(raw_data[2 * i + 1]) - 127.5f) / 127.5f;
+                    cand_iq_buf[i] = std::complex<float>(iv, qv);
                 }
-            } else {
-                if (sync_res.peak_correlation >= 0.40f) {
-                    const float spacing = static_cast<float>(ISDBT_SAMPLE_RATE) / static_cast<float>(FFT_LEN);
-                    float residual = sync_res.ffo_hz - tracked_ffo_hz;
-                    residual -= spacing * std::round(residual / spacing);
-                    tracked_ffo_hz += 0.05f * residual;
-                }
-            }
 
-            scan_sync.correct_frequency_offset(cand_iq_buf.data(), step_chunk_samples, tracked_ffo_hz);
-            stream_iq_buf.insert(stream_iq_buf.end(), cand_iq_buf.begin(), cand_iq_buf.end());
+                auto sync_res = scan_sync.find_symbol_boundary(cand_iq_buf.data(), step_chunk_samples);
+                if (!initial_symbol_found) {
+                    if (sync_res.locked) {
+                        initial_symbol_found = true;
+                        unlock_counter = 0;
+                        GI_LEN = static_cast<size_t>(scan_sync.gi_size());
+                        SYM_LEN = FFT_LEN + GI_LEN;
+                        frac_pos = 0.0f;
+                        tracked_ffo_hz = sync_res.ffo_hz;
+                        scan_sync.reset_phase();
+                        scan_sync.correct_frequency_offset(cand_iq_buf.data(), cand_iq_buf.size(), tracked_ffo_hz);
 
-            if (initial_symbol_found) {
-                std::vector<std::vector<uint8_t>> scan_pkts;
-                while (static_cast<size_t>(std::lround(frac_pos)) + SYM_LEN + 8 <= stream_iq_buf.size()) {
-                    int base_pos = static_cast<int>(std::lround(frac_pos));
-                    int max_neg = (base_pos >= 4) ? 4 : base_pos;
-                    int best_sh = 0;
-                    float best_mag = -1.0f;
-                    for (int sh = -max_neg; sh <= 4; ++sh) {
-                        std::complex<float> g(0.0f, 0.0f);
-                        for (size_t m = 0; m < GI_LEN; ++m) {
-                            g += stream_iq_buf[base_pos + sh + m] * std::conj(stream_iq_buf[base_pos + sh + m + FFT_LEN]);
+                        size_t gi_start = (sync_res.symbol_offset >= static_cast<int>(GI_LEN))
+                                          ? static_cast<size_t>(sync_res.symbol_offset - static_cast<int>(GI_LEN))
+                                          : 0;
+                        stream_iq_buf.assign(cand_iq_buf.begin() + gi_start, cand_iq_buf.end());
+                    }
+                } else {
+                    if (!sync_res.locked) {
+                        unlock_counter++;
+                        if (unlock_counter > 200) {
+                            reset_reception_stream(scan_sync, scan_demod, stream_iq_buf, cand_iq_buf,
+                                                   initial_symbol_found, tracked_ffo_hz, frac_pos,
+                                                   GI_LEN, SYM_LEN, unlock_counter, nullptr);
                         }
-                        float mag = std::norm(g);
-                        if (mag > best_mag) { best_mag = mag; best_sh = sh; }
+                    } else {
+                        unlock_counter = 0;
+                        const float spacing = static_cast<float>(ISDBT_SAMPLE_RATE) / static_cast<float>(FFT_LEN);
+                        float residual = sync_res.ffo_hz - tracked_ffo_hz;
+                        residual -= spacing * std::round(residual / spacing);
+                        tracked_ffo_hz += 0.1f * residual;
                     }
-                    frac_pos += 0.25f * static_cast<float>(best_sh);
-                    int sym_d = std::max(0, static_cast<int>(std::lround(frac_pos)));
-                    if (static_cast<size_t>(sym_d) + SYM_LEN > stream_iq_buf.size()) break;
 
-                    scan_demod.process_symbol(&stream_iq_buf[sym_d + GI_LEN], scan_pkts);
-                    frac_pos += static_cast<float>(SYM_LEN);
-                }
-
-                int consume_i = static_cast<int>(std::floor(frac_pos)) - 8;
-                if (consume_i > 0 && static_cast<size_t>(consume_i) <= stream_iq_buf.size()) {
-                    stream_iq_buf.erase(stream_iq_buf.begin(), stream_iq_buf.begin() + consume_i);
-                    frac_pos -= static_cast<float>(consume_i);
-                }
-
-                for (const auto& pkt : scan_pkts) {
-                    scan_psi.parse_packet(pkt.data());
-                }
-
-                std::string s_name = scan_psi.get_primary_service_name();
-                if (!s_name.empty()) {
-                    detected_name = s_name;
-                    if (!scan_psi.get_services().empty()) {
-                        detected_service_id = scan_psi.get_services().begin()->first;
+                    if (initial_symbol_found) {
+                        scan_sync.correct_frequency_offset(cand_iq_buf.data(), step_chunk_samples, tracked_ffo_hz);
+                        stream_iq_buf.insert(stream_iq_buf.end(), cand_iq_buf.begin(), cand_iq_buf.end());
                     }
-                    break;
+                }
+
+                if (initial_symbol_found) {
+                    std::vector<std::vector<uint8_t>> scan_pkts;
+                    while (static_cast<size_t>(std::lround(frac_pos)) + SYM_LEN + 8 <= stream_iq_buf.size()) {
+                        int base_pos = static_cast<int>(std::lround(frac_pos));
+                        int max_neg = (base_pos >= 4) ? 4 : base_pos;
+                        int best_sh = 0;
+                        float best_mag = -1.0f;
+                        for (int sh = -max_neg; sh <= 4; ++sh) {
+                            std::complex<float> g(0.0f, 0.0f);
+                            for (size_t m = 0; m < GI_LEN; ++m) {
+                                g += stream_iq_buf[base_pos + sh + m] * std::conj(stream_iq_buf[base_pos + sh + m + FFT_LEN]);
+                            }
+                            float mag = std::norm(g);
+                            if (mag > best_mag) { best_mag = mag; best_sh = sh; }
+                        }
+                        frac_pos += 0.25f * static_cast<float>(best_sh);
+                        int sym_d = std::max(0, static_cast<int>(std::lround(frac_pos)));
+                        if (static_cast<size_t>(sym_d) + SYM_LEN > stream_iq_buf.size()) break;
+
+                        scan_demod.process_symbol(&stream_iq_buf[sym_d + GI_LEN], scan_pkts);
+                        frac_pos += static_cast<float>(SYM_LEN);
+                    }
+
+                    int consume_i = static_cast<int>(std::floor(frac_pos)) - 8;
+                    if (consume_i > 0 && static_cast<size_t>(consume_i) <= stream_iq_buf.size()) {
+                        stream_iq_buf.erase(stream_iq_buf.begin(), stream_iq_buf.begin() + consume_i);
+                        frac_pos -= static_cast<float>(consume_i);
+                    }
+
+                    for (const auto& pkt : scan_pkts) {
+                        scan_psi.parse_packet(pkt.data());
+                    }
+
+                    std::string s_name = scan_psi.get_primary_service_name();
+                    if (!s_name.empty()) {
+                        detected_name = s_name;
+                        if (!scan_psi.get_services().empty()) {
+                            detected_service_id = scan_psi.get_services().begin()->first;
+                        }
+                        raw_queue->release_read(view);
+                        break;
+                    }
                 }
             }
+            raw_queue->release_read(view);
         }
 
-        pass2_worker_running = false;
-        q_cv.notify_all();
+        pass2_worker_running.store(false, std::memory_order_release);
         if (reader_thread.joinable()) {
             reader_thread.join();
         }
@@ -593,6 +662,35 @@ static bool launch_mpv(uint16_t udp_port) {
     return (ret == 0);
 #endif
 }
+void reset_reception_stream(
+    isdbt::OfdmSync& sync,
+    isdbt::OneSegDemodulator& demod,
+    std::vector<std::complex<float>>& stream_iq_buf,
+    std::vector<std::complex<float>>& iq_buf,
+    bool& ofdm_locked,
+    float& tracked_ffo_hz,
+    float& frac_pos,
+    std::size_t& gi_len,
+    std::size_t& sym_len,
+    int& unlock_counter,
+    isdbt::DspMetrics* metrics) {
+
+    stream_iq_buf.clear();
+    frac_pos = 0.0f;
+    ofdm_locked = false;
+    tracked_ffo_hz = 0.0f;
+    unlock_counter = 0;
+    gi_len = 0;
+    sym_len = 0;
+
+    (void)iq_buf;
+    sync.reset();
+    demod.reset();
+
+    if (metrics) {
+        metrics->decoder_resets++;
+    }
+}
 
 int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_port, int dev_idx, bool test_pattern = false, double gain_db = 28.0, bool auto_player = false) {
 #ifdef _WIN32
@@ -651,6 +749,7 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
     if (auto_player) {
         launch_mpv(udp_port);
     }
+    std::cout << "  \033[1;35m[DSP Engine]\033[0m Pipeline: Fila SPSC Lock-Free (64 slots) | Linhas de Atraso Estaticas | GF Fast O(1)\n";
     std::cout << "Pressione \033[1;33mCtrl+C\033[0m para encerrar a transmissao.\n\n";
 
     rtlsdr_dev_t* dev = nullptr;
@@ -683,27 +782,46 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
 
     const size_t chunk_samples = 32768;
     const size_t chunk_bytes = chunk_samples * 2;
-    std::mutex q_mtx;
-    std::condition_variable q_cv;
-    std::queue<std::vector<uint8_t>> raw_queue;
+    auto raw_queue = std::make_unique<isdbt::SpscCaptureQueue<64>>();
+    std::atomic<bool> reader_running{true};
+    isdbt::DspMetrics dsp_metrics{};
 
     std::thread reader_thread([&]() {
 #ifdef _WIN32
         // Eleva a prioridade da thread USB para evitar buffer overflows e perda de amostras
         SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
 #endif
-        while (g_running) {
-            std::vector<uint8_t> buf(chunk_bytes);
-            int n_read = 0;
-            int r = rtlsdr_read_sync(dev, buf.data(), static_cast<int>(buf.size()), &n_read);
-            if (r < 0 || n_read != static_cast<int>(chunk_bytes)) continue;
-            {
-                std::lock_guard<std::mutex> lock(q_mtx);
-                if (raw_queue.size() < 64) {
-                    raw_queue.push(std::move(buf));
-                }
+        std::uint64_t sequence = 0;
+        bool pending_discontinuity = false;
+
+        while (reader_running.load(std::memory_order_relaxed) && g_running) {
+            isdbt::SpscCaptureQueue<64>::WriteView view;
+            if (!raw_queue->try_acquire_write(view)) {
+                raw_queue->record_drop();
+                ++sequence;
+                pending_discontinuity = true;
+                std::this_thread::sleep_for(std::chrono::microseconds(500));
+                continue;
             }
-            q_cv.notify_one();
+
+            auto* block = view.block;
+            block->sequence = sequence++;
+            block->size = 0;
+            block->discontinuity_before = pending_discontinuity;
+
+            int n_read = 0;
+            int r = rtlsdr_read_sync(dev, block->raw.data(), static_cast<int>(chunk_bytes), &n_read);
+            if (r < 0 || n_read != static_cast<int>(chunk_bytes)) {
+                block->discontinuity_before = true;
+                block->size = 0;
+                pending_discontinuity = true;
+                raw_queue->publish_write(view);
+                continue;
+            }
+
+            block->size = static_cast<size_t>(n_read);
+            raw_queue->publish_write(view);
+            pending_discontinuity = false;
         }
     });
 
@@ -720,129 +838,157 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
     uint64_t total_standby_packets = 0;
     auto last_time = std::chrono::steady_clock::now();
 
+    std::uint64_t expected_sequence = 0;
+    bool have_expected_sequence = false;
+
     while (g_running) {
-        std::vector<uint8_t> raw_buf;
-        {
-            std::unique_lock<std::mutex> lock(q_mtx);
-            q_cv.wait_for(lock, std::chrono::milliseconds(100), [&]() { return !raw_queue.empty() || !g_running; });
-            if (!g_running) break;
-            if (raw_queue.empty()) continue;
-            raw_buf = std::move(raw_queue.front());
-            raw_queue.pop();
+        isdbt::SpscCaptureQueue<64>::ReadView view;
+        if (!raw_queue->try_acquire_read(view)) {
+            std::this_thread::sleep_for(std::chrono::microseconds(200));
+            continue;
         }
 
-        float pwr_sum = 0.0f;
-        for (size_t i = 0; i < chunk_samples; ++i) {
-            float iv = (static_cast<float>(raw_buf[2 * i + 0]) - 127.5f) / 127.5f;
-            float qv = (static_cast<float>(raw_buf[2 * i + 1]) - 127.5f) / 127.5f;
-            iq_buf[i] = std::complex<float>(iv, qv);
-            pwr_sum += (iv * iv + qv * qv);
+        const auto& block = *view.block;
+        bool discontinuity = block.discontinuity_before;
+        if (have_expected_sequence && block.sequence != expected_sequence) {
+            discontinuity = true;
+            dsp_metrics.sequence_gaps++;
         }
-        float rssi_dbfs = 10.0f * std::log10((pwr_sum / chunk_samples) + 1e-12f);
 
-        auto sync_res = sync.find_symbol_boundary(iq_buf.data(), chunk_samples);
-        last_peak_corr = sync_res.peak_correlation;
-        std::vector<std::vector<uint8_t>> decoded_pkts;
+        expected_sequence = block.sequence + 1;
+        have_expected_sequence = true;
+        dsp_metrics.input_blocks++;
 
-        if (!ofdm_locked) {
-            if (sync_res.locked) {
-                ofdm_locked = true;
-                unlock_counter = 0;
-                GI_LEN = static_cast<size_t>(sync.gi_size());
-                SYM_LEN = FFT_LEN + GI_LEN;
-                frac_pos = 0.0f;
-                tracked_ffo_hz = sync_res.ffo_hz;
-                sync.reset_phase();
-                sync.correct_frequency_offset(iq_buf.data(), iq_buf.size(), tracked_ffo_hz);
+        if (discontinuity) {
+            reset_reception_stream(sync, demod, stream_iq_buf, iq_buf,
+                                   ofdm_locked, tracked_ffo_hz, frac_pos,
+                                   GI_LEN, SYM_LEN, unlock_counter, &dsp_metrics);
+        }
 
-                // symbol_offset aponta para o inicio da parte util; recuamos GI_LEN para alinhar
-                // o inicio de stream_iq_buf exatamente com o prefixo ciclico do primeiro simbolo
-                size_t gi_start = (sync_res.symbol_offset >= static_cast<int>(GI_LEN))
-                                  ? static_cast<size_t>(sync_res.symbol_offset - static_cast<int>(GI_LEN))
-                                  : 0;
-                stream_iq_buf.assign(iq_buf.begin() + gi_start, iq_buf.end());
+        if (block.size == chunk_bytes) {
+            const uint8_t* raw_data = block.raw.data();
+            float pwr_sum = 0.0f;
+            for (size_t i = 0; i < chunk_samples; ++i) {
+                float iv = (static_cast<float>(raw_data[2 * i + 0]) - 127.5f) / 127.5f;
+                float qv = (static_cast<float>(raw_data[2 * i + 1]) - 127.5f) / 127.5f;
+                iq_buf[i] = std::complex<float>(iv, qv);
+                pwr_sum += (iv * iv + qv * qv);
             }
-        } else {
-            if (!sync_res.locked) {
-                unlock_counter++;
-                if (unlock_counter > 200) { // ~3.2 segundos de perda real de sinal
-                    ofdm_locked = false;
-                    stream_iq_buf.clear();
-                    demod.reset();
+            float rssi_dbfs = 10.0f * std::log10((pwr_sum / chunk_samples) + 1e-12f);
+
+            auto sync_res = sync.find_symbol_boundary(iq_buf.data(), chunk_samples);
+            last_peak_corr = sync_res.peak_correlation;
+            std::vector<std::vector<uint8_t>> decoded_pkts;
+
+            if (!ofdm_locked) {
+                if (sync_res.locked) {
+                    ofdm_locked = true;
+                    unlock_counter = 0;
+                    GI_LEN = static_cast<size_t>(sync.gi_size());
+                    SYM_LEN = FFT_LEN + GI_LEN;
+                    frac_pos = 0.0f;
+                    tracked_ffo_hz = sync_res.ffo_hz;
+                    sync.reset_phase();
+                    sync.correct_frequency_offset(iq_buf.data(), iq_buf.size(), tracked_ffo_hz);
+
+                    // symbol_offset aponta para o inicio da parte util; recuamos GI_LEN para alinhar
+                    // o inicio de stream_iq_buf exatamente com o prefixo ciclico do primeiro simbolo
+                    size_t gi_start = (sync_res.symbol_offset >= static_cast<int>(GI_LEN))
+                                      ? static_cast<size_t>(sync_res.symbol_offset - static_cast<int>(GI_LEN))
+                                      : 0;
+                    stream_iq_buf.assign(iq_buf.begin() + gi_start, iq_buf.end());
                 }
             } else {
-                unlock_counter = 0;
-                // Rastreamento suave do FFO com DESEMBRULHO de fase: a estimativa do CP so e valida
-                // em +/- meia subportadora (~496 Hz). Se o desvio real estiver perto de 0.5 bin,
-                // a estimativa alterna entre +490 e -490 Hz; media direta daria ~0 Hz (errado!).
-                const float spacing = static_cast<float>(ISDBT_SAMPLE_RATE) / static_cast<float>(FFT_LEN);
-                float residual = sync_res.ffo_hz - tracked_ffo_hz;
-                residual -= spacing * std::round(residual / spacing);
-                tracked_ffo_hz += 0.1f * residual;
+                if (!sync_res.locked) {
+                    unlock_counter++;
+                    if (unlock_counter > 200) { // ~3.2 segundos de perda real de sinal
+                        reset_reception_stream(sync, demod, stream_iq_buf, iq_buf,
+                                               ofdm_locked, tracked_ffo_hz, frac_pos,
+                                               GI_LEN, SYM_LEN, unlock_counter, &dsp_metrics);
+                    }
+                } else {
+                    unlock_counter = 0;
+                    // Rastreamento suave do FFO com DESEMBRULHO de fase: a estimativa do CP so e valida
+                    // em +/- meia subportadora (~496 Hz). Se o desvio real estiver perto de 0.5 bin,
+                    // a estimativa alterna entre +490 e -490 Hz; media direta daria ~0 Hz (errado!).
+                    const float spacing = static_cast<float>(ISDBT_SAMPLE_RATE) / static_cast<float>(FFT_LEN);
+                    float residual = sync_res.ffo_hz - tracked_ffo_hz;
+                    residual -= spacing * std::round(residual / spacing);
+                    tracked_ffo_hz += 0.1f * residual;
+                }
+
+                if (ofdm_locked) {
+                    // Desrotaciona o novo bloco mantendo continuidade de fase NCO
+                    sync.correct_frequency_offset(iq_buf.data(), iq_buf.size(), tracked_ffo_hz);
+                    stream_iq_buf.insert(stream_iq_buf.end(), iq_buf.begin(), iq_buf.end());
+                }
             }
 
             if (ofdm_locked) {
-                // Desrotaciona o novo bloco mantendo continuidade de fase NCO
-                sync.correct_frequency_offset(iq_buf.data(), iq_buf.size(), tracked_ffo_hz);
-                stream_iq_buf.insert(stream_iq_buf.end(), iq_buf.begin(), iq_buf.end());
-            }
-        }
-
-        if (ofdm_locked) {
-            // Processa todos os simbolos completos acumulados, rastreando suavemente o pico do
-            // prefixo ciclico (+/-4 amostras, ganho 0.25) para compensar a deriva de clock do dongle
-            while (static_cast<size_t>(std::lround(frac_pos)) + SYM_LEN + 8 <= stream_iq_buf.size()) {
-                int base_pos = static_cast<int>(std::lround(frac_pos));
-                int max_neg = (base_pos >= 4) ? 4 : base_pos;
-                int best_sh = 0;
-                float best_mag = -1.0f;
-                for (int sh = -max_neg; sh <= 4; ++sh) {
-                    std::complex<float> g(0.0f, 0.0f);
-                    for (size_t m = 0; m < GI_LEN; ++m) {
-                        g += stream_iq_buf[base_pos + sh + m] * std::conj(stream_iq_buf[base_pos + sh + m + FFT_LEN]);
+                // Processa todos os simbolos completos acumulados, rastreando suavemente o pico do
+                // prefixo ciclico (+/-4 amostras, ganho 0.25) para compensar a deriva de clock do dongle
+                while (static_cast<size_t>(std::lround(frac_pos)) + SYM_LEN + 8 <= stream_iq_buf.size()) {
+                    int base_pos = static_cast<int>(std::lround(frac_pos));
+                    int max_neg = (base_pos >= 4) ? 4 : base_pos;
+                    int best_sh = 0;
+                    float best_mag = -1.0f;
+                    for (int sh = -max_neg; sh <= 4; ++sh) {
+                        std::complex<float> g(0.0f, 0.0f);
+                        for (size_t m = 0; m < GI_LEN; ++m) {
+                            g += stream_iq_buf[base_pos + sh + m] * std::conj(stream_iq_buf[base_pos + sh + m + FFT_LEN]);
+                        }
+                        float mag = std::norm(g);
+                        if (mag > best_mag) { best_mag = mag; best_sh = sh; }
                     }
-                    float mag = std::norm(g);
-                    if (mag > best_mag) { best_mag = mag; best_sh = sh; }
+                    frac_pos += 0.25f * static_cast<float>(best_sh);
+                    int sym_d = std::max(0, static_cast<int>(std::lround(frac_pos)));
+                    if (static_cast<size_t>(sym_d) + SYM_LEN > stream_iq_buf.size()) break;
+
+                    demod.process_symbol(&stream_iq_buf[sym_d + GI_LEN], decoded_pkts);
+                    frac_pos += static_cast<float>(SYM_LEN);
+                    dsp_metrics.processed_symbols++;
                 }
-                frac_pos += 0.25f * static_cast<float>(best_sh);
-                int sym_d = std::max(0, static_cast<int>(std::lround(frac_pos)));
-                if (static_cast<size_t>(sym_d) + SYM_LEN > stream_iq_buf.size()) break;
 
-                demod.process_symbol(&stream_iq_buf[sym_d + GI_LEN], decoded_pkts);
-                frac_pos += static_cast<float>(SYM_LEN);
-            }
-
-            int consume_i = static_cast<int>(std::floor(frac_pos)) - 8;
-            if (consume_i > 0 && static_cast<size_t>(consume_i) <= stream_iq_buf.size()) {
-                stream_iq_buf.erase(stream_iq_buf.begin(), stream_iq_buf.begin() + consume_i);
-                frac_pos -= static_cast<float>(consume_i);
-            }
-
-            for (const auto& pkt : decoded_pkts) {
-                psi.parse_packet(pkt.data());
-            }
-
-            if (!decoded_pkts.empty()) {
-                air_stream_started = true;
-                // Em recepcao parcial 1-Seg o PMT vem no PID 0x1FC8 sem PAT correspondente:
-                // injeta uma PAT sintetica (~10x/s) apontando para ele, para o VLC achar o programa
-                auto now_pat = std::chrono::steady_clock::now();
-                if (std::chrono::duration_cast<std::chrono::milliseconds>(now_pat - last_pat_time).count() >= 100) {
-                    uint8_t pat_pkt[188];
-                    if (psi.build_pat_packet(pat_pkt)) {
-                        streamer.send_ts_packet(pat_pkt);
-                    }
-                    last_pat_time = now_pat;
+                int consume_i = static_cast<int>(std::floor(frac_pos)) - 8;
+                if (consume_i > 0 && static_cast<size_t>(consume_i) <= stream_iq_buf.size()) {
+                    stream_iq_buf.erase(stream_iq_buf.begin(), stream_iq_buf.begin() + consume_i);
+                    frac_pos -= static_cast<float>(consume_i);
                 }
-                // Envia todos os pacotes MPEG-TS reais decodificados do ar para o VLC (em blocos de 7x188 = 1316B)
+
                 for (const auto& pkt : decoded_pkts) {
-                    streamer.send_ts_packet(pkt.data());
-                    total_air_packets++;
+                    psi.parse_packet(pkt.data());
                 }
-                // Nao forca flush() a cada chunk: send_ts_packet() envia automaticamente datagramas
-                // completos de 7 pacotes (1316B). Isso elimina a diluicao do fluxo com pacotes nulos (0x1FFF).
+
+                if (!decoded_pkts.empty()) {
+                    air_stream_started = true;
+                    // Em recepcao parcial 1-Seg o PMT vem no PID 0x1FC8 sem PAT correspondente:
+                    // injeta uma PAT sintetica (~10x/s) apontando para ele, para o VLC achar o programa
+                    auto now_pat = std::chrono::steady_clock::now();
+                    if (std::chrono::duration_cast<std::chrono::milliseconds>(now_pat - last_pat_time).count() >= 100) {
+                        uint8_t pat_pkt[188];
+                        if (psi.build_pat_packet(pat_pkt)) {
+                            streamer.send_ts_packet(pat_pkt);
+                        }
+                        last_pat_time = now_pat;
+                    }
+                    // Envia todos os pacotes MPEG-TS reais decodificados do ar para o VLC (em blocos de 7x188 = 1316B)
+                    for (const auto& pkt : decoded_pkts) {
+                        streamer.send_ts_packet(pkt.data());
+                        total_air_packets++;
+                        dsp_metrics.valid_ts_packets++;
+                    }
+                } else if (test_pattern) {
+                    std::vector<std::vector<uint8_t>> standby_pkts;
+                    channel_ts_gen.get_standby_block(standby_pkts);
+                    for (const auto& pkt : standby_pkts) {
+                        streamer.send_ts_packet(pkt.data());
+                        total_standby_packets++;
+                    }
+                    streamer.flush();
+                }
+
+                streamer.flush_if_stale(80);
             } else if (test_pattern) {
-                // Apenas envia pacotes de teste sinteticos se solicitado com --test-pattern
                 std::vector<std::vector<uint8_t>> standby_pkts;
                 channel_ts_gen.get_standby_block(standby_pkts);
                 for (const auto& pkt : standby_pkts) {
@@ -852,36 +998,28 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
                 streamer.flush();
             }
 
-            // Descarrega pacotes pendentes residuais (1 a 6) somente se ficarem > 80ms parados no buffer
-            streamer.flush_if_stale(80);
-        } else if (test_pattern) {
-            std::vector<std::vector<uint8_t>> standby_pkts;
-            channel_ts_gen.get_standby_block(standby_pkts);
-            for (const auto& pkt : standby_pkts) {
-                streamer.send_ts_packet(pkt.data());
-                total_standby_packets++;
+            auto now = std::chrono::steady_clock::now();
+            if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_time).count() >= 300) {
+                std::string s_name = psi.get_primary_service_name();
+                std::stringstream status_ss;
+                status_ss << "[Status] RSSI: " << std::fixed << std::setprecision(1) << rssi_dbfs << " dBFS | "
+                          << "OFDM: " << (ofdm_locked ? "LOCK" : "SYNC") << " (" << std::setprecision(2) << last_peak_corr << ") | "
+                          << "TMCC: " << (demod.is_tmcc_locked() ? "LOCK" : "SYNC") << " | "
+                          << "TS: " << total_air_packets << " pkts";
+                status_ss << " | Drop: " << raw_queue->dropped_blocks();
+                if (!s_name.empty()) {
+                    status_ss << " | " << s_name;
+                }
+                std::cout << "\r" << status_ss.str() << "\033[K" << std::flush;
+                last_time = now;
             }
-            streamer.flush();
         }
 
-        auto now = std::chrono::steady_clock::now();
-        if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_time).count() >= 300) {
-            std::string s_name = psi.get_primary_service_name();
-            std::stringstream status_ss;
-            status_ss << "[Status] RSSI: " << std::fixed << std::setprecision(1) << rssi_dbfs << " dBFS | "
-                      << "OFDM: " << (ofdm_locked ? "LOCK" : "SYNC") << " (" << std::setprecision(2) << last_peak_corr << ") | "
-                      << "TMCC: " << (demod.is_tmcc_locked() ? "LOCK" : "SYNC") << " | "
-                      << "TS: " << total_air_packets << " pkts";
-            if (!s_name.empty()) {
-                status_ss << " | " << s_name;
-            }
-            std::cout << "\r" << status_ss.str() << "\033[K" << std::flush;
-            last_time = now;
-        }
+        raw_queue->release_read(view);
     }
 
+    reader_running.store(false, std::memory_order_release);
     g_running = false;
-    q_cv.notify_all();
     if (reader_thread.joinable()) {
         reader_thread.join();
     }

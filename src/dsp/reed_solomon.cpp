@@ -1,4 +1,5 @@
 #include "dsp/reed_solomon.hpp"
+#include "dsp/constants.hpp"
 #include <cstring>
 #include <algorithm>
 
@@ -33,14 +34,18 @@ void ReedSolomon::init_galois_field() {
     for (int i = 255 * 2; i < 512; ++i) {
         exp_table_[i] = exp_table_[i - 255];
     }
+
+    // Inicializa tabela 2D de multiplicacao direta GF(2^8) para acesso em O(1)
+    for (int a = 0; a < 256; ++a) {
+        for (int b = 0; b < 256; ++b) {
+            gf_mul_table_[a][b] = (a == 0 || b == 0)
+                                      ? 0
+                                      : exp_table_[log_table_[a] + log_table_[b]];
+        }
+    }
 }
 
-uint8_t ReedSolomon::gf_mul(uint8_t a, uint8_t b) const {
-    if (a == 0 || b == 0) return 0;
-    return exp_table_[log_table_[a] + log_table_[b]];
-}
-
-uint8_t ReedSolomon::gf_div(uint8_t a, uint8_t b) const {
+uint8_t ReedSolomon::gf_div(uint8_t a, uint8_t b) const noexcept {
     if (a == 0) return 0;
     if (b == 0) return 0; // divisao por zero
     return exp_table_[log_table_[a] + 255 - log_table_[b]];
@@ -64,7 +69,7 @@ void ReedSolomon::encode(const uint8_t* data188, uint8_t* parity16) {
     uint8_t p[NROOTS] = {0};
 
     // ISDB-T encurta RS(255, 239) para RS(204, 188) preenchendo os primeiros 51 bytes com 0
-    for (int i = 0; i < 188; ++i) {
+    for (int i = 0; i < static_cast<int>(constants::TS_PACKET_SIZE); ++i) {
         uint8_t feedback = data188[i] ^ p[NROOTS - 1];
         if (feedback != 0) {
             for (int j = NROOTS - 1; j > 0; --j) {
@@ -94,7 +99,7 @@ int ReedSolomon::decode(uint8_t* block204) {
     for (int i = 0; i < NROOTS; ++i) {
         uint8_t alpha_i = exp_table_[i];
         uint8_t sum = 0;
-        for (int j = 0; j < 204; ++j) {
+        for (int j = 0; j < static_cast<int>(constants::RS_BLOCK_SIZE); ++j) {
             sum = block204[j] ^ gf_mul(sum, alpha_i);
         }
         s[i] = sum;
@@ -157,9 +162,9 @@ int ReedSolomon::decode(uint8_t* block204) {
     int err_pos[NROOTS];
     int num_errors = 0;
 
-    for (int i = 0; i < 204; ++i) {
+    for (int i = 0; i < static_cast<int>(constants::RS_BLOCK_SIZE); ++i) {
         // Potencia correspondente no polinomio (203 - i)
-        int p_idx = 203 - i;
+        int p_idx = static_cast<int>(constants::RS_BLOCK_SIZE) - 1 - i;
         uint8_t x_inv = exp_table_[(255 - p_idx) % 255]; // X_k^-1 = alpha^(-p_idx)
         uint8_t sum = lambda[0];
         uint8_t term = 1;
@@ -188,7 +193,7 @@ int ReedSolomon::decode(uint8_t* block204) {
     // Corrigir cada erro: para FCR = 0, e_k = X_k * Omega(X_k^-1) / Lambda'(X_k^-1)
     for (int i = 0; i < num_errors; ++i) {
         int pos = err_pos[i];
-        int p_idx = 203 - pos;
+        int p_idx = static_cast<int>(constants::RS_BLOCK_SIZE) - 1 - pos;
         uint8_t x_k = exp_table_[p_idx];
         uint8_t x_inv = exp_table_[(255 - p_idx) % 255];
 

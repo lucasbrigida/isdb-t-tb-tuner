@@ -35,15 +35,15 @@ private:
     void init_galois_field();
     void init_generator_poly();
 
-    uint8_t gf_add(uint8_t a, uint8_t b) const { return a ^ b; }
-    uint8_t gf_mul(uint8_t a, uint8_t b) const;
-    uint8_t gf_div(uint8_t a, uint8_t b) const;
-    uint8_t gf_exp(uint8_t power) const { return exp_table_[power]; }
+    inline uint8_t gf_add(uint8_t a, uint8_t b) const noexcept { return a ^ b; }
+    inline uint8_t gf_mul(uint8_t a, uint8_t b) const noexcept { return gf_mul_table_[a][b]; }
+    uint8_t gf_div(uint8_t a, uint8_t b) const noexcept;
+    inline uint8_t gf_exp(uint8_t power) const noexcept { return exp_table_[power]; }
 
+    alignas(64) uint8_t gf_mul_table_[256][256]; // Tabela direta 64KB de multiplicacao GF(2^8)
     uint8_t exp_table_[512]; // Tabela exponencial (duplicada para evitar modulo)
     uint8_t log_table_[256]; // Tabela de logaritmos
     uint8_t gen_poly_[17];   // Coeficientes de g(x)
 };
 
 } // namespace isdbt
-

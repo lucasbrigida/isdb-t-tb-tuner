@@ -66,16 +66,51 @@ void OneSegDemodulator::init_pilots() {
     }
     // Segmento 0 (central) inicia na portadora ativa 6 * 432 = 2592 (inclui 433 pontos para o piloto de borda direita)
     prbs_pilots_.assign(full_prbs_.begin() + 2592, full_prbs_.begin() + 2592 + 433);
+
+    // Pre-calcula os inversos dos pilotos para transformar divisoes em multiplicacoes
+    inv_prbs_pilots_.resize(prbs_pilots_.size());
+    for (size_t i = 0; i < prbs_pilots_.size(); ++i) {
+        float p = prbs_pilots_[i];
+        inv_prbs_pilots_[i] = (std::abs(p) > 1e-6f) ? (1.0f / p) : 0.0f;
+    }
+}
+
+void OneSegDemodulator::init_carrier_layouts() {
+    auto is_tmcc_carrier = [](size_t c) {
+        return (c == 101 || c == 131 || c == 286 || c == 349);
+    };
+    auto is_ac_carrier = [](size_t c) {
+        return (c == 7 || c == 89 || c == 206 || c == 209 || c == 226 || c == 244 || c == 377 || c == 407);
+    };
+
+    for (size_t ph = 0; ph < 4; ++ph) {
+        sp_indices_per_phase_[ph].clear();
+        for (size_t l = 3 * ph; l < 432; l += 12) {
+            sp_indices_per_phase_[ph].push_back(l);
+        }
+
+        auto& layout = carrier_layouts_[ph];
+        layout.data_count = 0;
+        for (size_t l = 0; l < 432; ++l) {
+            bool is_sp = ((l % 12) == ((3 * ph) % 12));
+            if (!is_sp && !is_tmcc_carrier(l) && !is_ac_carrier(l)) {
+                if (layout.data_count < 384) {
+                    layout.data_indices[layout.data_count++] = static_cast<uint16_t>(l);
+                }
+            }
+        }
+    }
 }
 
 void OneSegDemodulator::init_time_deinterleaver(int I) {
     time_interleave_I_ = I;
-    time_deint_fifos_.clear();
-    time_deint_fifos_.resize(384);
-    for (size_t c = 0; c < 384; ++c) {
+    time_delay_lines_.resize(constants::DATA_CARRIERS);
+    time_csi_delay_lines_.resize(constants::DATA_CARRIERS);
+    for (size_t c = 0; c < constants::DATA_CARRIERS; ++c) {
         size_t mi = (5 * c) % 96;
         size_t delay = static_cast<size_t>(I) * (95 - mi);
-        time_deint_fifos_[c].assign(delay, std::complex<float>(0.0f, 0.0f));
+        time_delay_lines_[c].init(delay, std::complex<float>(0.0f, 0.0f));
+        time_csi_delay_lines_[c].init(delay, 1.0f);
     }
 }
 
@@ -97,25 +132,33 @@ OneSegDemodulator::OneSegDemodulator(OfdmMode mode, GuardInterval gi)
     : mode_(mode), gi_(gi), fft_size_(static_cast<int>(mode)),
       ofdm_sync_(mode, gi), viterbi_(CodeRate::RATE_1_2) {
     init_pilots();
+    init_carrier_layouts();
     init_prbs_frame_masks();
     fft_carriers_.resize(fft_size_);
 
     init_time_deinterleaver(4);
 
     // Desentrelaçador de bits para QPSK ({0, 120}) e 16QAM ({0, 40, 80, 120})
-    bit_deint_fifos_[0].clear();
-    bit_deint_fifos_[1].assign(120, 0.0f);
-    bit_deint_fifos_[2].assign(80, 0.0f);
-    bit_deint_fifos_[3].assign(120, 0.0f);
+    bit_delay_lines_[0].init(0, 0.0f);
+    bit_delay_lines_[1].init(120, 0.0f);
+    bit_delay_lines_[2].init(80, 0.0f);
+    bit_delay_lines_[3].init(120, 0.0f);
+    bit_csi_delay_lines_[0].init(0, 1.0f);
+    bit_csi_delay_lines_[1].init(120, 1.0f);
+    bit_csi_delay_lines_[2].init(80, 1.0f);
+    bit_csi_delay_lines_[3].init(120, 1.0f);
 
     // Desentrelaçador de bytes Forney (I=12, M=17): ramo j (0..11) tem retardo 17 * (11 - j)
-    forney_fifos_.resize(12);
     for (size_t j = 0; j < 12; ++j) {
-        size_t delay = 17 * (11 - j);
-        forney_fifos_[j].assign(delay, 0);
+        forney_delay_lines_[j].init(17 * (11 - j), 0);
     }
 
     tmcc_bits_.assign(204, 0);
+
+    // Pre-reserva capacidade de vetores para zero alocacao no caminho critico
+    soft_bits_.reserve(384 * 4);
+    viterbi_decoded_bytes_.reserve(1024);
+    viterbi_byte_stream_.reserve(8192);
 }
 
 void OneSegDemodulator::reset() {
@@ -134,13 +177,27 @@ void OneSegDemodulator::reset() {
     viterbi_.reset();
     descrambler_.reset();
     viterbi_byte_stream_.clear();
+    viterbi_stream_offset_ = 0;
     viterbi_sync_offset_ = -1;
     sync_miss_count_ = 0;
     forney_blocks_fed_ = 0;
     packet_idx_in_frame_ = -1;
-    init_time_deinterleaver(time_interleave_I_);
+
+    // Reinicia linhas de atraso de tempo, bits e Forney
+    for (auto& tdl : time_delay_lines_) {
+        tdl.reset(std::complex<float>(0.0f, 0.0f));
+    }
+    for (auto& cdl : time_csi_delay_lines_) {
+        cdl.reset(1.0f);
+    }
+    for (auto& bdl : bit_delay_lines_) {
+        bdl.reset(0.0f);
+    }
+    for (auto& cdl : bit_csi_delay_lines_) {
+        cdl.reset(1.0f);
+    }
     for (size_t j = 0; j < 12; ++j) {
-        forney_fifos_[j].assign(17 * (11 - j), 0);
+        forney_delay_lines_[j].reset(0);
     }
 }
 
@@ -150,13 +207,15 @@ void OneSegDemodulator::set_parameters(CarrierModulation mod, CodeRate rate, int
         modulation_ = mod;
         changed = true;
         if (modulation_ == CarrierModulation::QPSK || modulation_ == CarrierModulation::DQPSK) {
-            bit_deint_fifos_[0].clear();
-            bit_deint_fifos_[1].assign(120, 0.0f);
+            bit_delay_lines_[0].init(0, 0.0f);
+            bit_delay_lines_[1].init(120, 0.0f);
+            bit_delay_lines_[2].init(0, 0.0f);
+            bit_delay_lines_[3].init(0, 0.0f);
         } else if (modulation_ == CarrierModulation::QAM16) {
-            bit_deint_fifos_[0].clear();
-            bit_deint_fifos_[1].assign(40, 0.0f);
-            bit_deint_fifos_[2].assign(80, 0.0f);
-            bit_deint_fifos_[3].assign(120, 0.0f);
+            bit_delay_lines_[0].init(0, 0.0f);
+            bit_delay_lines_[1].init(40, 0.0f);
+            bit_delay_lines_[2].init(80, 0.0f);
+            bit_delay_lines_[3].init(120, 0.0f);
         }
     }
     if (code_rate_ != rate) {
@@ -173,12 +232,13 @@ void OneSegDemodulator::set_parameters(CarrierModulation mod, CodeRate rate, int
     }
     if (changed) {
         viterbi_byte_stream_.clear();
+        viterbi_stream_offset_ = 0;
         viterbi_sync_offset_ = -1;
         sync_miss_count_ = 0;
         forney_blocks_fed_ = 0;
         packet_idx_in_frame_ = -1;
         for (size_t j = 0; j < 12; ++j) {
-            forney_fifos_[j].assign(17 * (11 - j), 0);
+            forney_delay_lines_[j].reset(0);
         }
     }
 }
@@ -286,6 +346,11 @@ size_t OneSegDemodulator::process_symbol(const std::complex<float>* symbol_time_
     // ruidos transientes saltem o IFO e corrompam o fluxo TMCC DBPSK
     int min_delta = ifo_locked_ ? ifo_bins_ : -45;
     int max_delta = ifo_locked_ ? ifo_bins_ : +45;
+    if (ifo_locked_ && !tmcc_locked_) {
+        // Busca estreita em torno do ifo_bins_ se ainda nao confirmou paridade BCH do TMCC
+        min_delta = std::max(-45, ifo_bins_ - 2);
+        max_delta = std::min(45, ifo_bins_ + 2);
+    }
 
     int best_delta = ifo_bins_;
     size_t best_phase = (sym_mod4_ + 1) % 4;
@@ -299,8 +364,8 @@ size_t OneSegDemodulator::process_symbol(const std::complex<float>* symbol_time_
             std::complex<float> sum_corr(0.0f, 0.0f);
             float sum_energy = 0.0f;
             for (size_t l = 3 * p; l + 12 < 432; l += 12) {
-                std::complex<float> h0 = fft_carriers_[seg_start + l] / prbs_pilots_[l];
-                std::complex<float> h1 = fft_carriers_[seg_start + l + 12] / prbs_pilots_[l + 12];
+                std::complex<float> h0 = fft_carriers_[seg_start + l] * inv_prbs_pilots_[l];
+                std::complex<float> h1 = fft_carriers_[seg_start + l + 12] * inv_prbs_pilots_[l + 12];
                 sum_corr += h1 * std::conj(h0);
                 sum_energy += std::sqrt(std::norm(h1) * std::norm(h0));
             }
@@ -365,19 +430,14 @@ size_t OneSegDemodulator::process_symbol(const std::complex<float>* symbol_time_
 
     // 3. Extracao das 433 portadoras (432 do Segmento 0 + 1 portadora de borda direita) corrigidas pelo IFO
     const int SEG_OFFSET = BASE_SEG_OFFSET + ifo_bins_;
-    std::vector<std::complex<float>> seg_carriers(433);
     for (size_t i = 0; i < 433; ++i) {
-        seg_carriers[i] = fft_carriers_[SEG_OFFSET + i];
+        seg_carriers_[i] = fft_carriers_[SEG_OFFSET + i];
     }
 
     // 4. Estimacao de Canal nos Pilotos Dispersos (SP) e Interpolacao Linear (ofdm_synchronization_impl.cc)
-    std::vector<std::complex<float>> h(432, std::complex<float>(1.0f, 0.0f));
-    std::vector<size_t> sp_indices;
-    sp_indices.reserve(37);
-
-    for (size_t l = 3 * sym_mod4_; l < 432; l += 12) {
-        sp_indices.push_back(l);
-        h[l] = seg_carriers[l] / prbs_pilots_[l];
+    const auto& sp_indices = sp_indices_per_phase_[sym_mod4_ & 3];
+    for (size_t l : sp_indices) {
+        channel_h_[l] = seg_carriers_[l] * inv_prbs_pilots_[l];
     }
 
     // Interpolacao linear entre SPs adjacentes dentro do segmento
@@ -385,11 +445,11 @@ size_t OneSegDemodulator::process_symbol(const std::complex<float>* symbol_time_
         size_t a = sp_indices[i];
         size_t b = sp_indices[i + 1];
         float span = static_cast<float>(b - a);
-        auto ha = h[a];
-        auto hb = h[b];
+        auto ha = channel_h_[a];
+        auto hb = channel_h_[b];
         for (size_t l = a + 1; l < b; ++l) {
             float t = static_cast<float>(l - a) / span;
-            h[l] = ha * (1.0f - t) + hb * t;
+            channel_h_[l] = ha * (1.0f - t) + hb * t;
         }
     }
 
@@ -403,7 +463,7 @@ size_t OneSegDemodulator::process_symbol(const std::complex<float>* symbol_time_
             std::complex<float> h_left = fft_carriers_[prev_seg_sp_bin] / full_prbs_[prev_prbs_idx];
             for (size_t l = 0; l < first_sp; ++l) {
                 float t = static_cast<float>(l + 12 - first_sp) / 12.0f;
-                h[l] = h_left * (1.0f - t) + h[first_sp] * t;
+                channel_h_[l] = h_left * (1.0f - t) + channel_h_[first_sp] * t;
             }
         }
         size_t last_sp = sp_indices.back();
@@ -414,7 +474,7 @@ size_t OneSegDemodulator::process_symbol(const std::complex<float>* symbol_time_
             std::complex<float> h_right = fft_carriers_[next_seg_sp_bin] / full_prbs_[next_prbs_idx];
             for (size_t l = last_sp + 1; l < 432; ++l) {
                 float t = static_cast<float>(l - last_sp) / 12.0f;
-                h[l] = h[last_sp] * (1.0f - t) + h_right * t;
+                channel_h_[l] = channel_h_[last_sp] * (1.0f - t) + h_right * t;
             }
         }
     }
@@ -423,20 +483,18 @@ size_t OneSegDemodulator::process_symbol(const std::complex<float>* symbol_time_
     // Em vez de Zero-Forcing puro que explode o ruido em nulos de fading (|H|^2 -> 0),
     // utiliza regularizacao MMSE proporcional a potencia media do canal
     float pwr_sum = 0.0f;
-    for (size_t l = 0; l < 432; ++l) {
-        pwr_sum += std::norm(h[l]);
+    for (size_t l = 0; l < constants::ACTIVE_CARRIERS; ++l) {
+        pwr_sum += std::norm(channel_h_[l]);
     }
-    float pwr_avg = pwr_sum / 432.0f;
-    float sigma2 = std::max(1e-5f, 0.05f * pwr_avg); // SNR nominal de referencia ~13 dB
+    float pwr_avg = pwr_sum / static_cast<float>(constants::ACTIVE_CARRIERS);
+    float sigma2 = std::max(1e-5f, constants::MMSE_NOISE_FACTOR * pwr_avg); // SNR nominal de referencia ~13 dB
 
-    std::vector<std::complex<float>> eq_seg(432);
-    std::vector<float> csi_weight(432);
-    for (size_t l = 0; l < 432; ++l) {
-        float h_mag2 = std::norm(h[l]);
-        eq_seg[l] = (seg_carriers[l] * std::conj(h[l])) / (h_mag2 + sigma2);
+    for (size_t l = 0; l < constants::ACTIVE_CARRIERS; ++l) {
+        float h_mag2 = std::norm(channel_h_[l]);
+        equalized_[l] = (seg_carriers_[l] * std::conj(channel_h_[l])) / (h_mag2 + sigma2);
         // Peso CSI normalizado: portadoras atenuadas encolhem para ~0 (soft-bit 128 / neutro),
         // impedindo que ruido aleatorio desvie o caminho do Trellis do Viterbi
-        csi_weight[l] = std::clamp(h_mag2 / (pwr_avg + 1e-6f), 0.0f, 2.0f);
+        csi_weight_[l] = std::clamp(h_mag2 / (pwr_avg + 1e-6f), 0.0f, 2.0f);
     }
 
     // 6. Decodificacao TMCC e deteccao de inicio de quadro OFDM (204 simbolos)
@@ -444,127 +502,128 @@ size_t OneSegDemodulator::process_symbol(const std::complex<float>* symbol_time_
         packet_idx_in_frame_ = 0;
         frame_begin_pending_ = false;
     }
-    if (process_tmcc(eq_seg.data())) {
+    if (process_tmcc(equalized_.data())) {
         frame_begin_pending_ = true;
     }
 
-    // 7. Extracao das 384 portadoras de dados ponderadas por CSI (excluindo SP, TMCC e AC)
-    std::vector<std::complex<float>> data_carriers;
-    data_carriers.reserve(384);
-
-    bool is_sp[432] = {false};
-    for (size_t sp : sp_indices) is_sp[sp] = true;
-    bool is_tmcc[432] = {false};
-    for (size_t tm : TMCC_CARRIERS) is_tmcc[tm] = true;
-    bool is_ac[432] = {false};
-    for (size_t ac : AC_CARRIERS) is_ac[ac] = true;
-
-    for (size_t l = 0; l < 432; ++l) {
-        if (!is_sp[l] && !is_tmcc[l] && !is_ac[l]) {
-            // Aplica a ponderacao CSI diretamente ao simbolo complexo antes dos desentrelaçadores
-            data_carriers.push_back(eq_seg[l] * csi_weight[l]);
-        }
+    // 7. Extracao das 384 portadoras de dados via layout pre-calculado
+    const auto& layout = carrier_layouts_[sym_mod4_ & 3];
+    for (size_t i = 0; i < constants::DATA_CARRIERS; ++i) {
+        uint16_t l = layout.data_indices[i];
+        data_carriers_[i] = equalized_[l];
+        data_csi_[i] = csi_weight_[l];
     }
 
     // 8. Desentrelaçamento em Frequencia (Permutacao de 384 portadoras)
-    std::vector<std::complex<float>> freq_deint(384);
-    for (size_t i = 0; i < 384; ++i) {
-        freq_deint[i] = data_carriers[FREQ_PERM_MODE3[i]];
+    for (size_t i = 0; i < constants::DATA_CARRIERS; ++i) {
+        size_t p = FREQ_PERM_MODE3[i];
+        freq_deint_[i] = data_carriers_[p];
+        freq_csi_[i] = data_csi_[p];
     }
 
-    // 9. Desentrelaçamento no Tempo (FIFOs de profundidade I)
-    std::vector<std::complex<float>> time_deint(384);
-    for (size_t c = 0; c < 384; ++c) {
-        if (time_deint_fifos_[c].empty()) {
-            time_deint[c] = freq_deint[c];
-        } else {
-            time_deint_fifos_[c].push_back(freq_deint[c]);
-            time_deint[c] = time_deint_fifos_[c].front();
-            time_deint_fifos_[c].pop_front();
-        }
+    // 9. Desentrelaçamento no Tempo (linhas de atraso contíguas de profundidade I)
+    for (size_t c = 0; c < constants::DATA_CARRIERS; ++c) {
+        time_deint_[c] = time_delay_lines_[c].push_and_get(freq_deint_[c]);
+        time_csi_[c] = time_csi_delay_lines_[c].push_and_get(freq_csi_[c]);
     }
 
-    // 10. Demapeamento suave (QPSK / 16QAM) com desentrelaçamento de bits (symbol_demapper + bit_deinterleaver)
-    std::vector<uint8_t> soft_bits;
+    // 10. Demapeamento suave (QPSK / 16QAM) com ponderacao CSI e desentrelaçamento de bits
+    soft_bits_.clear();
+    auto scale_soft = [](uint8_t soft_val, float weight) -> uint8_t {
+        return static_cast<uint8_t>(std::clamp(constants::SOFT_NEUTRAL + weight * (static_cast<float>(soft_val) - constants::SOFT_NEUTRAL), 0.0f, 255.0f));
+    };
+
     if (modulation_ == CarrierModulation::QAM16) {
-        soft_bits.reserve(384 * 4);
         constexpr float TH_16QAM = 2.0f / 3.16227766f; // 2 / sqrt(10)
-        // Normaliza amplitude media pela energia dos pilotos (4/3)
-        for (size_t c = 0; c < 384; ++c) {
-            float re = time_deint[c].real();
-            float im = time_deint[c].imag();
-            // b3 (MSB): re < 0 (delay 120)
-            // b2:       im < 0 (delay 80)
-            // b1:       |re| < th (delay 40)
-            // b0 (LSB): |im| < th (delay 0)
+        auto to_soft = [](float v) -> uint8_t {
+            return static_cast<uint8_t>(std::clamp(static_cast<int>(constants::SOFT_NEUTRAL + v * constants::SOFT_SCALE), 0, 255));
+        };
+        for (size_t c = 0; c < constants::DATA_CARRIERS; ++c) {
+            float w = time_csi_[c];
+            float re = time_deint_[c].real();
+            float im = time_deint_[c].imag();
             float b0_raw = TH_16QAM - std::abs(im);
             float b1_raw = TH_16QAM - std::abs(re);
             float b2_raw = -im;
             float b3_raw = -re;
 
-            bit_deint_fifos_[1].push_back(b1_raw);
-            float b1_deint = bit_deint_fifos_[1].front();
-            bit_deint_fifos_[1].pop_front();
+            float b1_deint = bit_delay_lines_[1].push_and_get(b1_raw);
+            float b2_deint = bit_delay_lines_[2].push_and_get(b2_raw);
+            float b3_deint = bit_delay_lines_[3].push_and_get(b3_raw);
 
-            bit_deint_fifos_[2].push_back(b2_raw);
-            float b2_deint = bit_deint_fifos_[2].front();
-            bit_deint_fifos_[2].pop_front();
+            float w1_deint = bit_csi_delay_lines_[1].push_and_get(w);
+            float w2_deint = bit_csi_delay_lines_[2].push_and_get(w);
+            float w3_deint = bit_csi_delay_lines_[3].push_and_get(w);
 
-            bit_deint_fifos_[3].push_back(b3_raw);
-            float b3_deint = bit_deint_fifos_[3].front();
-            bit_deint_fifos_[3].pop_front();
-
-            auto to_soft = [](float v) -> uint8_t {
-                return static_cast<uint8_t>(std::clamp(static_cast<int>(128.0f + v * 64.0f), 0, 255));
-            };
-            soft_bits.push_back(to_soft(b3_deint));
-            soft_bits.push_back(to_soft(b2_deint));
-            soft_bits.push_back(to_soft(b1_deint));
-            soft_bits.push_back(to_soft(b0_raw));
+            soft_bits_.push_back(scale_soft(to_soft(b3_deint), w3_deint));
+            soft_bits_.push_back(scale_soft(to_soft(b2_deint), w2_deint));
+            soft_bits_.push_back(scale_soft(to_soft(b1_deint), w1_deint));
+            soft_bits_.push_back(scale_soft(to_soft(b0_raw), w));
         }
     } else {
         // QPSK padrao 1-Seg: MSB (b1 = re < 0) tem atraso de 120, LSB (b0 = im < 0) tem atraso 0
-        soft_bits.reserve(384 * 2);
-        for (size_t c = 0; c < 384; ++c) {
-            float lsb_raw = std::clamp(-time_deint[c].imag(), -4.0f, 4.0f);
-            float msb_raw = std::clamp(-time_deint[c].real(), -4.0f, 4.0f);
+        for (size_t c = 0; c < constants::DATA_CARRIERS; ++c) {
+            float w = time_csi_[c];
+            float lsb_raw = std::clamp(-time_deint_[c].imag(), -4.0f, 4.0f);
+            float msb_raw = std::clamp(-time_deint_[c].real(), -4.0f, 4.0f);
 
-            bit_deint_fifos_[1].push_back(msb_raw);
-            float msb_deint = bit_deint_fifos_[1].front();
-            bit_deint_fifos_[1].pop_front();
+            float msb_deint = bit_delay_lines_[1].push_and_get(msb_raw);
+            float msb_w = bit_csi_delay_lines_[1].push_and_get(w);
 
-            uint8_t msb_byte = static_cast<uint8_t>(std::clamp(static_cast<int>(128.0f + msb_deint * 48.0f), 0, 255));
-            uint8_t lsb_byte = static_cast<uint8_t>(std::clamp(static_cast<int>(128.0f + lsb_raw * 48.0f), 0, 255));
+            uint8_t msb_byte = static_cast<uint8_t>(std::clamp(static_cast<int>(constants::SOFT_NEUTRAL + msb_deint * 48.0f), 0, 255));
+            uint8_t lsb_byte = static_cast<uint8_t>(std::clamp(static_cast<int>(constants::SOFT_NEUTRAL + lsb_raw * 48.0f), 0, 255));
 
-            soft_bits.push_back(msb_byte);
-            soft_bits.push_back(lsb_byte);
+            soft_bits_.push_back(scale_soft(msb_byte, msb_w));
+            soft_bits_.push_back(scale_soft(lsb_byte, w));
         }
     }
 
     // 11. Decodificacao Convolucional Viterbi Continua (Inner FEC)
-    std::vector<uint8_t> decoded_bytes;
-    viterbi_.decode_continuous(soft_bits, decoded_bytes);
-    viterbi_byte_stream_.insert(viterbi_byte_stream_.end(), decoded_bytes.begin(), decoded_bytes.end());
+    viterbi_decoded_bytes_.clear();
+    viterbi_.decode_continuous(soft_bits_, viterbi_decoded_bytes_);
+    viterbi_byte_stream_.insert(viterbi_byte_stream_.end(),
+                                viterbi_decoded_bytes_.begin(),
+                                viterbi_decoded_bytes_.end());
 
-    // 12. Alinhamento de Pacotes de 204 Bytes, Desentrelaçador Forney (I=12, M=17),
-    //     Descrambler ISDB-T e Decodificador Reed-Solomon RS(204, 188, t=8)
-    // Conforme gr-isdbt (byte_deinterleaver_impl.cc + energy_descrambler_impl.cc):
-    // Cada bloco de 204 bytes pos-Viterbi possui 203 bytes embaralhados seguidos de 0x47 na posicao 203,
-    // de modo que o byte 0 (pos-0x47) entra no ramo 0 do Forney (atraso 187) e o byte 203 (0x47) entra no ramo 11 (atraso 0).
-    while (viterbi_byte_stream_.size() >= 204) {
+    // 12. Alinhamento de Pacotes de 204 Bytes com consumo por offset (zero memmove desnecessario),
+    //     Desentrelaçador Forney (I=12, M=17), Descrambler ISDB-T e Decodificador Reed-Solomon RS(204, 188, t=8)
+    auto avail_bytes = [&]() -> size_t {
+        return (viterbi_byte_stream_.size() >= viterbi_stream_offset_)
+                   ? (viterbi_byte_stream_.size() - viterbi_stream_offset_)
+                   : 0;
+    };
+
+    auto consume_bytes = [&](size_t count) {
+        viterbi_stream_offset_ += count;
+        if (viterbi_stream_offset_ > 4096 && viterbi_stream_offset_ > viterbi_byte_stream_.size() / 2) {
+            size_t rem = viterbi_byte_stream_.size() - viterbi_stream_offset_;
+            if (rem > 0) {
+                std::memmove(viterbi_byte_stream_.data(),
+                             viterbi_byte_stream_.data() + viterbi_stream_offset_,
+                             rem);
+                viterbi_byte_stream_.resize(rem);
+            } else {
+                viterbi_byte_stream_.clear();
+            }
+            viterbi_stream_offset_ = 0;
+        }
+    };
+
+    while (avail_bytes() >= 204) {
         if (viterbi_sync_offset_ < 0) {
             size_t sync_win_pkts = (time_interleave_I_ == 0) ? 2 : 8;
             int min_hits_req     = (time_interleave_I_ == 0) ? 2 : 5;
             size_t req_bytes     = sync_win_pkts * 204;
 
-            if (viterbi_byte_stream_.size() < req_bytes) break;
+            if (avail_bytes() < req_bytes) break;
 
             int best_off = -1;
             int best_hits = 0;
+            const uint8_t* base_ptr = viterbi_byte_stream_.data() + viterbi_stream_offset_;
             for (int off = 0; off < 204; ++off) {
                 int hits = 0;
                 for (size_t k = 0; k < sync_win_pkts; ++k) {
-                    if (viterbi_byte_stream_[off + k * 204 + 203] == 0x47) {
+                    if (base_ptr[off + k * 204 + 203] == 0x47) {
                         hits++;
                     }
                 }
@@ -579,22 +638,23 @@ size_t OneSegDemodulator::process_symbol(const std::complex<float>* symbol_time_
                 sync_miss_count_ = 0;
             } else {
                 size_t drop_bytes = (sync_win_pkts > 2) ? ((sync_win_pkts - 2) * 204) : 204;
-                viterbi_byte_stream_.erase(viterbi_byte_stream_.begin(), viterbi_byte_stream_.begin() + drop_bytes);
+                consume_bytes(drop_bytes);
                 break;
             }
         }
 
         if (viterbi_sync_offset_ > 0) {
-            if (viterbi_byte_stream_.size() < static_cast<size_t>(viterbi_sync_offset_)) break;
-            viterbi_byte_stream_.erase(viterbi_byte_stream_.begin(), viterbi_byte_stream_.begin() + viterbi_sync_offset_);
+            if (avail_bytes() < static_cast<size_t>(viterbi_sync_offset_)) break;
+            consume_bytes(static_cast<size_t>(viterbi_sync_offset_));
             viterbi_sync_offset_ = 0;
         }
 
-        if (viterbi_byte_stream_.size() < 204) break;
+        if (avail_bytes() < 204) break;
+
+        const uint8_t* cur_block = viterbi_byte_stream_.data() + viterbi_stream_offset_;
 
         // Monitora continuidade do sync byte 0x47 na posicao 203 com histerese (ate 16 pacotes)
-        // para nunca deslocar os 187 pacotes acumulados no Forney por um erro de bit isolado
-        if (viterbi_byte_stream_[203] == 0x47) {
+        if (cur_block[203] == 0x47) {
             sync_miss_count_ = 0;
         } else {
             if (++sync_miss_count_ >= 16) {
@@ -603,9 +663,9 @@ size_t OneSegDemodulator::process_symbol(const std::complex<float>* symbol_time_
                 forney_blocks_fed_ = 0;
                 packet_idx_in_frame_ = -1;
                 for (size_t j = 0; j < 12; ++j) {
-                    forney_fifos_[j].assign(17 * (11 - j), 0);
+                    forney_delay_lines_[j].reset(0);
                 }
-                viterbi_byte_stream_.erase(viterbi_byte_stream_.begin(), viterbi_byte_stream_.begin() + 204);
+                consume_bytes(204);
                 continue;
             }
         }
@@ -614,16 +674,9 @@ size_t OneSegDemodulator::process_symbol(const std::complex<float>* symbol_time_
         uint8_t deint_block[204];
         for (size_t k = 0; k < 204; ++k) {
             size_t branch = k % 12;
-            uint8_t in_b = viterbi_byte_stream_[k];
-            if (forney_fifos_[branch].empty()) {
-                deint_block[k] = in_b;
-            } else {
-                forney_fifos_[branch].push_back(in_b);
-                deint_block[k] = forney_fifos_[branch].front();
-                forney_fifos_[branch].pop_front();
-            }
+            deint_block[k] = forney_delay_lines_[branch].push_and_get(cur_block[k]);
         }
-        viterbi_byte_stream_.erase(viterbi_byte_stream_.begin(), viterbi_byte_stream_.begin() + 204);
+        consume_bytes(204);
         forney_blocks_fed_++;
 
         // Aguarda o preenchimento das 187 linhas de atraso do Forney (11 * 17 = 187 pacotes)

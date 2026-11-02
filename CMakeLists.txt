@@ -5,6 +5,35 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Opcoes de otimizacao para builds de Release
+option(ISDBT_ENABLE_FAST_MATH "Habilitar otimizacao de ponto flutuante rapido (-ffast-math / /fp:fast)" OFF)
+
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release)
+endif()
+
+if(MSVC)
+    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /O2 /DNDEBUG")
+    if(ISDBT_ENABLE_FAST_MATH)
+        set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /fp:fast")
+    endif()
+else()
+    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -DNDEBUG")
+    if(ISDBT_ENABLE_FAST_MATH)
+        set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -ffast-math")
+    endif()
+endif()
+
+# Interprocedural Optimization (LTO)
+include(CheckIPOSupported)
+check_ipo_supported(RESULT ipo_supported OUTPUT ipo_error)
+if(ipo_supported)
+    message(STATUS "IPO / LTO suportado e habilitado para Release")
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+else()
+    message(STATUS "IPO / LTO nao suportado no compilador atual: ${ipo_error}")
+endif()
+
 # Local dependency roots
 set(DEPS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps")
 set(SETUP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tools/rtl-sdr")
@@ -94,6 +123,34 @@ add_executable(test_oneseg_e2e
 
 target_link_libraries(test_oneseg_e2e PRIVATE ${DSP_EXTERNAL_LIBS})
 
+add_executable(test_spsc_queue
+    tests/test_spsc_queue.cpp
+)
+
+add_executable(test_delay_line
+    tests/test_delay_line.cpp
+)
+
+add_executable(test_reset_recovery
+    tests/test_reset_recovery.cpp
+    src/dsp/reed_solomon.cpp
+    src/dsp/descrambler.cpp
+    src/dsp/viterbi_decoder.cpp
+    src/dsp/ofdm_sync.cpp
+    src/dsp/oneseg_demodulator.cpp
+)
+target_link_libraries(test_reset_recovery PRIVATE ${DSP_EXTERNAL_LIBS})
+
+add_executable(test_sync_state_and_csi
+    tests/test_sync_state_and_csi.cpp
+    src/dsp/ofdm_sync.cpp
+    src/dsp/oneseg_demodulator.cpp
+    src/dsp/viterbi_decoder.cpp
+    src/dsp/reed_solomon.cpp
+    src/dsp/descrambler.cpp
+)
+target_link_libraries(test_sync_state_and_csi PRIVATE ${DSP_EXTERNAL_LIBS})
+
 # CTest Integration
 enable_testing()
 add_test(NAME ReedSolomon COMMAND test_reed_solomon)
@@ -102,6 +159,10 @@ add_test(NAME Viterbi COMMAND test_viterbi)
 add_test(NAME FecPipeline COMMAND test_fec_pipeline)
 add_test(NAME OfdmSync COMMAND test_ofdm_sync)
 add_test(NAME OneSegE2E COMMAND test_oneseg_e2e)
+add_test(NAME SpscQueue COMMAND test_spsc_queue)
+add_test(NAME DelayLine COMMAND test_delay_line)
+add_test(NAME ResetRecovery COMMAND test_reset_recovery)
+add_test(NAME SyncStateAndCsi COMMAND test_sync_state_and_csi)
 
 if(WIN32)
     target_link_libraries(isdbtb_rx PRIVATE ws2_32 shell32)

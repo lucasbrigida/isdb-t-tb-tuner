@@ -74,6 +74,7 @@ public:
 private:
     void init_trellis();
     void depuncture(const std::vector<uint8_t>& soft_in, std::vector<uint8_t>& unpunctured);
+    void depuncture(const uint8_t* in, size_t in_size, std::vector<uint8_t>& unpunctured);
 
     CodeRate rate_;
 
@@ -82,11 +83,14 @@ private:
     uint8_t prev_state_[NUM_STATES][2];
     uint8_t output_parity_[NUM_STATES][2]; // 2 bits de paridade gerados por transicao: G1 e G2
 
-    // Estado continuo para streaming entre simbolos OFDM
+    // Estado continuo para streaming entre simbolos OFDM (zero alocacao no loop quente)
     std::array<uint32_t, NUM_STATES> cont_metric_{};
-    std::deque<uint64_t> cont_history_;
+    std::array<uint64_t, TRACEBACK_DEPTH> cont_history_ring_{};
+    size_t history_write_{0};
+    size_t history_count_{0};
     std::vector<uint8_t> cont_soft_rem_;
     std::vector<uint8_t> cont_bit_buf_;
+    std::vector<uint8_t> unpunctured_buf_;
 };
 
 } // namespace isdbt

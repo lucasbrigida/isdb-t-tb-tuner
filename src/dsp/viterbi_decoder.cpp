@@ -1,4 +1,5 @@
 #include "dsp/viterbi_decoder.hpp"
+#include "dsp/constants.hpp"
 #include <algorithm>
 #include <cstring>
 #include <limits>
@@ -35,7 +36,9 @@ void ViterbiDecoder::set_code_rate(CodeRate rate) {
 void ViterbiDecoder::reset() {
     cont_metric_.fill(1000000);
     cont_metric_[0] = 0;
-    cont_history_.clear();
+    cont_history_ring_.fill(0);
+    history_write_ = 0;
+    history_count_ = 0;
     cont_soft_rem_.clear();
     cont_bit_buf_.clear();
 }
@@ -123,59 +126,67 @@ void ViterbiDecoder::encode(const std::vector<uint8_t>& in_bits, std::vector<uin
 }
 
 void ViterbiDecoder::depuncture(const std::vector<uint8_t>& soft_in, std::vector<uint8_t>& unpunctured) {
+    depuncture(soft_in.data(), soft_in.size(), unpunctured);
+}
+
+void ViterbiDecoder::depuncture(const uint8_t* in, size_t in_size, std::vector<uint8_t>& unpunctured) {
     unpunctured.clear();
-    constexpr uint8_t ERASED = 128;
+    const uint8_t ERASED = static_cast<uint8_t>(constants::SOFT_NEUTRAL);
 
     if (rate_ == CodeRate::RATE_1_2) {
-        unpunctured = soft_in;
+        unpunctured.assign(in, in + in_size);
     } else if (rate_ == CodeRate::RATE_2_3) {
-        for (size_t i = 0; i + 2 < soft_in.size(); i += 3) {
-            unpunctured.push_back(soft_in[i + 0]);
-            unpunctured.push_back(soft_in[i + 1]);
+        unpunctured.reserve((in_size / 3) * 4);
+        for (size_t i = 0; i + 2 < in_size; i += 3) {
+            unpunctured.push_back(in[i + 0]);
+            unpunctured.push_back(in[i + 1]);
             unpunctured.push_back(ERASED);
-            unpunctured.push_back(soft_in[i + 2]);
+            unpunctured.push_back(in[i + 2]);
         }
     } else if (rate_ == CodeRate::RATE_3_4) {
-        for (size_t i = 0; i + 3 < soft_in.size(); i += 4) {
-            unpunctured.push_back(soft_in[i + 0]);
-            unpunctured.push_back(soft_in[i + 1]);
+        unpunctured.reserve((in_size / 4) * 6);
+        for (size_t i = 0; i + 3 < in_size; i += 4) {
+            unpunctured.push_back(in[i + 0]);
+            unpunctured.push_back(in[i + 1]);
             unpunctured.push_back(ERASED);
-            unpunctured.push_back(soft_in[i + 2]);
-            unpunctured.push_back(soft_in[i + 3]);
+            unpunctured.push_back(in[i + 2]);
+            unpunctured.push_back(in[i + 3]);
             unpunctured.push_back(ERASED);
         }
     } else if (rate_ == CodeRate::RATE_5_6) {
-        for (size_t i = 0; i + 5 < soft_in.size(); i += 6) {
-            unpunctured.push_back(soft_in[i + 0]);
-            unpunctured.push_back(soft_in[i + 1]);
+        unpunctured.reserve((in_size / 6) * 10);
+        for (size_t i = 0; i + 5 < in_size; i += 6) {
+            unpunctured.push_back(in[i + 0]);
+            unpunctured.push_back(in[i + 1]);
             unpunctured.push_back(ERASED);
-            unpunctured.push_back(soft_in[i + 2]);
-            unpunctured.push_back(soft_in[i + 3]);
+            unpunctured.push_back(in[i + 2]);
+            unpunctured.push_back(in[i + 3]);
             unpunctured.push_back(ERASED);
             unpunctured.push_back(ERASED);
-            unpunctured.push_back(soft_in[i + 4]);
-            unpunctured.push_back(soft_in[i + 5]);
+            unpunctured.push_back(in[i + 4]);
+            unpunctured.push_back(in[i + 5]);
             unpunctured.push_back(ERASED);
         }
     } else if (rate_ == CodeRate::RATE_7_8) {
-        for (size_t i = 0; i + 7 < soft_in.size(); i += 8) {
-            unpunctured.push_back(soft_in[i + 0]);
-            unpunctured.push_back(soft_in[i + 1]);
+        unpunctured.reserve((in_size / 8) * 16);
+        for (size_t i = 0; i + 7 < in_size; i += 8) {
+            unpunctured.push_back(in[i + 0]);
+            unpunctured.push_back(in[i + 1]);
             unpunctured.push_back(ERASED);
-            unpunctured.push_back(soft_in[i + 2]);
+            unpunctured.push_back(in[i + 2]);
             unpunctured.push_back(ERASED);
-            unpunctured.push_back(soft_in[i + 3]);
+            unpunctured.push_back(in[i + 3]);
             unpunctured.push_back(ERASED);
-            unpunctured.push_back(soft_in[i + 4]);
-            unpunctured.push_back(soft_in[i + 5]);
+            unpunctured.push_back(in[i + 4]);
+            unpunctured.push_back(in[i + 5]);
             unpunctured.push_back(ERASED);
             unpunctured.push_back(ERASED);
-            unpunctured.push_back(soft_in[i + 6]);
-            unpunctured.push_back(soft_in[i + 7]);
+            unpunctured.push_back(in[i + 6]);
+            unpunctured.push_back(in[i + 7]);
             unpunctured.push_back(ERASED);
         }
     } else {
-        unpunctured = soft_in;
+        unpunctured.assign(in, in + in_size);
     }
 }
 
@@ -212,8 +223,9 @@ void ViterbiDecoder::decode(const std::vector<uint8_t>& soft_in, std::vector<uin
                 uint8_t exp_g1 = (parity >> 1) & 1 ? 255 : 0;
                 uint8_t exp_g2 = (parity & 1) ? 255 : 0;
 
-                uint32_t bm1 = (rx_g1 == 128) ? 0 : static_cast<uint32_t>(std::abs(static_cast<int>(rx_g1) - static_cast<int>(exp_g1)));
-                uint32_t bm2 = (rx_g2 == 128) ? 0 : static_cast<uint32_t>(std::abs(static_cast<int>(rx_g2) - static_cast<int>(exp_g2)));
+                constexpr uint8_t NEUTRAL_SOFT = static_cast<uint8_t>(constants::SOFT_NEUTRAL);
+                uint32_t bm1 = (rx_g1 == NEUTRAL_SOFT) ? 0 : static_cast<uint32_t>(std::abs(static_cast<int>(rx_g1) - static_cast<int>(exp_g1)));
+                uint32_t bm2 = (rx_g2 == NEUTRAL_SOFT) ? 0 : static_cast<uint32_t>(std::abs(static_cast<int>(rx_g2) - static_cast<int>(exp_g2)));
                 uint32_t branch_metric = bm1 + bm2;
 
                 uint32_t total = cur_m + branch_metric;
@@ -282,19 +294,23 @@ void ViterbiDecoder::decode_continuous(const std::vector<uint8_t>& soft_in, std:
     size_t usable_len = (cont_soft_rem_.size() / punct_block) * punct_block;
     if (usable_len == 0) return;
 
-    std::vector<uint8_t> chunk(cont_soft_rem_.begin(), cont_soft_rem_.begin() + usable_len);
-    cont_soft_rem_.erase(cont_soft_rem_.begin(), cont_soft_rem_.begin() + usable_len);
+    depuncture(cont_soft_rem_.data(), usable_len, unpunctured_buf_);
 
-    std::vector<uint8_t> unpunct;
-    depuncture(chunk, unpunct);
+    size_t rem_count = cont_soft_rem_.size() - usable_len;
+    if (rem_count > 0) {
+        std::memmove(cont_soft_rem_.data(), cont_soft_rem_.data() + usable_len, rem_count);
+        cont_soft_rem_.resize(rem_count);
+    } else {
+        cont_soft_rem_.clear();
+    }
 
-    size_t num_steps = unpunct.size() / 2;
+    size_t num_steps = unpunctured_buf_.size() / 2;
     constexpr uint32_t INF_METRIC = 1000000000;
     std::array<uint32_t, NUM_STATES> next_metric;
 
     for (size_t t = 0; t < num_steps; ++t) {
-        uint8_t rx_g1 = unpunct[2 * t + 0];
-        uint8_t rx_g2 = unpunct[2 * t + 1];
+        uint8_t rx_g1 = unpunctured_buf_[2 * t + 0];
+        uint8_t rx_g2 = unpunctured_buf_[2 * t + 1];
 
         next_metric.fill(INF_METRIC);
         uint64_t survivor_bits = 0;
@@ -309,8 +325,9 @@ void ViterbiDecoder::decode_continuous(const std::vector<uint8_t>& soft_in, std:
                 uint8_t exp_g1 = (parity >> 1) & 1 ? 255 : 0;
                 uint8_t exp_g2 = (parity & 1) ? 255 : 0;
 
-                uint32_t bm1 = (rx_g1 == 128) ? 0 : static_cast<uint32_t>(std::abs(static_cast<int>(rx_g1) - static_cast<int>(exp_g1)));
-                uint32_t bm2 = (rx_g2 == 128) ? 0 : static_cast<uint32_t>(std::abs(static_cast<int>(rx_g2) - static_cast<int>(exp_g2)));
+                constexpr uint8_t NEUTRAL_SOFT = static_cast<uint8_t>(constants::SOFT_NEUTRAL);
+                uint32_t bm1 = (rx_g1 == NEUTRAL_SOFT) ? 0 : static_cast<uint32_t>(std::abs(static_cast<int>(rx_g1) - static_cast<int>(exp_g1)));
+                uint32_t bm2 = (rx_g2 == NEUTRAL_SOFT) ? 0 : static_cast<uint32_t>(std::abs(static_cast<int>(rx_g2) - static_cast<int>(exp_g2)));
                 uint32_t total = cur_m + bm1 + bm2;
 
                 if (total < next_metric[ns]) {
@@ -325,7 +342,11 @@ void ViterbiDecoder::decode_continuous(const std::vector<uint8_t>& soft_in, std:
         }
 
         cont_metric_ = next_metric;
-        cont_history_.push_back(survivor_bits);
+        cont_history_ring_[history_write_] = survivor_bits;
+        history_write_ = (history_write_ + 1) % TRACEBACK_DEPTH;
+        if (history_count_ < TRACEBACK_DEPTH) {
+            history_count_++;
+        }
 
         uint32_t min_m = *std::min_element(cont_metric_.begin(), cont_metric_.end());
         if (min_m > 100000) {
@@ -334,8 +355,8 @@ void ViterbiDecoder::decode_continuous(const std::vector<uint8_t>& soft_in, std:
             }
         }
 
-        // Quando acumular TRACEBACK_DEPTH passos, realiza traceback do bit mais antigo
-        if (cont_history_.size() >= static_cast<size_t>(TRACEBACK_DEPTH)) {
+        // Quando acumular TRACEBACK_DEPTH passos, realiza traceback do bit mais antigo atraves do ring buffer
+        if (history_count_ >= TRACEBACK_DEPTH) {
             int cur_state = 0;
             uint32_t best_m = cont_metric_[0];
             for (int s = 1; s < NUM_STATES; ++s) {
@@ -345,12 +366,12 @@ void ViterbiDecoder::decode_continuous(const std::vector<uint8_t>& soft_in, std:
                 }
             }
 
-            for (int k = static_cast<int>(cont_history_.size()) - 1; k > 0; --k) {
-                bool msb_was_1 = (cont_history_[k] >> cur_state) & 1;
+            for (size_t step = 0; step < TRACEBACK_DEPTH - 1; ++step) {
+                size_t idx = (history_write_ - 1 - step + TRACEBACK_DEPTH) % TRACEBACK_DEPTH;
+                bool msb_was_1 = (cont_history_ring_[idx] >> cur_state) & 1;
                 cur_state = (cur_state >> 1) | (msb_was_1 ? 0x20 : 0);
             }
             uint8_t oldest_bit = cur_state & 1;
-            cont_history_.pop_front();
 
             cont_bit_buf_.push_back(oldest_bit);
             if (cont_bit_buf_.size() == 8) {

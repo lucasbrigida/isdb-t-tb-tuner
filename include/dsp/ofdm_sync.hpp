@@ -29,6 +29,15 @@ enum class GuardInterval {
 };
 
 /**
+ * @brief Maquina de estados para sincronismo temporal OFDM
+ */
+enum class SyncState {
+    Acquisition, ///< Busca global exaustiva por borda de simbolo e GI
+    Tracking,    ///< Rastreamento rapido em janela estreita (+/- 4 amostras) em torno do offset predito
+    LostLock     ///< Perda consecutiva de correlacao de prefixo ciclico
+};
+
+/**
  * @brief Estrutura que encapsula as metricas de sincronizacao de um simbolo OFDM.
  */
 struct SyncResult {
@@ -52,6 +61,9 @@ struct SyncResult {
  */
 class OfdmSync {
 public:
+    static constexpr int TRACK_RADIUS = 4;
+    static constexpr int MAX_CONSECUTIVE_FAILURES = 3;
+
     /**
      * @brief Construtor do sincronizador OFDM.
      * @param mode Modo de operacao (Mode 1, Mode 2 ou Mode 3).
@@ -67,10 +79,18 @@ public:
     void set_mode(OfdmMode mode, GuardInterval gi);
 
     /**
-     * @brief Reinicia o acumulador de fase do NCO de correcao de frequencia.
+     * @brief Reinicia o estado de sincronismo, maquina de estados e o acumulador de fase do NCO.
      */
-    void reset_phase() { current_phase_ = 0.0f; }
+    void reset() noexcept {
+        current_phase_ = 0.0f;
+        state_ = SyncState::Acquisition;
+        consecutive_failures_ = 0;
+        expected_first_d_ = 0;
+        has_expected_d_ = false;
+    }
+    void reset_phase() noexcept { current_phase_ = 0.0f; }
 
+    SyncState sync_state() const noexcept { return state_; }
     int fft_size() const { return fft_size_; }
     int gi_size() const { return gi_size_; }
     int symbol_size() const { return fft_size_ + gi_size_; }
@@ -124,6 +144,19 @@ private:
     fftwf_complex* fft_in_;
     fftwf_complex* fft_out_;
     fftwf_plan fft_plan_;
+
+    // Estado de sincronismo e rastreamento
+    SyncState state_{SyncState::Acquisition};
+    int consecutive_failures_{0};
+    int expected_first_d_{0};
+    bool has_expected_d_{false};
+
+    // Buffers reutilizaveis para eliminacao de alocacoes dinamicas no loop DSP
+    std::vector<std::complex<float>> prod_;
+    std::vector<float> nrm_;
+    std::vector<std::complex<float>> win_gamma_;
+    std::vector<float> win_energy_;
+    std::vector<std::complex<float>> rot_vec_;
 };
 
 } // namespace isdbt
