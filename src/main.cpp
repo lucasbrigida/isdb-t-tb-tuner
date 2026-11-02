@@ -29,6 +29,7 @@
 #include "dsp/constants.hpp"
 #include "dsp/dsp_metrics.hpp"
 #include "dsp/spsc_capture_queue.hpp"
+#include "dsp/iq_stream_buffer.hpp"
 #include "dsp/reed_solomon.hpp"
 #include "dsp/descrambler.hpp"
 #include "dsp/viterbi_decoder.hpp"
@@ -199,7 +200,7 @@ struct CandidateChannel {
 void reset_reception_stream(
     isdbt::OfdmSync& sync,
     isdbt::OneSegDemodulator& demod,
-    std::vector<std::complex<float>>& stream_iq_buf,
+    isdbt::IqStreamBuffer& stream_iq_buf,
     std::vector<std::complex<float>>& iq_buf,
     bool& ofdm_locked,
     float& tracked_ffo_hz,
@@ -377,8 +378,7 @@ int cmd_scan(int start_ch, int end_ch, int dev_idx) {
         isdbt::PsiParser scan_psi;
 
         std::vector<std::complex<float>> cand_iq_buf(step_chunk_samples);
-        std::vector<std::complex<float>> stream_iq_buf;
-        stream_iq_buf.reserve(step_chunk_samples * 2);
+        isdbt::IqStreamBuffer stream_iq_buf(step_chunk_samples * 2);
 
         float frac_pos = 0.0f;
         float tracked_ffo_hz = 0.0f;
@@ -439,7 +439,7 @@ int cmd_scan(int start_ch, int end_ch, int dev_idx) {
                         size_t gi_start = (sync_res.symbol_offset >= static_cast<int>(GI_LEN))
                                           ? static_cast<size_t>(sync_res.symbol_offset - static_cast<int>(GI_LEN))
                                           : 0;
-                        stream_iq_buf.assign(cand_iq_buf.begin() + gi_start, cand_iq_buf.end());
+                        stream_iq_buf.assign(cand_iq_buf.data() + gi_start, cand_iq_buf.size() - gi_start);
                     }
                 } else {
                     if (!sync_res.locked) {
@@ -459,13 +459,13 @@ int cmd_scan(int start_ch, int end_ch, int dev_idx) {
 
                     if (initial_symbol_found) {
                         scan_sync.correct_frequency_offset(cand_iq_buf.data(), step_chunk_samples, tracked_ffo_hz);
-                        stream_iq_buf.insert(stream_iq_buf.end(), cand_iq_buf.begin(), cand_iq_buf.end());
+                        stream_iq_buf.append(cand_iq_buf.data(), cand_iq_buf.size());
                     }
                 }
 
                 if (initial_symbol_found) {
                     std::vector<std::vector<uint8_t>> scan_pkts;
-                    while (static_cast<size_t>(std::lround(frac_pos)) + SYM_LEN + 8 <= stream_iq_buf.size()) {
+                    while (static_cast<size_t>(std::lround(frac_pos)) + SYM_LEN + 8 <= stream_iq_buf.available()) {
                         int base_pos = static_cast<int>(std::lround(frac_pos));
                         int max_neg = (base_pos >= 4) ? 4 : base_pos;
                         int best_sh = 0;
@@ -480,15 +480,15 @@ int cmd_scan(int start_ch, int end_ch, int dev_idx) {
                         }
                         frac_pos += 0.25f * static_cast<float>(best_sh);
                         int sym_d = std::max(0, static_cast<int>(std::lround(frac_pos)));
-                        if (static_cast<size_t>(sym_d) + SYM_LEN > stream_iq_buf.size()) break;
+                        if (static_cast<size_t>(sym_d) + SYM_LEN > stream_iq_buf.available()) break;
 
-                        scan_demod.process_symbol(&stream_iq_buf[sym_d + GI_LEN], scan_pkts);
+                        scan_demod.process_symbol(stream_iq_buf.data_at(sym_d + GI_LEN), scan_pkts);
                         frac_pos += static_cast<float>(SYM_LEN);
                     }
 
                     int consume_i = static_cast<int>(std::floor(frac_pos)) - 8;
-                    if (consume_i > 0 && static_cast<size_t>(consume_i) <= stream_iq_buf.size()) {
-                        stream_iq_buf.erase(stream_iq_buf.begin(), stream_iq_buf.begin() + consume_i);
+                    if (consume_i > 0 && static_cast<size_t>(consume_i) <= stream_iq_buf.available()) {
+                        stream_iq_buf.consume(static_cast<size_t>(consume_i));
                         frac_pos -= static_cast<float>(consume_i);
                     }
 
@@ -665,7 +665,7 @@ static bool launch_mpv(uint16_t udp_port) {
 void reset_reception_stream(
     isdbt::OfdmSync& sync,
     isdbt::OneSegDemodulator& demod,
-    std::vector<std::complex<float>>& stream_iq_buf,
+    isdbt::IqStreamBuffer& stream_iq_buf,
     std::vector<std::complex<float>>& iq_buf,
     bool& ofdm_locked,
     float& tracked_ffo_hz,
@@ -826,8 +826,7 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
     });
 
     std::vector<std::complex<float>> iq_buf(chunk_samples);
-    std::vector<std::complex<float>> stream_iq_buf;
-    stream_iq_buf.reserve(chunk_samples * 2);
+    isdbt::IqStreamBuffer stream_iq_buf(chunk_samples * 2);
 
     bool ofdm_locked = false;
     float tracked_ffo_hz = 0.0f;
@@ -896,7 +895,7 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
                     size_t gi_start = (sync_res.symbol_offset >= static_cast<int>(GI_LEN))
                                       ? static_cast<size_t>(sync_res.symbol_offset - static_cast<int>(GI_LEN))
                                       : 0;
-                    stream_iq_buf.assign(iq_buf.begin() + gi_start, iq_buf.end());
+                    stream_iq_buf.assign(iq_buf.data() + gi_start, iq_buf.size() - gi_start);
                 }
             } else {
                 if (!sync_res.locked) {
@@ -920,14 +919,14 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
                 if (ofdm_locked) {
                     // Desrotaciona o novo bloco mantendo continuidade de fase NCO
                     sync.correct_frequency_offset(iq_buf.data(), iq_buf.size(), tracked_ffo_hz);
-                    stream_iq_buf.insert(stream_iq_buf.end(), iq_buf.begin(), iq_buf.end());
+                    stream_iq_buf.append(iq_buf.data(), iq_buf.size());
                 }
             }
 
             if (ofdm_locked) {
                 // Processa todos os simbolos completos acumulados, rastreando suavemente o pico do
                 // prefixo ciclico (+/-4 amostras, ganho 0.25) para compensar a deriva de clock do dongle
-                while (static_cast<size_t>(std::lround(frac_pos)) + SYM_LEN + 8 <= stream_iq_buf.size()) {
+                while (static_cast<size_t>(std::lround(frac_pos)) + SYM_LEN + 8 <= stream_iq_buf.available()) {
                     int base_pos = static_cast<int>(std::lround(frac_pos));
                     int max_neg = (base_pos >= 4) ? 4 : base_pos;
                     int best_sh = 0;
@@ -942,16 +941,16 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
                     }
                     frac_pos += 0.25f * static_cast<float>(best_sh);
                     int sym_d = std::max(0, static_cast<int>(std::lround(frac_pos)));
-                    if (static_cast<size_t>(sym_d) + SYM_LEN > stream_iq_buf.size()) break;
+                    if (static_cast<size_t>(sym_d) + SYM_LEN > stream_iq_buf.available()) break;
 
-                    demod.process_symbol(&stream_iq_buf[sym_d + GI_LEN], decoded_pkts);
+                    demod.process_symbol(stream_iq_buf.data_at(sym_d + GI_LEN), decoded_pkts);
                     frac_pos += static_cast<float>(SYM_LEN);
                     dsp_metrics.processed_symbols++;
                 }
 
                 int consume_i = static_cast<int>(std::floor(frac_pos)) - 8;
-                if (consume_i > 0 && static_cast<size_t>(consume_i) <= stream_iq_buf.size()) {
-                    stream_iq_buf.erase(stream_iq_buf.begin(), stream_iq_buf.begin() + consume_i);
+                if (consume_i > 0 && static_cast<size_t>(consume_i) <= stream_iq_buf.available()) {
+                    stream_iq_buf.consume(static_cast<size_t>(consume_i));
                     frac_pos -= static_cast<float>(consume_i);
                 }
 
@@ -977,6 +976,10 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
                         total_air_packets++;
                         dsp_metrics.valid_ts_packets++;
                     }
+                    dsp_metrics.average_evm = demod.average_evm();
+                    dsp_metrics.average_snr_db = demod.average_snr_db();
+                    dsp_metrics.corrected_rs_packets = demod.corrected_rs_packets();
+                    dsp_metrics.uncorrectable_rs_packets = demod.uncorrectable_rs_packets();
                 } else if (test_pattern) {
                     std::vector<std::vector<uint8_t>> standby_pkts;
                     channel_ts_gen.get_standby_block(standby_pkts);
@@ -1005,7 +1008,8 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
                 status_ss << "[Status] RSSI: " << std::fixed << std::setprecision(1) << rssi_dbfs << " dBFS | "
                           << "OFDM: " << (ofdm_locked ? "LOCK" : "SYNC") << " (" << std::setprecision(2) << last_peak_corr << ") | "
                           << "TMCC: " << (demod.is_tmcc_locked() ? "LOCK" : "SYNC") << " | "
-                          << "TS: " << total_air_packets << " pkts";
+                          << "SNR: " << std::fixed << std::setprecision(1) << demod.average_snr_db() << " dB | "
+                          << "TS: " << total_air_packets << " pkts (RS: " << demod.corrected_rs_packets() << " corr / " << demod.uncorrectable_rs_packets() << " drop)";
                 status_ss << " | Drop: " << raw_queue->dropped_blocks();
                 if (!s_name.empty()) {
                     status_ss << " | " << s_name;

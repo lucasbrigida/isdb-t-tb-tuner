@@ -4,6 +4,7 @@
 #include <memory>
 #include <cstdlib>
 #include "dsp/spsc_capture_queue.hpp"
+#include "dsp/iq_stream_buffer.hpp"
 #include "dsp/dsp_metrics.hpp"
 #include "dsp/ofdm_sync.hpp"
 #include "dsp/oneseg_demodulator.hpp"
@@ -19,7 +20,7 @@
 void reset_reception_stream(
     isdbt::OfdmSync& sync,
     isdbt::OneSegDemodulator& demod,
-    std::vector<std::complex<float>>& stream_iq_buf,
+    isdbt::IqStreamBuffer& stream_iq_buf,
     std::vector<std::complex<float>>& iq_buf,
     bool& ofdm_locked,
     float& tracked_ffo_hz,
@@ -52,7 +53,9 @@ void test_discontinuity_detection_and_reset() {
 
     isdbt::OfdmSync sync(isdbt::OfdmMode::MODE_1_2K, isdbt::GuardInterval::GI_1_16);
     isdbt::OneSegDemodulator demod(isdbt::OfdmMode::MODE_1_2K, isdbt::GuardInterval::GI_1_16);
-    std::vector<std::complex<float>> stream_iq_buf(500, std::complex<float>(1.0f, 1.0f));
+    isdbt::IqStreamBuffer stream_iq_buf(500);
+    std::vector<std::complex<float>> dummy_iq(500, std::complex<float>(1.0f, 1.0f));
+    stream_iq_buf.assign(dummy_iq.data(), dummy_iq.size());
     std::vector<std::complex<float>> iq_buf(100);
     bool ofdm_locked = true;
     float tracked_ffo_hz = 250.0f;

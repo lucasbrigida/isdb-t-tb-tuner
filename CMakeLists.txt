@@ -123,6 +123,10 @@ add_executable(test_oneseg_e2e
 
 target_link_libraries(test_oneseg_e2e PRIVATE ${DSP_EXTERNAL_LIBS})
 
+add_executable(test_iq_stream_buffer
+    tests/test_iq_stream_buffer.cpp
+)
+
 add_executable(test_spsc_queue
     tests/test_spsc_queue.cpp
 )
@@ -159,6 +163,7 @@ add_test(NAME Viterbi COMMAND test_viterbi)
 add_test(NAME FecPipeline COMMAND test_fec_pipeline)
 add_test(NAME OfdmSync COMMAND test_ofdm_sync)
 add_test(NAME OneSegE2E COMMAND test_oneseg_e2e)
+add_test(NAME IqStreamBuffer COMMAND test_iq_stream_buffer)
 add_test(NAME SpscQueue COMMAND test_spsc_queue)
 add_test(NAME DelayLine COMMAND test_delay_line)
 add_test(NAME ResetRecovery COMMAND test_reset_recovery)

@@ -2,11 +2,11 @@
 
 #include <complex>
 #include <vector>
-#include <deque>
 #include <array>
 #include <cstdint>
 #include "dsp/constants.hpp"
 #include "dsp/delay_line.hpp"
+#include "dsp/tmcc_bit_buffer.hpp"
 #include "dsp/ofdm_sync.hpp"
 #include "dsp/viterbi_decoder.hpp"
 #include "dsp/descrambler.hpp"
@@ -71,6 +71,12 @@ public:
     uint64_t total_symbols_processed() const { return symbol_count_; }
     uint64_t total_ts_packets() const { return total_ts_packets_; }
     uint64_t rs_errors_corrected() const { return rs_corrected_; }
+    uint64_t corrected_rs_packets() const { return rs_corrected_packets_; }
+    uint64_t uncorrectable_rs_packets() const { return rs_uncorrectable_packets_; }
+    double average_evm() const { return average_evm_; }
+    double average_snr_db() const { return average_snr_db_; }
+    double latest_evm() const { return latest_evm_; }
+    double latest_snr_db() const { return latest_snr_db_; }
     bool tmcc_locked() const { return tmcc_locked_; }
     bool is_tmcc_locked() const { return tmcc_locked_; }
     int integer_freq_offset_bins() const { return ifo_bins_; }
@@ -91,6 +97,12 @@ private:
     uint64_t symbol_count_{0};
     uint64_t total_ts_packets_{0};
     uint64_t rs_corrected_{0};
+    uint64_t rs_corrected_packets_{0};
+    uint64_t rs_uncorrectable_packets_{0};
+    double latest_evm_{0.0};
+    double average_evm_{0.0};
+    double latest_snr_db_{0.0};
+    double average_snr_db_{0.0};
 
     // Parametros ativos da Camada A (1-Seg)
     CarrierModulation modulation_{CarrierModulation::QPSK};
@@ -107,7 +119,7 @@ private:
 
     // Estado do Decodificador TMCC
     std::array<std::complex<float>, 4> prev_tmcc_{};
-    std::deque<uint8_t> tmcc_bits_;
+    TmccBitBuffer tmcc_bits_;
     int since_last_tmcc_{203};
     bool tmcc_locked_{false};
     bool frame_begin_pending_{false};

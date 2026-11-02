@@ -2,6 +2,7 @@
 #include <complex>
 #include <cstdlib>
 #include "dsp/delay_line.hpp"
+#include "dsp/tmcc_bit_buffer.hpp"
 
 #define TEST_ASSERT(cond) do { \
     if (!(cond)) { \
@@ -68,10 +69,43 @@ void test_dynamic_delay_line() {
     std::cout << "  [PASS] test_dynamic_delay_line passou com sucesso.\n";
 }
 
+void test_tmcc_bit_buffer() {
+    isdbt::TmccBitBuffer tb;
+    tb.reset(0);
+    TEST_ASSERT(tb.size() == 204);
+    for (size_t i = 0; i < 204; ++i) {
+        TEST_ASSERT(tb[i] == 0);
+    }
+
+    // Push 204 distinct values (1 or 0)
+    for (int i = 0; i < 204; ++i) {
+        tb.push_back(static_cast<uint8_t>(i % 2));
+    }
+    for (size_t i = 0; i < 204; ++i) {
+        TEST_ASSERT(tb[i] == static_cast<uint8_t>(i % 2));
+    }
+
+    // Push 50 more bits and verify FIFO alignment
+    for (int i = 204; i < 254; ++i) {
+        tb.push_back(static_cast<uint8_t>((i * 7) % 2));
+    }
+    // Element at 0 must be old element 50 (i=50)
+    for (size_t i = 0; i < 204; ++i) {
+        int original_idx = static_cast<int>(50 + i);
+        uint8_t expected = (original_idx < 204)
+            ? static_cast<uint8_t>(original_idx % 2)
+            : static_cast<uint8_t>((original_idx * 7) % 2);
+        TEST_ASSERT(tb[i] == expected);
+    }
+
+    std::cout << "  [PASS] test_tmcc_bit_buffer passou com sucesso.\n";
+}
+
 int main() {
-    std::cout << "[TEST] Iniciando testes unitarios de DelayLine...\n";
+    std::cout << "[TEST] Iniciando testes unitarios de DelayLine e TmccBitBuffer...\n";
     test_fixed_delay_line();
     test_dynamic_delay_line();
-    std::cout << "[SUCESSO] Todos os testes de DelayLine passaram!\n";
+    test_tmcc_bit_buffer();
+    std::cout << "[SUCESSO] Todos os testes passaram!\n";
     return 0;
 }

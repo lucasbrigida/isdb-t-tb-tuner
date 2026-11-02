@@ -9,6 +9,11 @@ import time
 import ctypes
 import numpy as np
 
+# Taxa de amostragem padrao exata ISDB-T 1-Seg: 512 / (63 * 4) MHz = 2031746 Hz
+# Regra 1 (AGENTS.md) e include/dsp/constants.hpp: NUNCA use 2048000 Hz sem reamostragem racional.
+DEFAULT_SAMPLE_RATE_HZ = 2031746
+DEFAULT_CENTER_FREQ_HZ = 473142857  # Canal 14 UHF (470 + 3 + 1/7 MHz)
+
 # Procura DLL tanto em tools/rtl-sdr quanto em deps
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_dir = os.path.dirname(script_dir)
@@ -57,7 +62,7 @@ lib.rtlsdr_reset_buffer.restype = ctypes.c_int
 lib.rtlsdr_read_sync.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int, ctypes.POINTER(ctypes.c_int)]
 lib.rtlsdr_read_sync.restype = ctypes.c_int
 
-def calibrate(device_index=0, sample_rate=2031746, freq_hz=473142857, num_samples=131072):
+def calibrate(device_index=0, sample_rate=DEFAULT_SAMPLE_RATE_HZ, freq_hz=DEFAULT_CENTER_FREQ_HZ, num_samples=131072):
     count = lib.rtlsdr_get_device_count()
     if count == 0:
         print("[ERRO] Nenhum RTL-SDR encontrado.", file=sys.stderr)

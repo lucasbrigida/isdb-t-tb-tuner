@@ -8,6 +8,10 @@ import time
 import ctypes
 import numpy as np
 
+# Taxa de amostragem padrao exata ISDB-T 1-Seg: 512 / (63 * 4) MHz = 2031746 Hz
+# Regra 1 (AGENTS.md) e include/dsp/constants.hpp: NUNCA use 2048000 Hz sem reamostragem racional.
+DEFAULT_SAMPLE_RATE_HZ = 2031746
+
 project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 possible_dirs = [
     os.path.join(project_dir, "tools", "rtl-sdr"),
@@ -56,7 +60,7 @@ def scan_rf():
         return
 
     try:
-        sample_rate = 2031746
+        sample_rate = DEFAULT_SAMPLE_RATE_HZ
         lib.rtlsdr_set_sample_rate(dev, sample_rate)
         lib.rtlsdr_set_tuner_gain_mode(dev, 0) # AGC
 

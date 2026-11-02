@@ -153,7 +153,7 @@ OneSegDemodulator::OneSegDemodulator(OfdmMode mode, GuardInterval gi)
         forney_delay_lines_[j].init(17 * (11 - j), 0);
     }
 
-    tmcc_bits_.assign(204, 0);
+    tmcc_bits_.reset(0);
 
     // Pre-reserva capacidade de vetores para zero alocacao no caminho critico
     soft_bits_.reserve(384 * 4);
@@ -170,10 +170,16 @@ void OneSegDemodulator::reset() {
     sym_phase_agree_count_ = 0;
     sym_phase_locked_ = false;
     prev_tmcc_.fill(std::complex<float>(0.0f, 0.0f));
-    tmcc_bits_.assign(204, 0);
+    tmcc_bits_.reset(0);
     since_last_tmcc_ = 203;
     tmcc_locked_ = false;
     frame_begin_pending_ = false;
+    rs_corrected_packets_ = 0;
+    rs_uncorrectable_packets_ = 0;
+    latest_evm_ = 0.0;
+    average_evm_ = 0.0;
+    latest_snr_db_ = 0.0;
+    average_snr_db_ = 0.0;
     viterbi_.reset();
     descrambler_.reset();
     viterbi_byte_stream_.clear();
@@ -306,7 +312,6 @@ bool OneSegDemodulator::process_tmcc(const std::complex<float>* eq_seg_carriers)
     }
 
     uint8_t bit = (soft_vote >= 0.0f) ? 0 : 1;
-    tmcc_bits_.pop_front();
     tmcc_bits_.push_back(bit);
 
     bool end_frame = false;
@@ -512,6 +517,52 @@ size_t OneSegDemodulator::process_symbol(const std::complex<float>* symbol_time_
         uint16_t l = layout.data_indices[i];
         data_carriers_[i] = equalized_[l];
         data_csi_[i] = csi_weight_[l];
+    }
+
+    // 7.1 Calculo de EVM e SNR (dB) a cada 16 simbolos (custo CPU < 0.001%)
+    if ((symbol_count_ & 15) == 0) {
+        float err_pwr = 0.0f;
+        float ref_pwr = 0.0f;
+        if (modulation_ == CarrierModulation::QAM16) {
+            constexpr float scale_16q = 1.0f / 3.16227766f; // 1 / sqrt(10)
+            constexpr float th = 2.0f * scale_16q;
+            for (size_t i = 0; i < constants::DATA_CARRIERS; ++i) {
+                float re = data_carriers_[i].real();
+                float im = data_carriers_[i].imag();
+                float sgn_re = (re >= 0.0f) ? 1.0f : -1.0f;
+                float sgn_im = (im >= 0.0f) ? 1.0f : -1.0f;
+                float ideal_re = sgn_re * ((std::abs(re) > th) ? 3.0f * scale_16q : scale_16q);
+                float ideal_im = sgn_im * ((std::abs(im) > th) ? 3.0f * scale_16q : scale_16q);
+                float dr = re - ideal_re;
+                float di = im - ideal_im;
+                err_pwr += (dr * dr + di * di);
+                ref_pwr += (ideal_re * ideal_re + ideal_im * ideal_im);
+            }
+        } else {
+            // QPSK: decisao nos quadrantes (+/-1, +/-1)
+            for (size_t i = 0; i < constants::DATA_CARRIERS; ++i) {
+                float re = data_carriers_[i].real();
+                float im = data_carriers_[i].imag();
+                float ideal_re = (re >= 0.0f) ? 1.0f : -1.0f;
+                float ideal_im = (im >= 0.0f) ? 1.0f : -1.0f;
+                float dr = re - ideal_re;
+                float di = im - ideal_im;
+                err_pwr += (dr * dr + di * di);
+                ref_pwr += 2.0f;
+            }
+        }
+        if (ref_pwr > 1e-6f) {
+            float evm_sq = err_pwr / ref_pwr;
+            latest_evm_ = static_cast<double>(std::sqrt(evm_sq));
+            latest_snr_db_ = static_cast<double>(evm_sq > 1e-6f ? (-10.0f * std::log10(evm_sq)) : 40.0f);
+            if (average_evm_ <= 0.0) {
+                average_evm_ = latest_evm_;
+                average_snr_db_ = latest_snr_db_;
+            } else {
+                average_evm_ = 0.95 * average_evm_ + 0.05 * latest_evm_;
+                average_snr_db_ = 0.95 * average_snr_db_ + 0.05 * latest_snr_db_;
+            }
+        }
     }
 
     // 8. Desentrelaçamento em Frequencia (Permutacao de 384 portadoras)
@@ -731,9 +782,14 @@ size_t OneSegDemodulator::process_symbol(const std::complex<float>* symbol_time_
         }
 
         if (decoded_errs >= 0) {
+            if (decoded_errs > 0) {
+                rs_corrected_packets_++;
+            }
             rs_corrected_ += static_cast<uint64_t>(decoded_errs);
             total_ts_packets_++;
             out_ts_packets.emplace_back(valid_ts, valid_ts + 188);
+        } else {
+            rs_uncorrectable_packets_++;
         }
     }
 
