@@ -95,6 +95,37 @@ int main() {
     sync.process(signal.data(), 32768, out_symbols);
     TEST_ASSERT(sync.robust_state() == isdbt::RobustSyncState::Tracking);
 
+    // 6. Detecta cada um dos intervalos de guarda suportados pelo ISDB-T.
+    for (size_t gi_size : {size_t{64}, size_t{128}, size_t{256}, size_t{512}}) {
+        const size_t symbol_len = N_FFT + gi_size;
+        std::vector<std::complex<float>> gi_signal(symbol_len * NUM_SYMS);
+        size_t gi_pos = 0;
+        for (size_t s = 0; s < NUM_SYMS; ++s) {
+            std::vector<std::complex<float>> useful(N_FFT);
+            for (size_t k = 0; k < N_FFT; ++k) {
+                lfsr = (lfsr >> 1) ^ (-(lfsr & 1u) & 0xD0000001u);
+                useful[k] = std::complex<float>((lfsr & 2u) ? 0.7071f : -0.7071f,
+                                                (lfsr & 4u) ? 0.7071f : -0.7071f);
+            }
+            for (size_t m = 0; m < symbol_len; ++m, ++gi_pos) {
+                gi_signal[gi_pos] = (m < gi_size)
+                    ? useful[N_FFT - gi_size + m]
+                    : useful[m - gi_size];
+            }
+        }
+
+        isdbt::SyncParams gi_params = params;
+        gi_params.gi_size = gi_size;
+        gi_params.gi = static_cast<isdbt::GuardInterval>(N_FFT / gi_size);
+        isdbt::RobustGRISDBTSync gi_sync(gi_params);
+        std::vector<std::complex<float>> gi_output;
+        gi_sync.process(gi_signal.data(), 32768, gi_output);
+        TEST_ASSERT(gi_sync.robust_state() == isdbt::RobustSyncState::Tracking);
+        TEST_ASSERT(gi_sync.guard_interval_size() == gi_size);
+        gi_sync.process(gi_signal.data() + 32768, gi_signal.size() - 32768, gi_output);
+        TEST_ASSERT(gi_sync.robust_state() == isdbt::RobustSyncState::Tracking);
+    }
+
     std::cout << "  Transicoes de estado: " << sync.state_transitions() << "\n";
     std::cout << "[PASS] RobustGRISDBTSync testado e aprovado com sucesso!\n";
     return 0;

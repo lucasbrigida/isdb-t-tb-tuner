@@ -62,6 +62,7 @@ public:
     uint64_t resync_fallback() const noexcept { return resync_fallback_; }
     float estimated_sco_ppm() const noexcept { return sco_ppm_; }
     float estimated_cfo_hz() const noexcept { return current_cfo_hz_; }
+    size_t guard_interval_size() const noexcept { return gi_size_; }
 
 private:
     SyncParams params_;
@@ -75,6 +76,8 @@ private:
     // Buffers pre-alocados para zero alocacao no hot path (N5)
     IqStreamBuffer stream_buf_;
     std::vector<std::complex<float>> derot_buf_;
+    std::vector<std::complex<float>> window_gamma_;
+    std::vector<float> window_energy_;
     // Variaveis de rastreamento de fase e timing
     double nco_phase_ = 0.0;
     float current_cfo_hz_ = 0.0f;

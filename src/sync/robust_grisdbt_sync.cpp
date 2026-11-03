@@ -36,6 +36,8 @@ RobustGRISDBTSync::RobustGRISDBTSync(const SyncParams& params)
     }
 
     derot_buf_.reserve(65536 * 2);
+    window_gamma_.resize(8 * (fft_size_ + fft_size_ / 4));
+    window_energy_.resize(8 * (fft_size_ + fft_size_ / 4));
     reset();
 }
 
@@ -144,30 +146,71 @@ void RobustGRISDBTSync::process(const std::complex<float>* in, size_t n,
 
     // 2. Maquina de estados tripartite + Resync (R7.e)
     if (robust_state_ == RobustSyncState::Acquisition || robust_state_ == RobustSyncState::LostLock) {
-        if (stream_buf_.available() < symbol_len_ * 2) {
+        const size_t max_gi_size = fft_size_ / 4;
+        const size_t max_symbol_len = fft_size_ + max_gi_size;
+        if (stream_buf_.available() < max_symbol_len * 2) {
             return;
         }
 
-        // Busca global exaustiva por borda e GI
-        size_t search_len = stream_buf_.available() - symbol_len_;
+        // Adquire o intervalo de guarda por correlacao dobrada em simbolos consecutivos.
+        const GuardInterval candidates[] = {
+            GuardInterval::GI_1_16,
+            GuardInterval::GI_1_8,
+            GuardInterval::GI_1_4,
+            GuardInterval::GI_1_32
+        };
+        const size_t corr_len = stream_buf_.available() - fft_size_;
         float max_corr = -1.0f;
         size_t best_d = 0;
+        size_t best_gi_size = gi_size_;
         std::complex<float> best_cross(0.0f, 0.0f);
 
-        for (size_t d = 0; d < search_len; d += 2) {
+        for (GuardInterval candidate : candidates) {
+            const size_t candidate_gi = fft_size_ / static_cast<size_t>(candidate);
+            const size_t candidate_symbol_len = fft_size_ + candidate_gi;
+            size_t num_folds = (corr_len - candidate_gi) / candidate_symbol_len;
+            if (num_folds < 2) continue;
+            num_folds = std::min<size_t>(num_folds, 8);
+
+            const size_t window_len = num_folds * candidate_symbol_len;
             std::complex<float> cross(0.0f, 0.0f);
-            float pwr = 0.0f;
-            for (size_t m = 0; m < gi_size_; ++m) {
-                std::complex<float> r1 = stream_buf_[d + m];
-                std::complex<float> r2 = stream_buf_[d + m + fft_size_];
+            float power = 0.0f;
+            for (size_t m = 0; m < candidate_gi; ++m) {
+                const auto r1 = stream_buf_[m];
+                const auto r2 = stream_buf_[m + fft_size_];
                 cross += r1 * std::conj(r2);
-                pwr += 0.5f * (std::norm(r1) + std::norm(r2));
+                power += 0.5f * (std::norm(r1) + std::norm(r2));
             }
-            float corr = (pwr > 1e-12f) ? (std::abs(cross) / pwr) : 0.0f;
-            if (corr > max_corr) {
-                max_corr = corr;
-                best_d = d;
-                best_cross = cross;
+
+            for (size_t d = 0; d < window_len; ++d) {
+                window_gamma_[d] = cross;
+                window_energy_[d] = power;
+                const auto old_r1 = stream_buf_[d];
+                const auto old_r2 = stream_buf_[d + fft_size_];
+                const auto new_r1 = stream_buf_[d + candidate_gi];
+                const auto new_r2 = stream_buf_[d + candidate_gi + fft_size_];
+                cross += new_r1 * std::conj(new_r2) - old_r1 * std::conj(old_r2);
+                power += 0.5f * (std::norm(new_r1) + std::norm(new_r2)
+                               - std::norm(old_r1) - std::norm(old_r2));
+            }
+
+            for (size_t d0 = 0; d0 < candidate_symbol_len; ++d0) {
+                std::complex<float> folded_cross(0.0f, 0.0f);
+                float folded_power = 0.0f;
+                for (size_t k = 0; k < num_folds; ++k) {
+                    const size_t index = d0 + k * candidate_symbol_len;
+                    folded_cross += window_gamma_[index];
+                    folded_power += window_energy_[index];
+                }
+                const float corr = (folded_power > 1e-12f)
+                    ? std::abs(folded_cross) / folded_power
+                    : 0.0f;
+                if (corr > max_corr) {
+                    max_corr = corr;
+                    best_d = d0;
+                    best_gi_size = candidate_gi;
+                    best_cross = folded_cross;
+                }
             }
         }
         peak_correlation_ = std::max(0.0f, max_corr);
@@ -178,14 +221,16 @@ void RobustGRISDBTSync::process(const std::complex<float>* in, size_t n,
             float ffo_hz = -angle / (2.0f * static_cast<float>(M_PI) * (static_cast<float>(fft_size_) / params_.sample_rate));
             current_cfo_hz_ = ffo_hz;
 
+            gi_size_ = best_gi_size;
+            symbol_len_ = fft_size_ + gi_size_;
             frac_timing_offset_ = static_cast<double>(best_d);
             consecutive_good_symbols_ = 1;
             consecutive_bad_symbols_ = 0;
             set_robust_state(RobustSyncState::Tracking);
         } else {
             // Continua em Acquisition, descarta excesso
-            if (stream_buf_.available() > symbol_len_ * 4) {
-                stream_buf_.consume(symbol_len_);
+            if (stream_buf_.available() > max_symbol_len * 4) {
+                stream_buf_.consume(max_symbol_len);
             }
             return;
         }
