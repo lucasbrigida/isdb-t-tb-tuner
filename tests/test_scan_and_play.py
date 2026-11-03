@@ -35,12 +35,7 @@ filtered_paths = [p for p in current_path.split(os.pathsep) if "deps" not in p.l
 clean_env["PATH"] = os.pathsep.join(filtered_paths)
 
 def get_channels_json_path():
-    if os.name == 'nt':
-        appdata = os.environ.get("APPDATA", "")
-        return os.path.join(appdata, "isdbtb_rx", "channels.json")
-    else:
-        home = os.environ.get("HOME", "")
-        return os.path.join(home, ".config", "isdbtb_rx", "channels.json")
+    return os.path.join(PROJECT_ROOT, "channels.json")
 
 def validate_channel_play(channel_num, freq_mhz, rssi_dbfs, timeout_sec=5.0):
     """

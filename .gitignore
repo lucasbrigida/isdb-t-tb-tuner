@@ -1,11 +1,27 @@
 # Build directories
 build/
+build*/
+releases/*.zip
+releases/**/*.zip
+!releases/**/.gitkeep
 deps/
-channels.m3u
 .agents/
+
+# Local runtime generated files
+channels.json
+channels.m3u
+
+# Logs temporarios e de investigacao
+*.log
+!tests/golden/*.log
 
 # Test data captures
 tests/data/*.raw
+tests/golden/*current_run*.ts
+
+# Benchmark results
+bench/results/*.json
+!bench/results/.gitkeep
 
 # Compiled binaries
 *.exe

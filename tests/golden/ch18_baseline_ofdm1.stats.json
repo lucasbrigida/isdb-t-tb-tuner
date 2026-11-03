@@ -1,0 +1,16 @@
+{
+  "average_evm": 0.3344792254030533,
+  "average_snr_db": 9.513289044884683,
+  "corrected_rs_packets": 0,
+  "elapsed_seconds": 35.349282,
+  "locked_symbols": 112031,
+  "locked_time_ratio": 1.0,
+  "ofdm_mode": 1,
+  "resync_count": 0,
+  "sync_loss_count": 0,
+  "total_blocks": 7440,
+  "total_symbols": 112031,
+  "ts_sha256": "f8b920b7a216f4d80c178a722d28622de690aefc5006613b786a2285ac8b4032",
+  "uncorrectable_rs_packets": 0,
+  "valid_ts_packets": 34854
+}

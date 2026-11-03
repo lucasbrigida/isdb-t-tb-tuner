@@ -1,6 +1,6 @@
-# 📖 Manual do Usuário e Guia de Utilização (ISDB-T / ISDB-Tb Receiver)
+﻿# 📖 Manual do Usuário e Guia de Utilização (ISDB-T / ISDB-Tb Receiver)
 
-Este guia prático ensina como configurar o dongle RTL-SDR, instalar os drivers necessários, escanear canais de TV digital e assistir à transmissão em tempo real no **VLC Media Player**.
+Este guia prático ensina como configurar o dongle RTL-SDR, instalar os drivers necessários, escanear canais de TV digital e assistir à transmissão em tempo real no **MPV Media Player** (integrado) ou no **VLC Media Player**.
 
 ---
 
@@ -8,7 +8,7 @@ Este guia prático ensina como configurar o dongle RTL-SDR, instalar os drivers 
 
 Ao conectar o dongle RTL-SDR pela primeira vez no Windows, o sistema operacional instala um driver padrão de controle de rádio FM que bloqueia o acesso direto às amostras I/Q brutas. É necessário substituir o driver pelo **WinUSB** usando o utilitário **Zadig**:
 
-1. O utilitário **Zadig** (v2.9) já vem incluído no projeto na pasta **`tools/zadig.exe`** (ou pode ser baixado em [zadig.akeo.ie](https://zadig.akeo.ie/)).
+1. O utilitário **Zadig** (v2.9) já vem incluído no projeto na pasta **`tools/zadig.exe`** (ou na raiz das releases portáteis).
 2. Conecte o dongle RTL-SDR na porta USB do computador.
 3. Execute o **`tools/zadig.exe`** como Administrador.
 4. No menu superior, clique em **Options** e marque **List All Devices**.
@@ -21,12 +21,12 @@ Ao conectar o dongle RTL-SDR pela primeira vez no Windows, o sistema operacional
 
 ## 🚀 2. Comandos Principais da CLI
 
-Abra o terminal (PowerShell ou CMD) na pasta do projeto:
+Abra o terminal (PowerShell ou CMD) na pasta do projeto ou da release:
 
 ### 🔍 2.1 Inspecionar o RTL-SDR (`probe`)
 Verifica se o dongle foi reconhecido corretamente pelo sistema e inspeciona os recursos de hardware:
 ```powershell
-.\build\isdbtb_rx.exe probe
+.\isdbtb_rx.exe probe
 ```
 *Saída esperada:*
 ```text
@@ -48,26 +48,25 @@ Verifica se o dongle foi reconhecido corretamente pelo sistema e inspeciona os r
 ### 📡 2.2 Varrer os Canais de TV (`scan`)
 Executa a varredura profunda no espectro UHF, detecta o sinal de cada canal, verifica a sincronização OFDM e salva a lista no computador:
 
-- **Varredura padrão (Canais UHF 14 ao 45):**
+- **Varredura padrão (Canais UHF 14 ao 69):**
   ```powershell
-  .\build\isdbtb_rx.exe scan
+  .\isdbtb_rx.exe scan
   ```
 
 - **Varredura em uma faixa específica (ex: canais 20 ao 25):**
   ```powershell
-  .\build\isdbtb_rx.exe scan --start 20 --end 25
+  .\isdbtb_rx.exe scan --start 20 --end 25
   ```
 
-Os canais descobertos são salvos automaticamente no arquivo:
-- **Windows:** `%APPDATA%\isdbtb_rx\channels.json`
-- **Linux:** `~/.config/isdbtb_rx/channels.json`
+Os canais descobertos são salvos automaticamente no arquivo local:
+- `./channels.json` (no próprio diretório da aplicação, 100% autocontido e portátil).
 
 ---
 
 ### 📋 2.3 Listar os Canais Salvos (`list`)
 Exibe uma tabela formatada no terminal com todos os canais sintonizados, suas frequências, codecs, força visual do sinal e potência em dBFS:
 ```powershell
-.\build\isdbtb_rx.exe list
+.\isdbtb_rx.exe list
 ```
 *Exemplo:*
 ```text
@@ -85,15 +84,34 @@ Canal | Frequencia   |   Forca do Sinal    |  Potencia | Codecs (V/A) | Nome / E
 ### 📺 2.4 Assistir ao Canal no Player (`play`)
 Sintoniza a frequência desejada, inicia a captura assíncrona USB com alta prioridade de thread (`THREAD_PRIORITY_HIGHEST`) e decodifica os pacotes MPEG-TS em tempo real via UDP na porta 1234.
 
-#### Opção Recomendada (Comando Único com MPV):
+#### Opção Recomendada (Comando Único com MPV Integrado):
 Use a flag `--player` para sintonizar o canal e **abrir automaticamente o MPV Player integrado** com interpolação de resolução e movimento em tempo real:
 ```powershell
-.\build\isdbtb_rx.exe play -c 23 --player
+.\isdbtb_rx.exe play -c 23 --player
 ```
-O MPV abrirá diretamente carregando as otimizações de GPU de `tools/mpv/mpv.conf`:
+O MPV abrirá diretamente carregando as otimizações de GPU de `mpv.conf`:
 - **Interpolação Espacial (EWA-Lanczos Sharp):** Upscaling inteligente de $320 \times 240/180$ para a resolução nativa do seu monitor (1080p, 1440p, 4K) eliminando pixelização e dentes de serra.
 - **Interpolação Temporal (`display-resample` + `oversample`):** Converte a taxa de ~15/30 fps da TV móvel para 60Hz/120Hz/144Hz da tela, gerando movimentos fluidos sem engasgos.
 - **Debanding Dinâmico:** Remove artefatos de compressão e faixas de cores em tempo real.
+
+#### 📶 Escolha do Modo de Sincronismo OFDM (`--ofdm <1|2>`):
+O comando `play` permite selecionar o algoritmo de sincronismo OFDM através da flag `--ofdm`:
+
+```powershell
+# Modo 1 (Padrão): Van de Beek baseline. Mais leve e econômico para a CPU:
+.\isdbtb_rx.exe play -c 23 --player
+
+# Modo 2 (Reforçado): Port robusto do gr-isdbt com rastreamento ativo de timing por pilotos (SP),
+# correção de desvio de frequência fracionário e inteiro (CFO) e relógio de amostragem (SCO):
+.\isdbtb_rx.exe play -c 23 --ofdm 2 --player
+```
+
+> [!NOTE]
+> **Quando usar cada modo:**
+> - **`--ofdm 1` (Padrão):** Ideal para uso diário, notebooks com economia de bateria e estações de TV com sinal estável e boa visada direta da torre transmissora.
+> - **`--ofdm 2` (Reforçado):** Recomendado quando o sinal sofre com ecos de multi-percurso (reflexo em prédios), ruído elevado, antenas internas em locais difíceis ou recepção em movimento (desvio Doppler). Exige maior capacidade de processamento da CPU.
+> - **Flexibilidade Sintática:** Aceita tanto argumento separado por espaço (`--ofdm 1` / `--ofdm 2`) quanto com sinal de igual (`--ofdm=1` / `--ofdm=2`).
+> - **Compatibilidade:** A flag `--ofdm` é exclusiva do comando `play`. Em qualquer outro comando (`scan`, `probe`), ela é silenciosamente ignorada sem gerar erros.
 
 > [!TIP]
 > **Atalhos Úteis no MPV durante a exibição:**
@@ -106,23 +124,25 @@ O MPV abrirá diretamente carregando as otimizações de GPU de `tools/mpv/mpv.c
 Se preferir executar o receptor e o player em terminais separados:
 1. No terminal, inicie o receptor SDR:
    ```powershell
-   .\build\isdbtb_rx.exe play -c 23
+   .\isdbtb_rx.exe play -c 23
    ```
 2. Abra o player:
    - **MPV:** Execute `.\scripts\play_mpv.bat` (ou duplo clique no arquivo).
    - **VLC:** Execute no menu **Mídia** > **Abrir Fluxo de Rede** (`Ctrl + N`) o endereço `udp://@127.0.0.1:1234` com Cache de Rede configurado em 2000 ms.
 
-#### Modo Detalhado (-v / --verbose):
+#### Modo Detalhado (-v / --verbose) & Interface Interativa:
 Adicione `-v` ou `--verbose` para exibir a telemetria do sinal RF e do decodificador em tempo real:
 ```powershell
-.\build\isdbtb_rx.exe play -c 23 --player -v
+.\isdbtb_rx.exe play -c 23 --player -v
 ```
 
-Durante a exibição com `-v`, o terminal atualiza os dados em tempo real acima da lista de canais:
+- **Barra de Navegação no Rodapé (Última Linha):** Exibida em alto contraste com **fundo branco e letras pretas** (`\033[30;47m`):
+  `Comandos: [▲/▼] Navegar | [Enter] Sintonizar | [q] Sair`
+- **Telemetria de Sinal (Antepenúltima Linha com `-v`):** Atualizada continuamente na antepenúltima linha, com truncamento dinâmico que impede quebras de linha ao redimensionar o terminal:
 ```text
 [Status] Ch 23 | RSSI: -6.9 dBFS | OFDM: LOCK (0.98) | TMCC: LOCK | SNR: 18.5 dB | TS: 542 pkts (RS: 0 corr / 0 drop) | Drop: 0 | BAND HD
 ```
-Para encerrar a transmissão, pressione **Ctrl + C** no terminal.
+Para encerrar a transmissão, pressione **q** ou **Ctrl + C** no terminal.
 
 ---
 
@@ -145,16 +165,93 @@ Para encerrar a transmissão, pressione **Ctrl + C** no terminal.
 
 Para compilar o projeto em ambiente MinGW-w64 (`w64devkit`):
 
+### Compilação para 64 bits (x64):
 ```powershell
-# 1. Configurar o CMake em Release (otimizações -O3, -DNDEBUG e IPO/LTO ativados)
-cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
+# 1. Configurar o CMake em Release para 64 bits com suporte ao gr-isdbt sync:
+cmake -S . -B build_x64 -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DTARGET_ARCH=x64 -DISDBT_ENABLE_GRISDBT_SYNC=ON
 
-# Opcional: habilitar otimização de ponto flutuante rápido
-cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DISDBT_ENABLE_FAST_MATH=ON
+# 2. Compilar todos os binários e executáveis de teste:
+cmake --build build_x64 -j
 
-# 2. Compilar todos os binários e executáveis de teste
-cmake --build build -j
-
-# 3. Executar os 10 testes unitários determinísticos
-ctest --test-dir build --output-on-failure
+# 3. Executar a suíte de 22 testes determinísticos:
+ctest --test-dir build_x64 --output-on-failure -E BenchSync
 ```
+
+### Compilação para 32 bits (x86):
+```powershell
+# 1. Configurar o CMake em Release para 32 bits com instruções SSE2:
+cmake -S . -B build_x86 -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DTARGET_ARCH=x86 -DISDBT_ENABLE_GRISDBT_SYNC=ON
+
+# 2. Compilar todos os binários e executáveis de teste:
+cmake --build build_x86 -j
+
+# 3. Executar a suíte de 22 testes determinísticos:
+ctest --test-dir build_x86 --output-on-failure -E BenchSync
+```
+
+---
+
+## ⚡ 5. Execução de Benchmarks Comparativos (`bench_sync`)
+
+O executável `bench_sync` compara quantitativamente o **Modo 1** (`VanDeBeekSync` baseline) e o **Modo 2** (`RobustGRISDBTSync` reforçado portado do `gr-isdbt`) sobre capturas reais de sinal RF (`samples/ch24_10s_iq.cu8` ou qualquer arquivo `.cu8` fornecido):
+
+### 5.1 Comparação Completa (com Tabela ASCII)
+```powershell
+# Execução padrão em 64 bits sobre a amostra de referência oficial:
+.\build_x64\bench_sync.exe --compare
+```
+
+*Exemplo de saída com tabela comparativa:*
+```text
+======================================================================
+ SUITE DE BENCHMARK OFDM ISDB-T/ISDB-Tb (bench_sync)
+ Amostra: samples/ch24_10s_iq.cu8
+ Modo:    COMPARE (ofdm=1 vs ofdm=2)
+ Repeticoes: 1
+======================================================================
+
+=== BENCHMARK: RESULTADO COMPARATIVO OFICIAL ===
++-------------------+--------+---------+--------+
+| Metrica           | ofdm=1 |  ofdm=2 | Melhor |
++-------------------+--------+---------+--------+
+| wall_time_s       |  4.192 | 3.813 * | ofdm=2 |
+| cpu_user_s        |  4.172 | 3.812 * | ofdm=2 |
+| cycles_per_symbol |  60458 | 38024 * | ofdm=2 |
+| peak_rss_mb       |    7.8 |     7.8 | empate |
+| heap_allocs_hot   |      0 |       0 | empate |
++-------------------+--------+---------+--------+
+| locked_time_ratio |  1.000 |   1.000 | empate |
+| sync_loss_count   |      0 |       0 | empate |
+| resync_count      |      0 |       0 | empate |
+| avg_lock_recovery |    0.0 |     0.0 | empate |
+| snr_mean_db       |  4.8 * |     4.7 | ofdm=1 |
+| valid_ts_packets  |      1 |       1 | empate |
++-------------------+--------+---------+--------+
+```
+
+### 5.2 Opções Avançadas do `bench_sync`
+
+- **Comparação Rápida por Janelas de Tempo (`--segment-of <segundos>`):**
+  Divide a amostra em blocos menores (ex: 2 ou 5 segundos) para comparar a estabilidade em intervalos curtos:
+  ```powershell
+  .\build_x64\bench_sync.exe --compare --segment-of 5
+  ```
+
+- **Média Estatística com Repetições (`--repeat <N>`):**
+  Executa $N$ iterações e calcula médias aritméticas de tempo, ciclos e uso de memória:
+  ```powershell
+  .\build_x64\bench_sync.exe --compare --repeat 3
+  ```
+
+- **Amostra IQ Customizada (`-i` / `--input <caminho>`):**
+  Avalia qualquer captura de sinal gravada pelo RTL-SDR:
+  ```powershell
+  .\build_x64\bench_sync.exe --compare -i samples/minha_captura.cu8
+  ```
+
+- **Execução Monomodo Individual (`--ofdm 1` ou `--ofdm 2`):**
+  Avalia o desempenho isolado de um algoritmo específico:
+  ```powershell
+  .\build_x64\bench_sync.exe --ofdm 1
+  .\build_x64\bench_sync.exe --ofdm 2
+  ```

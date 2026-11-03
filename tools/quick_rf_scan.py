@@ -13,9 +13,12 @@ import numpy as np
 DEFAULT_SAMPLE_RATE_HZ = 2031746
 
 project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+arch = "x64" if ctypes.sizeof(ctypes.c_void_p) == 8 else "x86"
 possible_dirs = [
-    os.path.join(project_dir, "tools", "rtl-sdr"),
-    os.path.join(project_dir, "deps", "rtlsdr", "x64")
+    os.path.join(project_dir, "tools", "rtl-sdr", arch),
+    os.path.join(project_dir, "tools", "rtl-sdr", "x64"),
+    os.path.join(project_dir, "tools", "rtl-sdr", "x86"),
+    os.path.join(project_dir, "deps", "rtlsdr", arch)
 ]
 
 dll_dir = None

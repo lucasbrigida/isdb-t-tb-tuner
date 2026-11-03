@@ -173,6 +173,7 @@ void OneSegDemodulator::reset() {
     tmcc_bits_.reset(0);
     since_last_tmcc_ = 203;
     tmcc_locked_ = false;
+    tmcc_miss_frames_ = 0;
     frame_begin_pending_ = false;
     rs_corrected_packets_ = 0;
     rs_uncorrectable_packets_ = 0;
@@ -209,6 +210,10 @@ void OneSegDemodulator::reset() {
     for (size_t j = 0; j < 12; ++j) {
         forney_delay_lines_[j].reset(0);
     }
+}
+
+void OneSegDemodulator::reset_sync_state() {
+    reset();
 }
 
 void OneSegDemodulator::set_parameters(CarrierModulation mod, CodeRate rate, int time_interleave_I) {
@@ -330,7 +335,16 @@ bool OneSegDemodulator::process_tmcc(const std::complex<float>* eq_seg_carriers)
             end_frame = true;
             since_last_tmcc_ = 0;
             tmcc_locked_ = true;
+            tmcc_miss_frames_ = 0;
             decode_tmcc_parameters();
+        } else if (tmcc_locked_) {
+            // Histerese de protecao: 4 quadros consecutivos (~800ms) sem paridade BCH valida
+            // destravam o TMCC e liberam a busca de IFO para readquirir em caso de descontinuidade
+            if (++tmcc_miss_frames_ >= 4) {
+                tmcc_locked_ = false;
+                tmcc_miss_frames_ = 0;
+                ifo_locked_ = false;
+            }
         }
     }
     if (!end_frame) {

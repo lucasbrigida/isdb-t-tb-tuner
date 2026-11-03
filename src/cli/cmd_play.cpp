@@ -1,4 +1,5 @@
-#include "cli/commands.hpp"
+#include "sync/sync_factory.h"
+#include <fstream>
 #include "cli/channel_manager.hpp"
 #include "radio/frequency_plan.hpp"
 #include "radio/rtlsdr_device.hpp"
@@ -6,7 +7,6 @@
 #include "dsp/constants.hpp"
 #include "dsp/dsp_metrics.hpp"
 #include "dsp/spsc_capture_queue.hpp"
-#include "dsp/iq_stream_buffer.hpp"
 #include "dsp/ofdm_sync.hpp"
 #include "dsp/oneseg_demodulator.hpp"
 #include "streaming/udp_streamer.hpp"
@@ -50,25 +50,12 @@ struct SharedPlaybackStatus {
 };
 
 static void reset_play_reception_stream(
-    OfdmSync& sync,
+    IOFDMSynchronizer& sync,
     OneSegDemodulator& demod,
-    IqStreamBuffer& stream_iq_buf,
     bool& ofdm_locked,
-    float& tracked_ffo_hz,
-    float& frac_pos,
-    std::size_t& gi_len,
-    std::size_t& sym_len,
-    int& unlock_counter,
     DspMetrics* metrics = nullptr) {
 
-    stream_iq_buf.clear();
-    frac_pos = 0.0f;
     ofdm_locked = false;
-    tracked_ffo_hz = 0.0f;
-    unlock_counter = 0;
-    gi_len = 0;
-    sym_len = 0;
-
     sync.reset();
     demod.reset();
 
@@ -112,10 +99,16 @@ static std::string format_channel_line(const ChannelInfo& ch, bool is_selected, 
 }
 
 int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_port,
-             int dev_idx, bool test_pattern, double gain_db, bool auto_player, bool verbose) {
+             int dev_idx, bool test_pattern, double gain_db, bool auto_player, bool verbose,
+             int ofdm_mode, const std::string& input_file, const std::string& output_ts_file, bool headless) {
 #ifdef _WIN32
     SetPriorityClass(GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS);
 #endif
+
+    std::ofstream file_ts_out;
+    if (!output_ts_file.empty()) {
+        file_ts_out.open(output_ts_file, std::ios::binary);
+    }
 
     ChannelManager mgr;
     const auto& saved_channels = mgr.get_channels();
@@ -133,38 +126,52 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
     std::string ch_name = "Canal Desconhecido";
     int active_channel_num = channel_number;
 
-    if (target) {
-        freq_hz = target->frequency_hz;
-        ch_name = target->name;
-        active_channel_num = target->channel_number;
-    } else if (channel_number > 0) {
-        freq_hz = get_channel_freq(channel_number);
-        ch_name = "Canal " + std::to_string(channel_number);
-    } else {
-        std::cerr << "[ERRO] Nenhum canal especificado ou salvo. Use --channel <num> ou execute 'scan'.\n";
-        return 1;
-    }
-
-    // 1. Inicializa o hardware RTL-SDR ANTES de desenhar a interface
     rtlsdr_dev_t* dev = nullptr;
-    if (rtlsdr_open(&dev, static_cast<uint32_t>(dev_idx)) != 0) {
-        std::cerr << "[ERRO] Falha ao abrir dongle RTL-SDR #" << dev_idx << "\n";
+    constexpr uint32_t sample_rate = constants::SAMPLE_RATE;
+    SyncParams sync_params;
+    sync_params.sample_rate = static_cast<float>(sample_rate);
+    auto sync = make_synchronizer(
+        ofdm_mode == 2 ? OFDMAlgorithm::RobustGRISDBT : OFDMAlgorithm::VanDeBeek,
+        sync_params);
+    if (!sync) {
         return 1;
     }
 
-    rtlsdr_reset_buffer(dev);
-    constexpr uint32_t sample_rate = constants::SAMPLE_RATE;
-    rtlsdr_set_sample_rate(dev, sample_rate);
-    rtlsdr_set_tuner_gain_mode(dev, 1);
-    int gain_tenths = static_cast<int>(std::round(gain_db * 10.0));
-    rtlsdr_set_tuner_gain(dev, gain_tenths);
-    rtlsdr_set_agc_mode(dev, 0);
-    safe_set_freq(dev, freq_hz);
+    if (!input_file.empty()) {
+        ch_name = "Arquivo IQ";
+        active_channel_num = (channel_number > 0) ? channel_number : 18;
+    } else {
+        if (target) {
+            freq_hz = target->frequency_hz;
+            ch_name = target->name;
+            active_channel_num = target->channel_number;
+        } else if (channel_number > 0) {
+            freq_hz = get_channel_freq(channel_number);
+            ch_name = "Canal " + std::to_string(channel_number);
+        } else {
+            std::cerr << "[ERRO] Nenhum canal especificado ou salvo. Use --channel <num> ou execute 'scan'.\n";
+            return 1;
+        }
+
+        // 1. Inicializa o hardware RTL-SDR ANTES de desenhar a interface
+        if (rtlsdr_open(&dev, static_cast<uint32_t>(dev_idx)) != 0) {
+            std::cerr << "[ERRO] Falha ao abrir dongle RTL-SDR #" << dev_idx << "\n";
+            return 1;
+        }
+
+        rtlsdr_reset_buffer(dev);
+        rtlsdr_set_sample_rate(dev, sample_rate);
+        rtlsdr_set_tuner_gain_mode(dev, 1);
+        int gain_tenths = static_cast<int>(std::round(gain_db * 10.0));
+        rtlsdr_set_tuner_gain(dev, gain_tenths);
+        rtlsdr_set_agc_mode(dev, 0);
+        safe_set_freq(dev, freq_hz);
+    }
 
     // 2. Inicializa o streamer UDP
     UdpStreamer streamer("127.0.0.1", udp_port);
     if (!streamer.start()) {
-        rtlsdr_close(dev);
+        if (dev) rtlsdr_close(dev);
         return 1;
     }
 
@@ -178,20 +185,29 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
         streamer.flush();
     }
 
-    // 3. Limpa a tela para eliminar mensagens de inicializacao do driver librtlsdr
-    std::cout << "\033[2J\033[H" << std::flush;
+    if (!headless) {
+        // 3. Limpa a tela para eliminar mensagens de inicializacao do driver librtlsdr
+        std::cout << "\033[2J\033[H" << std::flush;
 
-    // 4. Exibe cabecalho e reprodutores de video
-    print_cli_header();
-    print_players_box(streamer.url());
-    if (auto_player) {
-        launch_mpv(udp_port);
+        // 4. Exibe cabecalho e reprodutores de video
+        print_cli_header();
+        print_players_box(streamer.url());
+        if (auto_player) {
+            launch_mpv(udp_port);
+            if (test_pattern) {
+                reload_mpv_player(udp_port);
+            }
+        }
     }
 
     constexpr int VISIBLE_CHANNELS = 8;
+    constexpr int FIRST_CHANNEL_ROW = 18;
     std::vector<ChannelInfo> channels = saved_channels;
-    const bool has_scroll = channels.size() > VISIBLE_CHANNELS;
-    const int visible_count = channels.empty() ? 1 : std::min(static_cast<int>(channels.size()), VISIBLE_CHANNELS);
+    int visible_count = 1;
+    bool has_scroll = false;
+    bool show_scroll_markers = false;
+    int previous_channel_first_row = 0;
+    int previous_channel_line_count = 0;
 
     int selected_index = 0;
     for (size_t i = 0; i < channels.size(); ++i) {
@@ -202,6 +218,19 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
     }
 
     int window_start = 0;
+    auto update_layout = [&]() {
+        const TerminalSize sz = get_terminal_size();
+        const int row_capacity = std::max(1, sz.height - FIRST_CHANNEL_ROW - 2);
+        const int max_visible = std::min(VISIBLE_CHANNELS, row_capacity);
+        visible_count = channels.empty()
+            ? 1
+            : std::min(static_cast<int>(channels.size()), max_visible);
+        has_scroll = channels.size() > static_cast<size_t>(visible_count);
+        if (has_scroll && row_capacity >= 3) {
+            visible_count = std::min(VISIBLE_CHANNELS, row_capacity - 2);
+        }
+        show_scroll_markers = has_scroll && row_capacity >= visible_count + 2;
+    };
     auto update_window = [&]() {
         if (!has_scroll) {
             window_start = 0;
@@ -215,11 +244,8 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
         int max_start = std::max(0, static_cast<int>(channels.size()) - visible_count);
         window_start = std::clamp(window_start, 0, max_start);
     };
+    update_layout();
     update_window();
-
-    // 1 (Canais) + (top ind) + visible_count + (bot ind) + 2 (\nComandos...)
-    const int channel_section_lines = 1 + (has_scroll ? 1 : 0) + visible_count + (has_scroll ? 1 : 0) + 2;
-    const int dynamic_lines = (verbose ? 2 : 0) + channel_section_lines;
 
     std::string last_status_str;
     if (verbose) {
@@ -228,46 +254,90 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
         last_status_str = ss.str();
     }
 
-    auto render_dynamic_ui = [&](bool move_up) {
-        if (move_up) {
-            std::cout << "\033[" << dynamic_lines << "F";
-        }
+    auto render_bottom_bars = [&]() {
+        TerminalSize sz = get_terminal_size();
+
+        // 1. Antepenultima linha (height - 2): Status (apenas com flag -v)
         if (verbose) {
-            std::cout << "\033[2K" << last_status_str << "\n\033[2K\n";
+            std::string safe_status = last_status_str;
+            int max_w = std::max(0, sz.width - 1);
+            if (static_cast<int>(safe_status.length()) > max_w) {
+                safe_status = (max_w > 4) ? safe_status.substr(0, max_w - 3) + "..." : safe_status.substr(0, max_w);
+            }
+            std::cout << "\033[" << (sz.height - 2) << ";1H\033[2K" << safe_status;
         }
-        std::cout << "\033[2KCanais\n";
+
+        // 2. Penultima linha (height - 1): Linha limpa de respiro
+        std::cout << "\033[" << (sz.height - 1) << ";1H\033[2K";
+
+        // 3. Ultima linha (height): Barra de navegacao (fundo branco, letras pretas)
+        std::string nav_bar = " Comandos: [▲/▼] Navegar | [Enter] Sintonizar | [q] Sair";
+        int target_len = std::max(0, sz.width - 1);
+        if (static_cast<int>(nav_bar.length()) > target_len) {
+            nav_bar = nav_bar.substr(0, target_len);
+        } else if (static_cast<int>(nav_bar.length()) < target_len) {
+            nav_bar += std::string(target_len - nav_bar.length(), ' ');
+        }
+        std::cout << "\033[" << sz.height << ";1H\033[2K\033[30;47m" << nav_bar << "\033[0m" << std::flush;
+    };
+
+    auto render_channels = [&]() {
+        const TerminalSize sz = get_terminal_size();
+        update_layout();
+        update_window();
+
+        std::vector<std::string> lines;
         if (channels.empty()) {
-            std::cout << "\033[2K  Nenhum canal salvo. Execute scan para realizar a busca de canais\n";
+            lines.emplace_back("  Nenhum canal salvo. Execute scan para realizar a busca de canais");
         } else {
-            if (has_scroll) {
+            if (show_scroll_markers) {
                 if (window_start > 0) {
-                    std::cout << "\033[2K  ▲ (mais " << window_start << " canais acima)\n";
+                    lines.emplace_back("  ▲ (mais " + std::to_string(window_start) + " canais acima)");
                 } else {
-                    std::cout << "\033[2K\n";
+                    lines.emplace_back("");
                 }
             }
             for (int i = 0; i < visible_count; ++i) {
                 int idx = window_start + i;
                 bool is_sel = (idx == selected_index);
                 bool is_act = (channels[idx].channel_number == active_channel_num);
-                std::cout << "\033[2K" << format_channel_line(channels[idx], is_sel, is_act) << "\n";
+                lines.push_back(format_channel_line(channels[idx], is_sel, is_act));
             }
-            if (has_scroll) {
+            if (show_scroll_markers) {
                 int rem = static_cast<int>(channels.size()) - (window_start + visible_count);
                 if (rem > 0) {
-                    std::cout << "\033[2K  ▼ (mais " << rem << " canais abaixo)\n";
+                    lines.emplace_back("  ▼ (mais " + std::to_string(rem) + " canais abaixo)");
                 } else {
-                    std::cout << "\033[2K\n";
+                    lines.emplace_back("");
                 }
             }
         }
-        std::cout << "\033[2K\n";
-        std::cout << "\033[2KComandos: [Setas Cima/Baixo] Navegar | [Enter] Sintonizar | [q] Sair\n";
+
+        const int first_row = FIRST_CHANNEL_ROW;
+        for (int i = 0; i < previous_channel_line_count; ++i) {
+            const int row = previous_channel_first_row + i;
+            if (row <= sz.height) {
+                std::cout << "\033[" << row << ";1H\033[2K";
+            }
+        }
+        for (size_t i = 0; i < lines.size(); ++i) {
+            std::cout << "\033[" << (first_row + static_cast<int>(i)) << ";1H\033[2K"
+                      << lines[i];
+        }
+        previous_channel_first_row = first_row;
+        previous_channel_line_count = static_cast<int>(lines.size());
         std::cout << std::flush;
     };
 
-    // 5. Renderizacao inicial consistente
-    render_dynamic_ui(false);
+    auto render_dynamic_ui = [&]() {
+        render_channels();
+        render_bottom_bars();
+    };
+
+    // 5. Renderizacao inicial consistente (apenas modo interativo)
+    if (!headless) {
+        render_dynamic_ui();
+    }
 
     const size_t chunk_samples = 32768;
     const size_t chunk_bytes = chunk_samples * 2;
@@ -282,7 +352,7 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
 
     SharedPlaybackStatus shared_status;
 
-    // THREAD 1: Captura USB continua e retune seguro sem colisao
+    // THREAD 1: Captura continua (USB ou Arquivo IQ)
     std::thread reader_thread([&]() {
 #ifdef _WIN32
         SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
@@ -290,10 +360,20 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
         std::uint64_t sequence = 0;
         bool pending_discontinuity = false;
 
+        std::ifstream in_file;
+        if (!input_file.empty()) {
+            in_file.open(input_file, std::ios::binary);
+            if (!in_file.is_open()) {
+                std::cerr << "[ERRO] Nao foi possivel abrir arquivo de entrada: " << input_file << "\n";
+                reader_running.store(false, std::memory_order_release);
+                return;
+            }
+        }
+
         while (reader_running.load(std::memory_order_relaxed) && g_running) {
             uint32_t req_freq = retune_target_freq_hz.load(std::memory_order_acquire);
             if (req_freq != 0) {
-                safe_set_freq(dev, req_freq);
+                if (dev) safe_set_freq(dev, req_freq);
                 retune_target_freq_hz.store(0, std::memory_order_release);
                 pending_discontinuity = true;
                 retune_in_progress.store(false, std::memory_order_release);
@@ -301,10 +381,12 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
 
             SpscCaptureQueue<64>::WriteView view;
             if (!raw_queue->try_acquire_write(view)) {
-                raw_queue->record_drop();
-                ++sequence;
-                pending_discontinuity = true;
-                std::this_thread::sleep_for(std::chrono::microseconds(500));
+                if (input_file.empty()) raw_queue->record_drop();
+                if (input_file.empty()) {
+                    ++sequence;
+                    pending_discontinuity = true;
+                }
+                std::this_thread::sleep_for(std::chrono::microseconds(200));
                 continue;
             }
 
@@ -313,20 +395,32 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
             block->size = 0;
             block->discontinuity_before = pending_discontinuity;
 
-            int n_read = 0;
-            int r = rtlsdr_read_sync(dev, block->raw.data(), static_cast<int>(chunk_bytes), &n_read);
-            if (r < 0 || n_read != static_cast<int>(chunk_bytes)) {
-                block->discontinuity_before = true;
-                block->size = 0;
-                pending_discontinuity = true;
+            if (!input_file.empty()) {
+                in_file.read(reinterpret_cast<char*>(block->raw.data()), chunk_bytes);
+                std::streamsize n_read = in_file.gcount();
+                if (n_read <= 0) {
+                    break;
+                }
+                block->size = static_cast<size_t>(n_read);
                 raw_queue->publish_write(view);
-                continue;
-            }
+                pending_discontinuity = false;
+            } else {
+                int n_read = 0;
+                int r = rtlsdr_read_sync(dev, block->raw.data(), static_cast<int>(chunk_bytes), &n_read);
+                if (r < 0 || n_read != static_cast<int>(chunk_bytes)) {
+                    block->discontinuity_before = true;
+                    block->size = 0;
+                    pending_discontinuity = true;
+                    raw_queue->publish_write(view);
+                    continue;
+                }
 
-            block->size = static_cast<size_t>(n_read);
-            raw_queue->publish_write(view);
-            pending_discontinuity = false;
+                block->size = static_cast<size_t>(n_read);
+                raw_queue->publish_write(view);
+                pending_discontinuity = false;
+            }
         }
+        reader_running.store(false, std::memory_order_release);
     });
 
     // THREAD 2: Worker de DSP e Streaming UDP dedicado (continua rodando mesmo com menu aberto!)
@@ -335,24 +429,23 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
         SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
 #endif
         constexpr size_t FFT_LEN = 2048;
-        size_t GI_LEN  = 128;
-        size_t SYM_LEN = FFT_LEN + GI_LEN;
-        float frac_pos = 0.0f;
         auto last_pat_time = std::chrono::steady_clock::now();
         auto last_null_burst = std::chrono::steady_clock::now();
 
-        OfdmSync sync(OfdmMode::MODE_1_2K, GuardInterval::GI_1_16, static_cast<float>(sample_rate));
         OneSegDemodulator demod(OfdmMode::MODE_1_2K, GuardInterval::GI_1_16);
         PsiParser psi;
         TsGenerator channel_ts_gen;
 
         std::vector<std::complex<float>> iq_buf(chunk_samples);
-        IqStreamBuffer stream_iq_buf(chunk_samples * 2);
+        std::vector<std::complex<float>> useful_symbols;
+        useful_symbols.reserve(chunk_samples);
 
         bool ofdm_locked = false;
-        float tracked_ffo_hz = 0.0f;
         float last_peak_corr = 0.0f;
         int unlock_counter = 0;
+        bool reception_started = false;
+        bool channel_transition_pending = !test_pattern;
+        int transition_wait_blocks = 0;
         uint64_t total_air_packets = 0;
         uint64_t total_standby_packets = 0;
 
@@ -373,10 +466,13 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
                 }
 
                 psi.reset();
-                reset_play_reception_stream(sync, demod, stream_iq_buf, ofdm_locked, tracked_ffo_hz,
-                                            frac_pos, GI_LEN, SYM_LEN, unlock_counter, &dsp_metrics);
+                channel_transition_pending = true;
+                transition_wait_blocks = 0;
+                reset_play_reception_stream(*sync, demod, ofdm_locked, &dsp_metrics);
                 total_air_packets = 0;
                 have_expected_sequence = false;
+                reception_started = false;
+                unlock_counter = 0;
                 last_pat_time = std::chrono::steady_clock::now();
 
                 {
@@ -393,6 +489,9 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
 
             SpscCaptureQueue<64>::ReadView view;
             if (!raw_queue->try_acquire_read(view)) {
+                if (!reader_running.load(std::memory_order_relaxed)) {
+                    break;
+                }
                 std::this_thread::sleep_for(std::chrono::microseconds(200));
                 continue;
             }
@@ -409,9 +508,9 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
             dsp_metrics.input_blocks++;
 
             if (discontinuity) {
-                reset_play_reception_stream(sync, demod, stream_iq_buf,
-                                            ofdm_locked, tracked_ffo_hz, frac_pos,
-                                            GI_LEN, SYM_LEN, unlock_counter, &dsp_metrics);
+                reset_play_reception_stream(*sync, demod, ofdm_locked, &dsp_metrics);
+                reception_started = false;
+                unlock_counter = 0;
             }
 
             if (block.size == chunk_bytes) {
@@ -425,94 +524,98 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
                 }
                 float rssi_dbfs = 10.0f * std::log10((pwr_sum / chunk_samples) + 1e-12f);
 
-                auto sync_res = sync.find_symbol_boundary(iq_buf.data(), chunk_samples);
-                last_peak_corr = sync_res.peak_correlation;
+                sync->process(iq_buf.data(), chunk_samples, useful_symbols);
+                last_peak_corr = sync->peak_correlation();
+                bool synchronizer_locked = sync->state() == SyncState::Tracking;
+                bool has_synchronized_symbols = !useful_symbols.empty();
                 std::vector<std::vector<uint8_t>> decoded_pkts;
 
-                if (!ofdm_locked) {
-                    if (sync_res.locked) {
-                        ofdm_locked = true;
-                        unlock_counter = 0;
-                        GI_LEN = static_cast<size_t>(sync.gi_size());
-                        SYM_LEN = FFT_LEN + GI_LEN;
-                        frac_pos = 0.0f;
-                        tracked_ffo_hz = sync_res.ffo_hz;
-                        sync.reset_phase();
-                        sync.correct_frequency_offset(iq_buf.data(), iq_buf.size(), tracked_ffo_hz);
-
-                        size_t gi_start = (sync_res.symbol_offset >= static_cast<int>(GI_LEN))
-                                          ? static_cast<size_t>(sync_res.symbol_offset - static_cast<int>(GI_LEN))
-                                          : 0;
-                        stream_iq_buf.assign(iq_buf.data() + gi_start, iq_buf.size() - gi_start);
-                    }
+                if (synchronizer_locked || has_synchronized_symbols) {
+                    ofdm_locked = true;
+                    reception_started = true;
+                    unlock_counter = 0;
                 } else {
-                    if (!sync_res.locked) {
-                        unlock_counter++;
-                        if (unlock_counter > 200) {
-                            reset_play_reception_stream(sync, demod, stream_iq_buf,
-                                                        ofdm_locked, tracked_ffo_hz, frac_pos,
-                                                        GI_LEN, SYM_LEN, unlock_counter, &dsp_metrics);
+                    if (reception_started) {
+                        ofdm_locked = true;
+                        if (++unlock_counter > 200) {
+                            reset_play_reception_stream(*sync, demod, ofdm_locked, &dsp_metrics);
+                            reception_started = false;
+                            unlock_counter = 0;
                         }
                     } else {
-                        unlock_counter = 0;
-                        const float spacing = static_cast<float>(sample_rate) / static_cast<float>(FFT_LEN);
-                        float residual = sync_res.ffo_hz - tracked_ffo_hz;
-                        residual -= spacing * std::round(residual / spacing);
-                        tracked_ffo_hz += 0.1f * residual;
-                    }
-
-                    if (ofdm_locked) {
-                        sync.correct_frequency_offset(iq_buf.data(), iq_buf.size(), tracked_ffo_hz);
-                        stream_iq_buf.append(iq_buf.data(), iq_buf.size());
+                        ofdm_locked = false;
                     }
                 }
 
                 if (ofdm_locked) {
-                    while (static_cast<size_t>(std::lround(frac_pos)) + SYM_LEN + 8 <= stream_iq_buf.available()) {
-                        int base_pos = static_cast<int>(std::lround(frac_pos));
-                        int max_neg = (base_pos >= 4) ? 4 : base_pos;
-                        int best_sh = 0;
-                        float best_mag = -1.0f;
-                        for (int sh = -max_neg; sh <= 4; ++sh) {
-                            std::complex<float> g(0.0f, 0.0f);
-                            for (size_t m = 0; m < GI_LEN; ++m) {
-                                g += stream_iq_buf[base_pos + sh + m] * std::conj(stream_iq_buf[base_pos + sh + m + FFT_LEN]);
-                            }
-                            float mag = std::norm(g);
-                            if (mag > best_mag) { best_mag = mag; best_sh = sh; }
-                        }
-                        frac_pos += 0.25f * static_cast<float>(best_sh);
-                        int sym_d = std::max(0, static_cast<int>(std::lround(frac_pos)));
-                        if (static_cast<size_t>(sym_d) + SYM_LEN > stream_iq_buf.available()) break;
-
-                        demod.process_symbol(stream_iq_buf.data_at(sym_d + GI_LEN), decoded_pkts);
-                        frac_pos += static_cast<float>(SYM_LEN);
+                    for (size_t s = 0; s + FFT_LEN <= useful_symbols.size(); s += FFT_LEN) {
+                        demod.process_symbol(&useful_symbols[s], decoded_pkts);
                         dsp_metrics.processed_symbols++;
-                    }
-
-                    int consume_i = static_cast<int>(std::floor(frac_pos)) - 8;
-                    if (consume_i > 0 && static_cast<size_t>(consume_i) <= stream_iq_buf.available()) {
-                        stream_iq_buf.consume(static_cast<size_t>(consume_i));
-                        frac_pos -= static_cast<float>(consume_i);
                     }
 
                     for (const auto& pkt : decoded_pkts) {
                         psi.parse_packet(pkt.data());
                     }
 
-                    if (!decoded_pkts.empty()) {
-                        auto now_pat = std::chrono::steady_clock::now();
-                        if (std::chrono::duration_cast<std::chrono::milliseconds>(now_pat - last_pat_time).count() >= 100) {
-                            if (psi.has_pmt()) {
+                    if (channel_transition_pending) {
+                        // Aguarda a PMT ser decodificada nos primeiros blocos do novo canal (ou timeout de 40 blocos)
+                        // para garantir que a PAT sintetizada e a PMT precedam qualquer pacote continuo de midia
+                        if (!decoded_pkts.empty()) {
+                            transition_wait_blocks++;
+                            if (psi.has_pmt() || transition_wait_blocks >= 40) {
+                                streamer.send_discontinuity_burst();
+
                                 uint8_t pat_pkt[188];
                                 if (psi.build_pat_packet(pat_pkt)) {
                                     streamer.send_ts_packet(pat_pkt);
+                                    if (file_ts_out.is_open()) {
+                                        file_ts_out.write(reinterpret_cast<const char*>(pat_pkt), 188);
+                                    }
+                                }
+
+                                for (const auto& pkt : decoded_pkts) {
+                                    streamer.send_ts_packet(pkt.data());
+                                    if (file_ts_out.is_open()) {
+                                        file_ts_out.write(reinterpret_cast<const char*>(pkt.data()), 188);
+                                    }
+                                    total_air_packets++;
+                                    dsp_metrics.valid_ts_packets++;
+                                }
+                                streamer.flush();
+
+                                // Notifica MPV via IPC agora que os primeiros pacotes validos e a PAT/PMT
+                                // do novo canal ja estao disponiveis no socket UDP
+                                reload_mpv_player(udp_port);
+
+                                last_pat_time = std::chrono::steady_clock::now();
+                                channel_transition_pending = false;
+                                transition_wait_blocks = 0;
+                            }
+                        } else {
+                            // Enquanto o novo canal ainda esta em aquisicao OFDM/TMCC, mantem keep-alive
+                            auto now_keepalive = std::chrono::steady_clock::now();
+                            if (std::chrono::duration_cast<std::chrono::milliseconds>(now_keepalive - last_null_burst).count() >= 50) {
+                                streamer.send_null_burst(7);
+                                last_null_burst = now_keepalive;
+                            }
+                        }
+                    } else if (!decoded_pkts.empty()) {
+                        auto now_pat = std::chrono::steady_clock::now();
+                        if (std::chrono::duration_cast<std::chrono::milliseconds>(now_pat - last_pat_time).count() >= 100) {
+                            uint8_t pat_pkt[188];
+                            if (psi.build_pat_packet(pat_pkt)) {
+                                streamer.send_ts_packet(pat_pkt);
+                                if (file_ts_out.is_open()) {
+                                    file_ts_out.write(reinterpret_cast<const char*>(pat_pkt), 188);
                                 }
                             }
                             last_pat_time = now_pat;
                         }
                         for (const auto& pkt : decoded_pkts) {
                             streamer.send_ts_packet(pkt.data());
+                            if (file_ts_out.is_open()) {
+                                file_ts_out.write(reinterpret_cast<const char*>(pkt.data()), 188);
+                            }
                             total_air_packets++;
                             dsp_metrics.valid_ts_packets++;
                         }
@@ -580,14 +683,22 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
         }
     });
 
-    // THREAD 3 (Main): Gerenciamento de CLI, menu e teclado interativo
-    auto last_render_time = std::chrono::steady_clock::now();
-    bool channel_name_learned = false;
+    if (headless) {
+        if (reader_thread.joinable()) {
+            reader_thread.join();
+        }
+        if (dsp_worker_thread.joinable()) {
+            dsp_worker_thread.join();
+        }
+    } else {
+        // THREAD 3 (Main): Gerenciamento de CLI, menu e teclado interativo
+        auto last_render_time = std::chrono::steady_clock::now();
+        bool channel_name_learned = false;
 
-    // Oculta o cursor durante a execucao para evitar piscamento
-    std::cout << "\033[?25l" << std::flush;
+        // Oculta o cursor durante a execucao para evitar piscamento
+        std::cout << "\033[?25l" << std::flush;
 
-    while (g_running) {
+        while (g_running) {
         if (console_kbhit()) {
             int key = console_getch();
             bool need_redraw = false;
@@ -668,10 +779,8 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
                             std::this_thread::sleep_for(std::chrono::milliseconds(5));
                         }
 
-                        // 4. Se o MPV player automatico estiver ativo, notifica recarga via IPC sem fechar janela
-                        if (auto_player) {
-                            reload_mpv_player(udp_port);
-                        }
+                        // 4. Notifica recarga via IPC ao MPV (tanto modo integrado quanto scripts externos)
+                        reload_mpv_player(udp_port);
 
                         channel_name_learned = false;
                         last_render_time = std::chrono::steady_clock::now();
@@ -682,7 +791,7 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
             }
 
             if (need_redraw) {
-                render_dynamic_ui(true);
+                render_dynamic_ui();
             }
         }
 
@@ -711,7 +820,7 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
                         break;
                     }
                 }
-                render_dynamic_ui(true);
+                render_dynamic_ui();
             } else if (verbose) {
                 std::stringstream status_ss;
                 status_ss << "[Status] Ch " << active_channel_num << " | RSSI: " << std::fixed << std::setprecision(1) << snap.rssi_dbfs << " dBFS | "
@@ -727,7 +836,7 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
                 }
 
                 last_status_str = status_ss.str();
-                render_dynamic_ui(true);
+                render_bottom_bars();
             }
 
             last_render_time = now;
@@ -737,7 +846,10 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
     }
 
     // Restaura o cursor do terminal
-    std::cout << "\033[?25h\n\n[Encerrando] Fechando player, dongle RTL-SDR e encerrando stream UDP...\n";
+    TerminalSize final_sz = get_terminal_size();
+    std::cout << "\033[" << final_sz.height << ";1H\033[2K\033[0m\033[?25h\n[Encerrando] Fechando player, dongle RTL-SDR e encerrando stream UDP...\n";
+    }
+
     reader_running.store(false, std::memory_order_release);
     dsp_running.store(false, std::memory_order_release);
     g_running = false;
@@ -750,10 +862,15 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
     }
 
     stop_player();
-    rtlsdr_reset_buffer(dev);
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    rtlsdr_close(dev);
+    if (dev) {
+        rtlsdr_reset_buffer(dev);
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        rtlsdr_close(dev);
+    }
     streamer.stop();
+    if (file_ts_out.is_open()) {
+        file_ts_out.close();
+    }
     return 0;
 }
 

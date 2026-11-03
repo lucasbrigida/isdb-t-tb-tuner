@@ -36,6 +36,10 @@ Este documento registra as decisões de engenharia fundamentais tomadas durante 
 - [ADR 022 (Consolidated Refactoring ADR-011): Tabela Direta de 64 KB em O(1) para Multiplicações em GF(2^8) no Reed-Solomon](#adr-022-refatoração-consolidada-adr-011-tabela-direta-de-64-kb-em-o1-para-multiplicações-em-campo-de-galois-gf28-no-reed-solomon-rs204-188)
 - [ADR 023 (Consolidated Refactoring ADR-012): Otimizações de Compilação de Produção (IPO/LTO, -O3, -DNDEBUG e FAST_MATH)](#adr-023-refatoração-consolidada-adr-012-otimizações-de-compilação-de-produção-ipolto--o3--dndebug-e-isdbt_enable_fast_math)
 
+### Fase 4: Sincronismo OFDM Avançado e Distribuição Multi-Arquitetura (ADR 024 – 025)
+- [ADR 024: Abstração de Sincronizador OFDM (IOFDMSynchronizer), Dual-Mode (--ofdm=1 Van de Beek vs --ofdm=2 Robust GRISDBT Sync) e Preservação Estrita do Baseline](#adr-024-abstração-de-sincronizador-ofdm-iofdmsynchronizer-dual-mode---ofdm1-van-de-beek-vs---ofdm2-robust-grisdbt-sync-e-preservação-estrita-do-baseline)
+- [ADR 025: Suporte Dual-Architecture (x86 32-bit e x64 64-bit) no CMake, MPV i686 Embutido e Automação de Releases Independentes](#adr-025-suporte-dual-architecture-x86-32-bit-e-x64-64-bit-no-cmake-mpv-i686-embutido-e-automação-de-releases-independentes)
+
 ---
 
 ## ADR 001: Escopo de Recepção Estrito em 1-Seg com Dongles RTL-SDR
@@ -685,4 +689,109 @@ Estruturar o sistema de compilação em `CMakeLists.txt` com as seguintes flags 
 ### Consequências
 - Código binário compacto, com inlining agressivo entre todos os módulos de DSP.
 - Execução suave e estável mesmo em CPUs de baixo consumo energético (Intel Celeron, mini-PCs ou Raspberry Pi 4/5).
+---
 
+## ADR 024: Abstração de Sincronizador OFDM (IOFDMSynchronizer), Dual-Mode (--ofdm=1 Van de Beek vs --ofdm=2 Robust GRISDBT Sync) e Preservação Estrita do Baseline
+
+### Contexto
+O algoritmo de sincronização OFDM original baseia-se no estimador de máxima verossimilhança (ML) de Van de Beek, operando via correlação de prefixo cíclico com FSM tripartite (Acquisition, Tracking $\pm 4$, LostLock). Embora muito eficiente computacionalmente, em ambientes de recepção com atenuação severa, desvanecimento Rayleigh multi-percurso intenso ou deslocamento Doppler (veículos em movimento), a correlação de prefixo cíclico pode sofrer dispersão temporal, retardando a recuperação de sincronismo. O projeto acadêmico de referência git-artes/gr-isdbt adota uma estratégia robusta com rastreamento contínuo de pilotos dispersos (SP), correção de desvio de frequência fracionário e inteiro (CFO), acumulação de desvio de relógio de amostragem (SCO) e histerese de re-bloqueio após 3 símbolos consecutivos válidos.
+
+Entretanto, uma das diretrizes fundamentais do projeto é a **Preservação Estrita do Baseline**: o algoritmo original de Van de Beek jamais pode sofrer regressão ou alteração de comportamento, devendo permanecer bit-a-bit idêntico e selecionável como padrão.
+
+### Decisão
+1. **Interface Abstrata Polimórfica (include/sync/iofdm_synchronizer.h):**
+   Criar a classe base abstrata pura IOFDMSynchronizer com os métodos virtuais process(), state() e eset().
+2. **Implementação do Baseline (VanDeBeekSync):**
+   Atuar estritamente como um Adaptador (*Adapter Pattern*) sobre a classe existente OfdmSync, mantendo src/dsp/ofdm_sync.cpp e include/dsp/ofdm_sync.hpp **100% inalterados**.
+3. **Implementação Robusta Portada (RobustGRISDBTSync):**
+   Reimplementar de forma nativa e autocontida (sem GNU Radio, boost ou pmt) as etapas do isdb_t_sync_impl.cc do gr-isdbt:
+   - Aquisição coarse por correlação de prefixo cíclico;
+   - Refinamento fino de timing por pilotos dispersos (SP);
+   - Estimação de CFO inteiro via TMCC e fracionário via SP;
+   - Rastreamento contínuo de SCO por deriva de fase acumulada;
+   - FSM de re-sincronização com histerese de 3 símbolos consecutivos.
+4. **Fábrica Polimórfica (src/sync/sync_factory.cpp):**
+   Injeta a instância selecionada no pipeline de demodulação sem que estágios subsequentes (equalizador, Viterbi, RS) precisem saber qual algoritmo está ativo.
+5. **Controle por Linha de Comando:**
+   - Adicionada a flag `--ofdm` exclusivamente no subcomando `play`, aceitando tanto argumentos separados por espaço (`--ofdm 1` / `--ofdm 2`) quanto por sinal de igual (`--ofdm=1` / `--ofdm=2`).
+   - `--ofdm 1` é o valor padrão.
+   - Fora do subcomando `play`, a flag é silenciosamente ignorada.
+
+### Consequências
+- Zero risco de regressão: `--ofdm 1` garante comportamento idêntico ao histórico do projeto.
+- Disponibilidade de modo reforçado `--ofdm 2` para condições adversas de RF.
+- Flexibilidade e ergonomia no CLI: alinhamento sintático com os demais parâmetros (`-c 18`, `-p 1234`, `-g 28.0`).
+- Separação clara de responsabilidades com desacoplamento arquitetural.
+
+---
+
+## ADR 025: Suporte Dual-Architecture (x86 32-bit e x64 64-bit) no CMake, MPV i686 Embutido e Automação de Releases Independentes
+
+### Contexto
+Embora sistemas modernos Windows operem predominantemente em arquiteturas de 64 bits (x64), uma parcela expressiva de hardware legado, sistemas industriais embarcados, terminais portáteis e receptores antigos ainda utilizam Windows de 32 bits (x86 / i686). O receptor foi inicialmente compilado exclusivamente para 64 bits, e a biblioteca librtlsdr.dll e o reprodutor MPV embutidos eram binários de 64 bits, impossibilitando a execução em sistemas x86.
+
+### Decisão
+1. **Configuração Multi-Arquitetura no CMake (CMakeLists.txt):**
+   - Introduzir a opção TARGET_ARCH (x64, x86, uto).
+   - Para x64: aplicar -m64.
+   - Para x86: aplicar -m32 -msse2 -mfpmath=sse (garantindo consistência de aritmética de ponto flutuante IEEE-754 com registros XMM em vez do antigo coprocessador x87 de 80 bits).
+   - Injetar a definição _WIN32_WINNT=0x0600 em builds Windows para declaração uniforme de APIs de rede (inet_pton) e criptografia WinCrypt (CALG_SHA_256).
+2. **Isolamento de DLLs e Executáveis por Arquitetura:**
+   - `tools/rtl-sdr/x64/` e `tools/rtl-sdr/x86/`: DLLs oficiais e utilitários isolados para cada ABI.
+   - `tools/mpv/` e `tools/mpv/x86/`: Distribuições portáteis completas do MPV para 64 bits e 32 bits oficial (mpv-i686).
+   - O código-fonte em src/platform/platform_utils.cpp detecta em runtime sizeof(void*) == 4 e aciona prioritariamente `tools\mpv\x86\mpv.exe`.
+3. **Compatibilidade de ABI Win32 em x86:**
+   - Funções de callback do kernel Win32 (como SetConsoleCtrlHandler) exigem a convenção __stdcall em x86. Substituída a lambda anônima por uma função estática declarada com a macro WINAPI.
+4. **Pipeline Automatizado de Release (scripts/build_release.ps1):**
+   - Parâmetro -Arch all (padrão), x64 ou x86.
+   - Execução automática de CTest em ambas as arquiteturas.
+   - Montagem de staging isolado e geração de pacotes zip independentes: yyyymmdd_v1.0.0_win64.zip e yyyymmdd_v1.0.0_win32.zip.
+   - Validação estrita via objdump -f inspecionando se os executáveis dentro do pacote correspondem a pei-x86-64 ou pei-i386.
+5. **Estabilidade de Releases do MPV 32 bits (i686) e Smoke Test:**
+   - Adotada estritamente a release estável oficial `mpv-0.41.0-i686` em substituição aos snapshots diários de desenvolvimento (`git`), prevenindo regressões de compilador upstream (como a falha de asserção `OpenSSL internal error: assertion failed: lock != NULL`).
+   - Integrado teste de fumaça automatizado no pipeline de release que executa `mpv.exe --version` e valida código de saída zero sem erros de OpenSSL antes do empacotamento final.
+
+### Consequências
+- Cobertura universal de plataformas Windows (Windows 7/8/10/11 tanto em x64 quanto em x86).
+- Pacotes de release 100% autocontidos, portáteis e sem dependências externas instaladas no sistema.
+- Garantia matemática de que o código compila e passa em 100% dos testes determinísticos em ambas as larguras de palavra (32 e 64 bits).
+
+---
+
+## ADR 026: Persistência Exclusivamente Local e Portátil (`channels.json`)
+
+### Contexto
+Originalmente, a classe `ChannelManager` consultava variáveis de ambiente do sistema operacional para salvar a lista de canais sintonizados em diretórios de perfil de usuário (`%APPDATA%\isdbtb_rx\channels.json` no Windows e `~/.config/isdbtb_rx/channels.json` no Linux). Em ambientes restritos, contas de usuário sem privilégios administrativos, terminais sem `%APPDATA%` configurado ou ao executar a aplicação a partir de mídias portáteis (como pendrives), essa abordagem gerava limitações de permissão, caminhos ocultos de difícil inspeção e inconsistências entre múltiplas instâncias instaladas.
+
+### Decisão
+Eliminar qualquer dependência ou consulta a variáveis de ambiente de pastas de usuário (`%APPDATA%`, `USERPROFILE`, `HOME`).
+1. `ChannelManager::get_default_config_path()` passa a retornar estritamente e exclusivamente `"channels.json"`.
+2. A leitura e gravação ocorrem sempre no diretório local de trabalho da aplicação (modo portátil puro).
+3. O arquivo `channels.json` foi devidamente blindado no `.gitignore` para evitar poluição do repositório em testes locais.
+
+### Consequências
+- A aplicação é agora 100% autocontida (*portable app*): descompactar o ZIP e executar em qualquer pasta ou pendrive funciona imediatamente.
+- Zero erros de permissão de escrita em diretórios ocultos do sistema operacional.
+
+---
+
+## ADR 027: Segregação Simétrica de Ferramentas por Arquitetura e Layout Dinâmico no Terminal
+
+### Contexto
+1. Arquivos de 64 bits do MPV e Osmocom RTL-SDR residiam soltos na raiz de `tools/mpv/` e `tools/rtl-sdr/`, enquanto os de 32 bits estavam em subpastas `x86/`. Além disso, ferramentas diagnósticas em Python estavam misturadas em `scripts/`.
+2. No comando `play -v`, a renderização do status em tempo real gerava quebra de linha (*word wrap*) e duplicava linhas ao redimensionar a janela do terminal, poluindo a visualização da lista de canais.
+
+### Decisão
+1. **Simetria Completa de Ferramentas:**
+   - `tools/rtl-sdr/x64/` e `tools/rtl-sdr/x86/` contêm todas as DLLs e executáveis oficiais de cada ABI.
+   - `tools/mpv/x64/` e `tools/mpv/x86/` contêm a distribuição portátil completa do MPV para cada ABI.
+   - Utilitários diagnósticos (`calibrate_ppm.py`, `quick_rf_scan.py`) movidos formalmente para `tools/`.
+   - `scripts/` reservado a scripts de automação (`build_release.ps1`) e lançadores do player.
+2. **Layout Estável no Terminal:**
+   - Adicionada detecção da geometria do console (`get_terminal_size()`).
+   - Com `-v`, o status de RF é exibido via posicionamento absoluto ANSI na **antepenúltima linha** (`height - 2`), com truncamento dinâmico estrito em `width - 1` caracteres, eliminando *word wrap* ao redimensionar o terminal.
+   - A última linha (`height`) exibe em alto contraste com **fundo branco e letras pretas** (`\033[30;47m`) a legenda de navegação, sem emitir `\n` final para não rolar o buffer da tela.
+
+### Consequências
+- Repositório limpo, simétrico e padronizado por arquitetura.
+- Experiência do usuário (UX) estável e sem piscar ou duplicar linhas no terminal.

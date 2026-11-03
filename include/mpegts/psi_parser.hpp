@@ -12,6 +12,7 @@ struct ProgramService {
     uint16_t service_id = 0;
     std::string service_name;
     uint16_t pmt_pid = 0;
+    uint16_t pcr_pid = 0x1FFF;
     uint16_t video_pid = 0;
     uint16_t audio_pid = 0;
 };
@@ -28,6 +29,8 @@ public:
 
     const std::map<uint16_t, ProgramService>& get_services() const { return services_; }
     std::string get_primary_service_name() const;
+    // Returns PCR/video/audio PIDs that need discontinuity markers on a channel switch.
+    std::vector<uint16_t> get_discontinuity_pids() const;
 
     /**
      * @brief Verifica se um PID corresponde a uma trilha de audio identificada nas PMTs.

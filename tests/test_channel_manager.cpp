@@ -94,7 +94,7 @@ void test_persistence() {
         TEST_ASSERT(band != nullptr);
         TEST_ASSERT(band->name == "BAND HD");
         TEST_ASSERT(band->frequency_hz == 527142857);
-        TEST_ASSERT(band->rssi_dbfs == -5.4f);
+        TEST_ASSERT(std::abs(band->rssi_dbfs - (-5.4f)) < 0.01f);
 
         const auto* cultura = mgr2.find_by_name("cultura");
         TEST_ASSERT(cultura != nullptr);
@@ -106,6 +106,7 @@ void test_persistence() {
 }
 
 int main() {
+    TEST_ASSERT(isdbt::ChannelManager::get_default_config_path() == "channels.json");
     test_in_memory_operations();
     test_persistence();
 

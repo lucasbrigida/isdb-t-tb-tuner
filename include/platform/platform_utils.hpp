@@ -27,4 +27,12 @@ bool reload_mpv_player(uint16_t udp_port = 1234);
 bool console_kbhit();
 int console_getch();
 
+struct TerminalSize {
+    int width = 80;
+    int height = 24;
+};
+
+// Obtem a largura e altura da janela visivel do terminal
+TerminalSize get_terminal_size();
+
 } // namespace isdbt

@@ -1,0 +1,12 @@
+﻿{
+  "channel": 18,
+  "frequency_hz": 497142857,
+  "sample_rate_hz": 2031746,
+  "sample_rate_source": "include/dsp/constants.hpp:10, AGENTS.md:Invariante 1",
+  "gain_db": 28,
+  "duration_seconds": 120,
+  "total_samples": 243809520,
+  "format": "CU8 (interleaved uint8 I/Q)",
+  "recorded_at_utc": "2026-11-02T19:22:16Z",
+  "sha256": "f614eade06dcffcd6f69e10c5c0f6f44ec0d6f67d8e2459036b152f7fe431c50"
+}

@@ -66,6 +66,12 @@ public:
     void reset();
 
     /**
+     * @brief Reinicia suavemente o estado de sincronismo de símbolos, Forney e TMCC
+     * apos reaquisição de fronteira de símbolo por descontinuidade temporal.
+     */
+    void reset_sync_state();
+
+    /**
      * @brief Retorna metricas operacionais da demodulacao.
      */
     uint64_t total_symbols_processed() const { return symbol_count_; }
@@ -122,6 +128,7 @@ private:
     TmccBitBuffer tmcc_bits_;
     int since_last_tmcc_{203};
     bool tmcc_locked_{false};
+    int tmcc_miss_frames_{0};
     bool frame_begin_pending_{false};
 
     // Modulos DSP

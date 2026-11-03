@@ -23,7 +23,7 @@
 namespace isdbt {
 
 UdpStreamer::UdpStreamer(const std::string& host, uint16_t port)
-    : host_(host), port_(port), socket_fd_(reinterpret_cast<uintptr_t>(INVALID_SOCK)),
+    : host_(host), port_(port), socket_fd_(static_cast<uintptr_t>(INVALID_SOCK)),
       is_running_(false), last_packet_time_(std::chrono::steady_clock::now()) {
     buffer_.reserve(UDP_PAYLOAD_SIZE);
 }
@@ -67,7 +67,7 @@ void UdpStreamer::stop() {
     socket_t s = static_cast<socket_t>(socket_fd_);
     if (s != INVALID_SOCK) {
         CLOSE_SOCK(s);
-        socket_fd_ = reinterpret_cast<uintptr_t>(INVALID_SOCK);
+        socket_fd_ = static_cast<uintptr_t>(INVALID_SOCK);
     }
 #ifdef _WIN32
     WSACleanup();
