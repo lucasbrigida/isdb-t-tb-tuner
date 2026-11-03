@@ -194,6 +194,9 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
         print_players_box(streamer.url());
         if (auto_player) {
             launch_mpv(udp_port);
+            if (test_pattern) {
+                reload_mpv_player(udp_port);
+            }
         }
     }
 
@@ -441,7 +444,8 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
         float last_peak_corr = 0.0f;
         int unlock_counter = 0;
         bool reception_started = false;
-        bool channel_transition_pending = false;
+        bool channel_transition_pending = !test_pattern;
+        int transition_wait_blocks = 0;
         uint64_t total_air_packets = 0;
         uint64_t total_standby_packets = 0;
 
@@ -453,7 +457,7 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
         while (dsp_running.load(std::memory_order_relaxed) && g_running) {
             // Verifica solicitacao de reset de stream (troca de canal)
             if (dsp_reset_requested.load(std::memory_order_acquire)) {
-                streamer.send_discontinuity_burst(psi.get_discontinuity_pids());
+                streamer.send_discontinuity_burst();
 
                 // Drena amostras pendentes da fila SPSC
                 SpscCaptureQueue<64>::ReadView drain_view;
@@ -463,6 +467,7 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
 
                 psi.reset();
                 channel_transition_pending = true;
+                transition_wait_blocks = 0;
                 reset_play_reception_stream(*sync, demod, ofdm_locked, &dsp_metrics);
                 total_air_packets = 0;
                 have_expected_sequence = false;
@@ -552,28 +557,56 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
                         psi.parse_packet(pkt.data());
                     }
 
-                    if (!decoded_pkts.empty()) {
-                        auto now_pat = std::chrono::steady_clock::now();
-                        if (channel_transition_pending && psi.has_pmt()) {
-                            streamer.send_discontinuity_burst(psi.get_discontinuity_pids());
-                            uint8_t pat_pkt[188];
-                            if (psi.build_pat_packet(pat_pkt)) {
-                                streamer.send_ts_packet(pat_pkt);
-                                if (file_ts_out.is_open()) {
-                                    file_ts_out.write(reinterpret_cast<const char*>(pat_pkt), 188);
-                                }
-                            }
-                            last_pat_time = now_pat;
-                            channel_transition_pending = false;
-                        }
-                        if (std::chrono::duration_cast<std::chrono::milliseconds>(now_pat - last_pat_time).count() >= 100) {
-                            if (psi.has_pmt()) {
+                    if (channel_transition_pending) {
+                        // Aguarda a PMT ser decodificada nos primeiros blocos do novo canal (ou timeout de 40 blocos)
+                        // para garantir que a PAT sintetizada e a PMT precedam qualquer pacote continuo de midia
+                        if (!decoded_pkts.empty()) {
+                            transition_wait_blocks++;
+                            if (psi.has_pmt() || transition_wait_blocks >= 40) {
+                                streamer.send_discontinuity_burst();
+
                                 uint8_t pat_pkt[188];
                                 if (psi.build_pat_packet(pat_pkt)) {
                                     streamer.send_ts_packet(pat_pkt);
                                     if (file_ts_out.is_open()) {
                                         file_ts_out.write(reinterpret_cast<const char*>(pat_pkt), 188);
                                     }
+                                }
+
+                                for (const auto& pkt : decoded_pkts) {
+                                    streamer.send_ts_packet(pkt.data());
+                                    if (file_ts_out.is_open()) {
+                                        file_ts_out.write(reinterpret_cast<const char*>(pkt.data()), 188);
+                                    }
+                                    total_air_packets++;
+                                    dsp_metrics.valid_ts_packets++;
+                                }
+                                streamer.flush();
+
+                                // Notifica MPV via IPC agora que os primeiros pacotes validos e a PAT/PMT
+                                // do novo canal ja estao disponiveis no socket UDP
+                                reload_mpv_player(udp_port);
+
+                                last_pat_time = std::chrono::steady_clock::now();
+                                channel_transition_pending = false;
+                                transition_wait_blocks = 0;
+                            }
+                        } else {
+                            // Enquanto o novo canal ainda esta em aquisicao OFDM/TMCC, mantem keep-alive
+                            auto now_keepalive = std::chrono::steady_clock::now();
+                            if (std::chrono::duration_cast<std::chrono::milliseconds>(now_keepalive - last_null_burst).count() >= 50) {
+                                streamer.send_null_burst(7);
+                                last_null_burst = now_keepalive;
+                            }
+                        }
+                    } else if (!decoded_pkts.empty()) {
+                        auto now_pat = std::chrono::steady_clock::now();
+                        if (std::chrono::duration_cast<std::chrono::milliseconds>(now_pat - last_pat_time).count() >= 100) {
+                            uint8_t pat_pkt[188];
+                            if (psi.build_pat_packet(pat_pkt)) {
+                                streamer.send_ts_packet(pat_pkt);
+                                if (file_ts_out.is_open()) {
+                                    file_ts_out.write(reinterpret_cast<const char*>(pat_pkt), 188);
                                 }
                             }
                             last_pat_time = now_pat;
@@ -729,7 +762,10 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
                         const auto* info = mgr.find_by_number(active_channel_num);
                         ch_name = (info != nullptr) ? info->name : ("Canal " + std::to_string(active_channel_num));
 
-                        // Solicita retune a reader_thread
+                        // 1. Envia burst de descontinuidade MPEG-TS para players externos (VLC/MPV)
+                        streamer.send_discontinuity_burst();
+
+                        // 2. Solicita retune a reader_thread
                         retune_in_progress.store(true, std::memory_order_release);
                         retune_target_freq_hz.store(freq_hz, std::memory_order_release);
                         while (retune_in_progress.load(std::memory_order_acquire) && g_running) {
@@ -742,6 +778,9 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
                         while (!dsp_reset_done.load(std::memory_order_acquire) && g_running) {
                             std::this_thread::sleep_for(std::chrono::milliseconds(5));
                         }
+
+                        // 4. Notifica recarga via IPC ao MPV (tanto modo integrado quanto scripts externos)
+                        reload_mpv_player(udp_port);
 
                         channel_name_learned = false;
                         last_render_time = std::chrono::steady_clock::now();

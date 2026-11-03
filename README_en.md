@@ -1,4 +1,4 @@
-# 📡 ISDB-T / ISDB-Tb Universal SDR Receiver & Real-Time Player
+﻿# 📡 ISDB-T / ISDB-Tb Universal SDR Receiver & Real-Time Player
 
 <p align="center">
   <img src="https://img.shields.io/badge/License-GPLv3-blue.svg" alt="License: GPLv3" />
@@ -6,10 +6,10 @@
   <img src="https://img.shields.io/badge/Hardware-RTL--SDR%20(RTL2832U)-red.svg" alt="RTL-SDR" />
   <img src="https://img.shields.io/badge/Platform-Windows%20(x64%20%7C%20x86)%20%7C%20Linux-brightgreen.svg" alt="Platforms" />
   <img src="https://img.shields.io/badge/Player-MPV%20Embedded-darkgreen.svg" alt="MPV Embedded" />
-  <img src="https://img.shields.io/badge/Tests-20%2F20%20Passed-success.svg" alt="CTest Passing" />
+  <img src="https://img.shields.io/badge/Tests-22%2F22%20Passed-success.svg" alt="CTest Passing" />
 </p>
 
-Complete digital broadcast TV receiver and demodulator for the **ISDB-T / ISDB-Tb / SBTVD** standard (Brazil, Japan, Philippines, and Latin America) powered by **RTL-SDR** hardware (RTL2832U with R820T/R828D/E4000 tuners). Built in **pure, high-performance native C++ without GNU Radio dependencies**, featuring a **lock-free SPSC ring buffer** with sequence tracking and coordinated resets, **zero heap allocations** in symbol processing, a **dual-engine OFDM synchronization architecture** (Van de Beek baseline and robust cyclic-prefix acquisition/tracking with initial CFO estimation, timing/SCO adjustment, and re-lock hysteresis), **Regularized MMSE** channel equalization, **128-centered CSI soft scaling** with synchronized bit delay lines in the continuous Viterbi decoder, **$O(1)$ 64 KB direct Galois field table** in Reed-Solomon, smart two-pass spectrum scan with official station name resolution via **SDT**, **dual-target Windows releases (64-bit x64 & 32-bit x86)**, and an **embedded MPV player with real-time super-resolution upscaling and motion interpolation**.
+Complete digital broadcast TV receiver and demodulator for the **ISDB-T / ISDB-Tb / SBTVD** standard (Brazil, Japan, Philippines, and Latin America) powered by **RTL-SDR** hardware (RTL2832U with R820T/R828D/E4000 tuners). Built in **pure, high-performance native C++ without GNU Radio dependencies**, featuring a **lock-free SPSC ring buffer** with sequence tracking and coordinated resets, **zero heap allocations** in symbol processing, a **dual-engine OFDM synchronization architecture** (Van de Beek baseline and dual-engine OFDM synchronization architecture (standard Van de Beek and robust `gr-isdbt` port with active timing, CFO/SCO, and re-sync hysteresis)), **Regularized MMSE** channel equalization, **128-centered CSI soft scaling** with synchronized bit delay lines in the continuous Viterbi decoder, **$O(1)$ 64 KB direct Galois field table** in Reed-Solomon, smart two-pass spectrum scan with official station name resolution via **SDT**, **dual-target Windows releases (64-bit x64 & 32-bit x86)**, and an **embedded MPV player with real-time super-resolution upscaling and motion interpolation**.
 
 ---
 
@@ -225,7 +225,7 @@ The 20 deterministic tests validate:
 16. `SyncRegressionScan`: Ensures channel scanner operates strictly under baseline Van de Beek synchronization with zero regression.
 17. `BenchAsciiTable`: Validates ASCII table formatting for benchmark telemetry reports.
 18. `RegressionOfdm1`: Baseline Van de Beek regression test anchored to reference broadcast capture.
-19. `SyncGrisdbtRobust`: Validates the robust CP-based synchronization engine (timing, initial CFO estimate, SCO, and FSM hysteresis).
+19. `SyncGrisdbtRobust`: Validates the robust `gr-isdbt` synchronization engine (active SP timing, integer/fractional CFO, SCO, and FSM hysteresis).
 20. `RegressionOfdm2`: Robust `gr-isdbt` synchronization regression test anchored to reference broadcast capture.
 
 ### 2.4 Automated Release Packaging (`build_release.ps1`)
@@ -251,8 +251,8 @@ The repository hosts a complete ecosystem of standalone tools and reference util
 
 | Utility / Directory | Technical Description & Developer Use Cases |
 | :--- | :--- |
-| **[`bench/`](bench/)** | **Benchmark Suite (`bench_sync`):** Compares execution time, CPU load, and synchronizer locking stability across OFDM algorithms against reference broadcast captures. |
-| **[`samples/`](samples/)** | **RF Reference Captures:** Contains the official 2-minute Channel 18 reference dataset (`ch18_2031746sps_2min.cu8`) sampled at exact 2031746 S/s for deterministic regression testing (managed via Git LFS). |
+| **[`bench/`](bench/)** | **Benchmark Suite (`bench_sync`):** Comparative benchmark tool (`bench_sync --compare` / `--segment-of 5`) measuring cycles/symbol, CPU usage, RSS, and stability across OFDM algorithms. |
+| **[`samples/`](samples/)** | **RF Reference Captures:** Contains the official 10-second Channel 24 reference dataset (`ch24_10s_iq.cu8`) sampled at exact 2031746 S/s for deterministic regression testing (managed via Git LFS). |
 | **[`tools/zadig.exe`](tools/zadig.exe)** | Official portable **WinUSB** driver installer (v2.9 / libwdi). Links the WinUSB driver to `Interface 0` of the RTL2832U device with 1 click. |
 | **[`tools/rtl-sdr/`](tools/rtl-sdr/)** | Complete collection of official **Osmocom RTL-SDR** diagnostic binaries and runtime libraries: |
 | ↳ `x64/` & `x86/` | Dedicated architecture folders containing 64-bit and 32-bit `librtlsdr.dll` and diagnostic tools. |
@@ -322,7 +322,7 @@ isdb_t_isdb_tb_tuner_player/
 - **Exact Fundamental Sampling Rate ($2031746\text{ S/s}$):** Exactly $1/4$ of the ISDB-T chip rate $F_{base} = 512/63\text{ MHz} \approx 8.126984\text{ MHz}$, ensuring $>90\%$ cyclic prefix correlation and perfectly aligned FFT bins without rational resampling filters.
 - **Dual-Engine OFDM Synchronization:**
   - *Mode 1 (`VanDeBeekSync`, Baseline):* Sliding cyclic prefix autocorrelation with fractional frequency offset (FFO) estimation and three-state FSM (`Acquisition`, `Tracking` $\pm 4$, `LostLock`).
-  - *Mode 2 (`RobustGRISDBTSync`):* CP-correlation acquisition and timing refinement, initial CFO estimation from correlation phase, PI timing/SCO adjustment, and re-lock hysteresis after consecutive valid symbols.
+  - *Mode 2 (`RobustGRISDBTSync`, gr-isdbt port):* Coarse CP acquisition, active Scattered Pilot (SP) timing refinement, integer CFO estimation via TMCC, fractional CFO via SP, sampling clock offset (SCO) phase accumulation, and 3-symbol lock hysteresis.
 - **Lock-Free SPSC USB Capture Queue (`SpscCaptureQueue`):** Static 64-slot ring buffer with acquire-release memory semantics, atomic drop counters, and explicit sequence gap detection triggering coordinated NCO resets.
 - **Zero Dynamic Allocations in Hot Path:** Complete elimination of `std::deque` and `std::vector::erase` across time, bit, and Forney deinterleavers, replaced with `FixedDelayLine`, `DynamicDelayLine`, and offset sliding (`viterbi_stream_offset_`).
 - **Regularized MMSE Channel Equalization:** Replaces traditional Zero-Forcing with adaptive MMSE ($\sigma^2 = \max(10^{-5}, 0.05 \cdot P_{\text{avg}})$), preventing severe noise amplification in deep fading nulls.

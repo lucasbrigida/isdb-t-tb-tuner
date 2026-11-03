@@ -59,13 +59,7 @@ int main(int argc, char** argv) {
         "  --ofdm 1   Modo padrao. Mais leve e economico.\n"
         "  --ofdm 2   Modo reforcado. Mantem a imagem estavel com sinal\n"
         "             fraco, muito reflexo ou em movimento. Usa mais\n"
-        "             processamento.\n"
-        "Sem a opcao, o modo 1 eh usado. (Tambem aceita --ofdm=1 ou --ofdm=2)\n"
-        "A flag so vale para 'play' e eh ignorada nos demais comandos.\n"
-        "Exemplos:\n"
-        "  play -c 18\n"
-        "  play -c 18 --ofdm 2\n"
-        "  play -c 18 --ofdm=2");
+        "             processamento.");
 
     sc_play->add_option("-i,--input", input_file, "Arquivo de amostras IQ para reproducao offline (.cu8)");
     sc_play->add_option("--output-ts", output_ts_file, "Arquivo de destino para gravar o fluxo MPEG-TS (.ts)");

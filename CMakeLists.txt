@@ -349,7 +349,7 @@ add_test(NAME BenchAsciiTable COMMAND test_bench_ascii_table)
 add_test(NAME RegressionOfdm1 COMMAND test_regression_ofdm1)
 add_test(NAME SyncGrisdbtRobust COMMAND test_sync_grisdbt_robust)
 add_test(NAME RegressionOfdm2 COMMAND test_regression_ofdm2
-    "${CMAKE_CURRENT_SOURCE_DIR}/samples/ch18_2min_iq.cu8"
+    "${CMAKE_CURRENT_SOURCE_DIR}/samples/ch24_10s_iq.cu8"
     "${CMAKE_CURRENT_SOURCE_DIR}")
 add_test(NAME BenchSync COMMAND bench_sync --compare)
 set_tests_properties(BenchSync PROPERTIES LABELS "bench")

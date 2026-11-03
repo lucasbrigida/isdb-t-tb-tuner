@@ -73,4 +73,4 @@ echo   [q]      - Fechar Player
 echo ==============================================================================
 echo.
 
-start "" "%MPV_BIN%" --config-dir="%MPV_CONF_DIR%" --idle=yes "udp://127.0.0.1:%PORT%?localaddr=127.0.0.1"
+start "" "%MPV_BIN%" --config-dir="%MPV_CONF_DIR%" --idle=yes --input-ipc-server=\\.\pipe\isdbtb_mpv "udp://127.0.0.1:%PORT%"

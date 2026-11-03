@@ -4,6 +4,8 @@
 #include <string>
 #include <filesystem>
 #include <csignal>
+#include <thread>
+#include <chrono>
 
 #ifdef _WIN32
     #include <windows.h>
@@ -102,29 +104,51 @@ bool launch_mpv(uint16_t udp_port) {
 #ifdef _WIN32
     std::string mpv_bin = "tools\\mpv\\mpv.exe";
     std::string conf_dir = "tools\\mpv";
-    if (sizeof(void*) == 4 && std::filesystem::exists("tools\\mpv\\x86\\mpv.exe")) {
-        mpv_bin = "tools\\mpv\\x86\\mpv.exe";
-        conf_dir = "tools\\mpv\\x86";
-    } else if (sizeof(void*) == 8 && std::filesystem::exists("tools\\mpv\\x64\\mpv.exe")) {
-        mpv_bin = "tools\\mpv\\x64\\mpv.exe";
-        conf_dir = "tools\\mpv\\x64";
-    } else if (!std::filesystem::exists(mpv_bin)) {
-        auto root = std::filesystem::current_path();
-        if (sizeof(void*) == 4 && std::filesystem::exists(root / "tools" / "mpv" / "x86" / "mpv.exe")) {
-            mpv_bin = (root / "tools" / "mpv" / "x86" / "mpv.exe").string();
-            conf_dir = (root / "tools" / "mpv" / "x86").string();
-        } else if (sizeof(void*) == 8 && std::filesystem::exists(root / "tools" / "mpv" / "x64" / "mpv.exe")) {
-            mpv_bin = (root / "tools" / "mpv" / "x64" / "mpv.exe").string();
-            conf_dir = (root / "tools" / "mpv" / "x64").string();
-        } else if (std::filesystem::exists(root / "tools" / "mpv" / "mpv.exe")) {
-            mpv_bin = (root / "tools" / "mpv" / "mpv.exe").string();
-            conf_dir = (root / "tools" / "mpv").string();
+
+    auto probe_candidates = [&](const std::filesystem::path& base) -> bool {
+        if (sizeof(void*) == 8) {
+            auto b64 = base / "tools" / "mpv" / "x64" / "mpv.exe";
+            if (std::filesystem::exists(b64)) {
+                mpv_bin = b64.string();
+                conf_dir = (base / "tools" / "mpv" / "x64").string();
+                return true;
+            }
+        }
+        if (sizeof(void*) == 4) {
+            auto b86 = base / "tools" / "mpv" / "x86" / "mpv.exe";
+            if (std::filesystem::exists(b86)) {
+                mpv_bin = b86.string();
+                conf_dir = (base / "tools" / "mpv" / "x86").string();
+                return true;
+            }
+        }
+        auto bdef = base / "tools" / "mpv" / "mpv.exe";
+        if (std::filesystem::exists(bdef)) {
+            mpv_bin = bdef.string();
+            conf_dir = (base / "tools" / "mpv").string();
+            return true;
+        }
+        return false;
+    };
+
+    // 1. Tenta a partir do diretorio corrente
+    bool found = probe_candidates(std::filesystem::current_path());
+
+    // 2. Se nao encontrou, tenta a partir do diretorio onde esta o executavel
+    if (!found) {
+        char exe_buf[MAX_PATH];
+        if (GetModuleFileNameA(NULL, exe_buf, MAX_PATH) > 0) {
+            std::filesystem::path exe_dir = std::filesystem::path(exe_buf).parent_path();
+            found = probe_candidates(exe_dir) || probe_candidates(exe_dir.parent_path());
         }
     }
-    std::string cmdline = "\"" + mpv_bin + "\" --config-dir=\"" + conf_dir + "\" --idle=yes --input-ipc-server=\\\\.\\pipe\\isdbtb_mpv \"udp://127.0.0.1:" + std::to_string(udp_port) + "?localaddr=127.0.0.1\"";
+
+    std::string cmdline = "\"" + mpv_bin + "\" --config-dir=\"" + conf_dir + "\" --force-window=immediate --idle=yes --input-ipc-server=\\\\.\\pipe\\isdbtb_mpv";
 
     STARTUPINFOA si{};
     si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_SHOWNORMAL;
     PROCESS_INFORMATION pi{};
     std::vector<char> cmd_buf(cmdline.begin(), cmdline.end());
     cmd_buf.push_back('\0');
@@ -167,19 +191,30 @@ bool launch_mpv(uint16_t udp_port) {
 
 bool reload_mpv_player(uint16_t udp_port) {
 #ifdef _WIN32
-    HANDLE hPipe = CreateFileA(
-        "\\\\.\\pipe\\isdbtb_mpv",
-        GENERIC_WRITE,
-        0,
-        NULL,
-        OPEN_EXISTING,
-        0,
-        NULL
-    );
+    HANDLE hPipe = INVALID_HANDLE_VALUE;
+    for (int attempt = 0; attempt < 20; ++attempt) {
+        hPipe = CreateFileA(
+            "\\\\.\\pipe\\isdbtb_mpv",
+            GENERIC_WRITE,
+            0,
+            NULL,
+            OPEN_EXISTING,
+            0,
+            NULL
+        );
+        if (hPipe != INVALID_HANDLE_VALUE) {
+            break;
+        }
+        if (GetLastError() == ERROR_PIPE_BUSY) {
+            WaitNamedPipeA("\\\\.\\pipe\\isdbtb_mpv", 100);
+        } else {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+    }
     if (hPipe == INVALID_HANDLE_VALUE) {
         return false;
     }
-    std::string cmd = "{\"command\": [\"loadfile\", \"udp://127.0.0.1:" + std::to_string(udp_port) + "?localaddr=127.0.0.1\", \"replace\"]}\n";
+    std::string cmd = "{\"command\": [\"loadfile\", \"udp://127.0.0.1:" + std::to_string(udp_port) + "\", \"replace\"]}\n";
     DWORD written = 0;
     WriteFile(hPipe, cmd.data(), static_cast<DWORD>(cmd.size()), &written, NULL);
     CloseHandle(hPipe);

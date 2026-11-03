@@ -1,4 +1,4 @@
-# 📖 Manual do Usuário e Guia de Utilização (ISDB-T / ISDB-Tb Receiver)
+﻿# 📖 Manual do Usuário e Guia de Utilização (ISDB-T / ISDB-Tb Receiver)
 
 Este guia prático ensina como configurar o dongle RTL-SDR, instalar os drivers necessários, escanear canais de TV digital e assistir à transmissão em tempo real no **MPV Media Player** (integrado) ou no **VLC Media Player**.
 
@@ -101,8 +101,8 @@ O comando `play` permite selecionar o algoritmo de sincronismo OFDM através da 
 # Modo 1 (Padrão): Van de Beek baseline. Mais leve e econômico para a CPU:
 .\isdbtb_rx.exe play -c 23 --player
 
-# Modo 2 (Reforçado): aquisição e rastreamento de timing por correlação do prefixo cíclico,
-# estimativa inicial de CFO e ajuste de timing/SCO:
+# Modo 2 (Reforçado): Port robusto do gr-isdbt com rastreamento ativo de timing por pilotos (SP),
+# correção de desvio de frequência fracionário e inteiro (CFO) e relógio de amostragem (SCO):
 .\isdbtb_rx.exe play -c 23 --ofdm 2 --player
 ```
 
@@ -173,7 +173,7 @@ cmake -S . -B build_x64 -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DTARGET
 # 2. Compilar todos os binários e executáveis de teste:
 cmake --build build_x64 -j
 
-# 3. Executar os 20 testes unitários determinísticos:
+# 3. Executar a suíte de 22 testes determinísticos:
 ctest --test-dir build_x64 --output-on-failure -E BenchSync
 ```
 
@@ -185,6 +185,73 @@ cmake -S . -B build_x86 -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DTARGET
 # 2. Compilar todos os binários e executáveis de teste:
 cmake --build build_x86 -j
 
-# 3. Executar os 20 testes unitários determinísticos:
+# 3. Executar a suíte de 22 testes determinísticos:
 ctest --test-dir build_x86 --output-on-failure -E BenchSync
 ```
+
+---
+
+## ⚡ 5. Execução de Benchmarks Comparativos (`bench_sync`)
+
+O executável `bench_sync` compara quantitativamente o **Modo 1** (`VanDeBeekSync` baseline) e o **Modo 2** (`RobustGRISDBTSync` reforçado portado do `gr-isdbt`) sobre capturas reais de sinal RF (`samples/ch24_10s_iq.cu8` ou qualquer arquivo `.cu8` fornecido):
+
+### 5.1 Comparação Completa (com Tabela ASCII)
+```powershell
+# Execução padrão em 64 bits sobre a amostra de referência oficial:
+.\build_x64\bench_sync.exe --compare
+```
+
+*Exemplo de saída com tabela comparativa:*
+```text
+======================================================================
+ SUITE DE BENCHMARK OFDM ISDB-T/ISDB-Tb (bench_sync)
+ Amostra: samples/ch24_10s_iq.cu8
+ Modo:    COMPARE (ofdm=1 vs ofdm=2)
+ Repeticoes: 1
+======================================================================
+
+=== BENCHMARK: RESULTADO COMPARATIVO OFICIAL ===
++-------------------+--------+---------+--------+
+| Metrica           | ofdm=1 |  ofdm=2 | Melhor |
++-------------------+--------+---------+--------+
+| wall_time_s       |  4.192 | 3.813 * | ofdm=2 |
+| cpu_user_s        |  4.172 | 3.812 * | ofdm=2 |
+| cycles_per_symbol |  60458 | 38024 * | ofdm=2 |
+| peak_rss_mb       |    7.8 |     7.8 | empate |
+| heap_allocs_hot   |      0 |       0 | empate |
++-------------------+--------+---------+--------+
+| locked_time_ratio |  1.000 |   1.000 | empate |
+| sync_loss_count   |      0 |       0 | empate |
+| resync_count      |      0 |       0 | empate |
+| avg_lock_recovery |    0.0 |     0.0 | empate |
+| snr_mean_db       |  4.8 * |     4.7 | ofdm=1 |
+| valid_ts_packets  |      1 |       1 | empate |
++-------------------+--------+---------+--------+
+```
+
+### 5.2 Opções Avançadas do `bench_sync`
+
+- **Comparação Rápida por Janelas de Tempo (`--segment-of <segundos>`):**
+  Divide a amostra em blocos menores (ex: 2 ou 5 segundos) para comparar a estabilidade em intervalos curtos:
+  ```powershell
+  .\build_x64\bench_sync.exe --compare --segment-of 5
+  ```
+
+- **Média Estatística com Repetições (`--repeat <N>`):**
+  Executa $N$ iterações e calcula médias aritméticas de tempo, ciclos e uso de memória:
+  ```powershell
+  .\build_x64\bench_sync.exe --compare --repeat 3
+  ```
+
+- **Amostra IQ Customizada (`-i` / `--input <caminho>`):**
+  Avalia qualquer captura de sinal gravada pelo RTL-SDR:
+  ```powershell
+  .\build_x64\bench_sync.exe --compare -i samples/minha_captura.cu8
+  ```
+
+- **Execução Monomodo Individual (`--ofdm 1` ou `--ofdm 2`):**
+  Avalia o desempenho isolado de um algoritmo específico:
+  ```powershell
+  .\build_x64\bench_sync.exe --ofdm 1
+  .\build_x64\bench_sync.exe --ofdm 2
+  ```

@@ -93,7 +93,7 @@ static const char* state_to_string(isdbt::SyncState st) {
 }
 
 int main(int argc, char** argv) {
-    std::string input_iq = "samples/ch18_2min_iq.cu8";
+    std::string input_iq = "samples/ch24_10s_iq.cu8";
     if (argc > 1) {
         input_iq = argv[1];
     }
@@ -106,11 +106,11 @@ int main(int argc, char** argv) {
 
     fs::create_directories("tests/golden");
 
-    std::string ts_out_path    = "tests/golden/ch18_baseline_ofdm1.ts";
-    std::string state_log_path = "tests/golden/ch18_baseline_ofdm1.state.log";
-    std::string csv_path       = "tests/golden/ch18_baseline_ofdm1.rssi_snr.csv";
-    std::string stats_path     = "tests/golden/ch18_baseline_ofdm1.stats.json";
-    std::string sha_path       = "tests/golden/ch18_baseline_ofdm1.ts.sha256";
+    std::string ts_out_path    = "tests/golden/ch24_baseline_ofdm1.ts";
+    std::string state_log_path = "tests/golden/ch24_baseline_ofdm1.state.log";
+    std::string csv_path       = "tests/golden/ch24_baseline_ofdm1.rssi_snr.csv";
+    std::string stats_path     = "tests/golden/ch24_baseline_ofdm1.stats.json";
+    std::string sha_path       = "tests/golden/ch24_baseline_ofdm1.ts.sha256";
 
     std::ofstream ts_out(ts_out_path, std::ios::binary);
     std::ofstream state_log(state_log_path);

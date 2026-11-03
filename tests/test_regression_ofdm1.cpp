@@ -77,7 +77,7 @@ static std::string compute_sha256_file(const std::string& filepath) {
 int main(int argc, char** argv) {
     std::cout << "=== Teste de Regressao Bit-a-Bit --ofdm=1 (R14) ===\n";
 
-    std::string iq_path = "samples/ch18_2min_iq.cu8";
+    std::string iq_path = "samples/ch24_10s_iq.cu8";
     if (argc > 1) {
         iq_path = argv[1];
     }
@@ -89,8 +89,8 @@ int main(int argc, char** argv) {
     }
 
     // Valida SHA-256 da amostra de entrada (R16)
-    std::string expected_sample_sha = "f614eade06dcffcd6f69e10c5c0f6f44ec0d6f67d8e2459036b152f7fe431c50";
-    std::ifstream sha_file("samples/ch18_2min_iq.sha256");
+    std::string expected_sample_sha = "ac92101f279a7fd518d3648c8ac2fbef6fbb0acb5df1c5553b174b93e4db4843";
+    std::ifstream sha_file("samples/ch24_10s_iq.sha256");
     if (sha_file.is_open()) {
         std::string line;
         if (std::getline(sha_file, line)) {
@@ -107,7 +107,7 @@ int main(int argc, char** argv) {
 
     // Le hash esperado do TS
     std::string expected_ts_sha = "";
-    std::ifstream ts_sha_f("tests/golden/ch18_baseline_ofdm1.ts.sha256");
+    std::ifstream ts_sha_f("tests/golden/ch24_baseline_ofdm1.ts.sha256");
     if (ts_sha_f.is_open()) {
         std::string line;
         if (std::getline(ts_sha_f, line)) {
@@ -116,11 +116,11 @@ int main(int argc, char** argv) {
     }
 
     if (expected_ts_sha.empty()) {
-        std::cerr << "[FALHA] Golden file ch18_baseline_ofdm1.ts.sha256 nao encontrado!\n";
+        std::cerr << "[FALHA] Golden file ch24_baseline_ofdm1.ts.sha256 nao encontrado!\n";
         return 1;
     }
 
-    std::string run_ts_path = "tests/golden/ch18_current_run_ofdm1.ts";
+    std::string run_ts_path = "tests/golden/ch24_current_run_ofdm1.ts";
     std::ofstream ts_out(run_ts_path, std::ios::binary);
 
     isdbt::SyncParams params;

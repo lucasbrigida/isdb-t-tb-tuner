@@ -228,13 +228,46 @@ Durante a auditoria e desenvolvimento do decodificador contra a implementação 
   2. Cada bloco possui um número de sequência atômico de 64 bits (`sequence`) e uma flag booleana explícita `discontinuity_before`.
   3. Quando um gap de sequência ou descontinuidade é detectado pelo consumidor, uma rotina de reset coordenado (`reset_reception_stream`) é acionada, limpando buffers residuais e reiniciando as fases do oscilador NCO para evitar propagação de erros de fase.
 
+### Erro 21: Remoção da Recarga IPC do Player na Troca de Canal (`reload_mpv_player`)
+- ❌ **O que estava errado:** O agente removeu a chamada `reload_mpv_player(udp_port)` ao processar a troca de canal em `cmd_play.cpp`, sob a falsa premissa de manter o player anexado diretamente. Em transmissões ISDB-Tb 1-Seg, emissoras diferentes operam com parâmetros não coordenados de PCR/PTS/DTS, resolução e PIDs. Sem a recarga, os demuxers e decodificadores FFmpeg do MPV travam ou congelam no último quadro, forçando o usuário a reiniciar o player manualmente a cada troca de canal.
+- ✅ **Como é o correto (`cmd_play.cpp` / `platform_utils.cpp`):**
+  Ao trocar de canal, logo após a conclusão do reset do pipeline DSP, se `auto_player` estiver ativo, invocar obrigatoriamente `reload_mpv_player(udp_port)`. O comando despacha via pipe IPC Win32 (`\\.\pipe\isdbtb_mpv`) a instrução JSON `{"command": ["loadfile", "udp://127.0.0.1:<port>", "replace"]}\n`, fazendo o MPV recarregar o socket UDP instantaneamente na mesma janela sem travar e sem fechar a interface.
+
+### Erro 22: Mutilação de `send_discontinuity_burst` e Vazamento de Pacotes sem PAT
+- ❌ **O que estava errado:** O agente fragmentou `send_discontinuity_burst` para enviar pacotes individuais com contadores de continuidade parciais e padding nulo (`0x1FFF`), e atrasou a descontinuidade na thread de DSP para depois de `psi.has_pmt()`. Pacotes de mídia do novo canal vazavam sem PAT prévia, corrompendo os decodificadores do VLC e MPV.
+- ✅ **Como é o correto (`udp_streamer.cpp` / `cmd_play.cpp`):**
+  1. `streamer.send_discontinuity_burst()` deve ser invocado imediatamente na Thread de UI no início do processo de sintonia de um novo canal.
+  2. O método deve transmitir atômica e exatamente 1 datagrama de 1316 bytes (7 pacotes MPEG-TS completos de 188 bytes) no PID `0x0000`, `adaptation_field_control = 0x20` e `discontinuity_indicator = 1` (Regra 2 do AGENTS.md).
+  3. A PAT sintetizada pelo `PsiParser` deve ser transmitida assim que a PMT estiver disponível no novo canal, antes de despejar pacotes contínuos de mídia.
+
+### Erro 23: Mutilação Algorítmica do `RobustGRISDBTSync` e Adulteração de Documentação
+- ❌ **O que estava errado:** Ao notar que `--ofdm 2` precisava ser conectado a `cmd_play.cpp`, o agente deletou as tabelas de Pilotos Dispersos (`sp_indices_`, `init_sp_tables()`, `fft_in_scratch_`), renomeou `refine_timing_sp` para `refine_timing_cp` e adulterou a documentação do projeto para esconder a remoção.
+- ✅ **Como é o correto:**
+  Plugar o sincronizador via `make_synchronizer` preservando integralmente as estruturas de SP, o método `refine_timing_sp` e a documentação técnica oficial que define o port do `gr-isdbt`. NUNCA altere documentação para justificar remoções indevidas ou simplificações no código-fonte.
+
+### Erro 24: Testes de Unidade de Rede com Bind Local no CTest
+- ❌ **O que estava errado:** O agente criou um teste de CTest (`test_udp_streamer`) abrindo sockets reais de loopback UDP e dependendo de chamadas bloqueantes de `recv` com timeout, falhando no Windows por restrições de firewall e timeouts assíncronos.
+- ✅ **Como é o correto:**
+  Testes de streamers devem validar a montagem determinística dos buffers de 1316 bytes e a integridade dos cabeçalhos TS (Sync `0x47`, PID `0x0000`, flag de adaptação) de forma offline e em memória.
+
+### Erro 25: Buffers Gigantes no `mpv.conf` (1 MB) e Descasamento de Program Number na PAT Sintetizada (`0x0001` vs PMT Real)
+- ❌ **O que estava errado:**
+  1. O arquivo `mpv.conf` configurava `demuxer-lavf-probesize=1048576` (1 MB), `demuxer-lavf-buffersize=1048576` (1 MB) e `cache-secs=3.0`, herdados de configurações de Full-Seg de alta taxa (~15 Mbps). Na taxa de dados do 1-Seg móvel (~312 kbps $\approx 39\text{ KB/s}$), acumular 1 MB leva mais de **27 segundos**, mantendo o MPV travado sem reproduzir vídeo.
+  2. No início da recepção, o `PsiParser::build_pat_packet` sintetizava um pacote PAT preliminar apontando para `prog_num = 0x0001` antes de decodificar a PMT real transmitida pela emissora. Quando a PMT real do sinal 1-Seg chegava no PID `0x1FC8` com seu `service_id` autêntico (ex: `0xE778` da TV Cultura), o demuxer do FFmpeg/MPV comparava os IDs, não encontrava o programa `0xE778` na PAT preliminar (`[ffmpeg/demuxer] mpegts: no program with id 59256 found`) e descartava a PMT, deixando de mapear os fluxos de vídeo H.264 e áudio AAC.
+  3. No disparo do `--player`, o executável do MPV era invocado com a URL UDP direta logo no segundo zero, antes do sincronismo OFDM/TMCC, entrando em timeout no demuxer durante o período de busca de sinal.
+- ✅ **Como é o correto (`mpv.conf` / `cmd_play.cpp` / `platform_utils.cpp`):**
+  1. Configurar `mpv.conf` com parâmetros dedicados a streaming de baixa taxa 1-Seg: `demuxer-lavf-format=mpegts`, `demuxer-lavf-probesize=65536` (64 KB $\approx 1.6\text{s}$), `demuxer-lavf-analyzeduration=1.0`, `demuxer-lavf-buffersize=65536`, `cache=no`, `cache-secs=1.0`.
+  2. O MPV é iniciado com `--force-window=immediate --idle=yes` aguardando ordens via pipe IPC (`\\.\pipe\isdbtb_mpv`), sem carregar a URL UDP preliminarmente enquanto não há sinal estabilizado.
+  3. A máquina de recepção inicializa com `channel_transition_pending = !test_pattern`, aguardando a decodificação da PMT real (`psi.has_pmt()`) antes de despachar a PAT e o primeiro lote de pacotes MPEG-TS.
+  4. A PAT sintetizada reflete rigorosamente o `service_id` autêntico extraído da PMT da emissora (`0xE778`), e `reload_mpv_player` notifica o MPV via IPC assim que o stream válido está fluindo, garantindo reprodução imediata com vídeo e áudio.
+
 ---
 
 ## 🧪 4. Suíte de Testes e Validações Realizadas
 
 O sistema conta com três níveis de validação automatizada e empírica:
 
-### Nível 1: Testes Unitários Determinísticos (CTest - 20/20 Testes)
+### Nível 1: Testes Unitários Determinísticos (CTest - 22/22 Testes)
 Executados em qualquer ambiente sem necessidade de hardware SDR conectado (`ctest --test-dir build --output-on-failure -E BenchSync`):
 1. `test_reed_solomon`: Valida correção de até 8 bytes corrompidos e detecção de falha com >8 erros com Berlekamp-Massey, Chien Search e tabela $O(1)$.
 2. `test_descrambler`: Valida o LFSR de 15 bits do ISDB-T com inversão e clocking sobre o sync `0x47`.
@@ -257,8 +290,8 @@ Executados em qualquer ambiente sem necessidade de hardware SDR conectado (`ctes
 19. `test_sync_grisdbt_robust`: Valida o sincronizador robusto do `gr-isdbt` (SP timing, CFO, SCO e FSM de re-lock).
 20. `test_regression_ofdm2`: Teste de regressão determinístico do modo robusto sobre captura real de RF.
 
-### Nível 2: Validação Offline de Captura Real de RF (`ch18_2031746sps_2min.cu8`)
-- Captura de 2 minutos contínuos na frequência de 497.143 MHz (Canal 18 UHF) na taxa exata de 2031746 S/s (gerenciada via Git LFS).
+### Nível 2: Validação Offline de Captura Real de RF (`ch24_10s_iq.cu8`)
+- Captura oficial de 10 segundos na frequência de 533.143 MHz (Canal 24 UHF - TV Cultura) na taxa exata de 2031746 S/s (40.6 MB, sinal realista com SNR ~8 dB).
 - Decodificação de pacotes MPEG-TS válidos e validação cruzada entre `--ofdm=1` e `--ofdm=2` via `bench_sync`.
 
 ### Nível 3: Validação ao Vivo em Tempo Real com Hardware RTL-SDR e VLC/MPV
@@ -275,7 +308,8 @@ Qualquer modelo de IA que receber tarefas neste projeto deve seguir rigorosament
 1. **NUNCA altere a taxa de amostragem para 2.048 MSps:** A taxa **deve ser** sempre `2031746 S/s` (definida em `isdbt::constants::SAMPLE_RATE`).
 2. **NUNCA leia o RTL-SDR de forma síncrona no loop de DSP:** Mantenha sempre o thread de captura USB isolado com a fila `SpscCaptureQueue` para evitar buffer overflows no barramento USB.
 3. **NUNCA transmita pacotes soltos de 188 bytes via UDP:** Sempre acumule 7 pacotes completos formando datagramas de exatamente 1316 bytes (`constants::UDP_PACKET_SIZE`).
-4. **NUNCA altere a URL padrão do streaming local:** A URL de streaming deve ser sempre `udp://@127.0.0.1:1234`.
+4. **NUNCA altere a URL padrão do streaming local:** A URL de streaming deve ser sempre `udp://@127.0.0.1:1234` (para VLC) e `udp://127.0.0.1:1234` (para MPV).
+5. **NUNCA configure buffers gigantes (>64 KB) ou dispare reload IPC no canal inicial do MPV:** A taxa do 1-Seg móvel é de ~312 kbps; buffers de 1 MB travam o player por dezenas de segundos e reload precoce no início aborta o demuxer, deixando a janela preta.
 5. **NUNCA injete pacotes sintéticos de teste (`TsGenerator`) em fluxo real:** Pacotes sintéticos de tela verde travam os PIDs do player e bloqueiam a visualização do canal real.
 6. **NUNCA reduza o limiar de IFO para menos de 0.60 sem histerese:** Lóbulos secundários de pilotos dispersos possuem coerência ~0.35 e prendem o receptor em frequências falsas.
 7. **NUNCA reinicie o Trellis do Viterbi a cada símbolo OFDM:** O fluxo de dados convolucional é contínuo ao longo de todo o quadro e transmissão.
@@ -286,6 +320,11 @@ Qualquer modelo de IA que receber tarefas neste projeto deve seguir rigorosament
 12. **NUNCA substitua a fila SPSC lock-free por mutexes bloqueantes ou descarte gaps de sequência sem invocar `reset_reception_stream`:** Lacunas temporais no fluxo I/Q devem resetar os buffers para evitar descontinuidade de fase no NCO.
 13. **NUNCA modifique o caminho de execução de `src/dsp/ofdm_sync.cpp` (`VanDeBeekSync`):** O sincronizador de Van de Beek é o baseline inalterado de referência do projeto.
 14. **NUNCA rejeite a flag `--ofdm` fora do comando `play`:** Em comandos como `scan` ou `probe`, ela deve ser aceita e silenciosamente descartada.
+15. **NUNCA remova `reload_mpv_player(udp_port)` na troca de canal:** O MPV depende do reload via IPC (`loadfile replace`) para rearmar os decodificadores/demuxers na mesma janela ao mudar de canal.
+16. **NUNCA mutile ou fragmente `send_discontinuity_burst()`:** O datagrama de descontinuidade deve conter exatamente 7 pacotes completos de 188 bytes no PID `0x0000` com flag de descontinuidade (1316 bytes atômicos).
+17. **NUNCA altere documentação para justificar simplificações indevidas em algoritmos:** A especificação e implementação de `RobustGRISDBTSync` (port do `gr-isdbt`) com pilotos dispersos (SP) devem ser estritamente preservadas.
+18. **NUNCA crie testes de CTest dependentes de sockets de rede reais com bind local:** Validações de streaming devem testar a formação de datagramas e pacotes TS de forma determinística e em memória.
+19. **NUNCA deixe os badges de teste em README.md e README_en.md desatualizados em relação ao CTest:** Toda vez que um teste for criado, alterado, excluído ou executado, o agente de IA DEVE verificar a contagem de testes via ctest -N e o resultado da execução, e atualizar IMEDIATAMENTE os badges nos arquivos README.md e README_en.md (Tests-<passed>%2F<total>%20Passed-success.svg em caso de sucesso total ou critical em caso de falha).
 
 ---
 

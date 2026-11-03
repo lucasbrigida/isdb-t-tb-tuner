@@ -1,4 +1,4 @@
-# 📡 ISDB-T / ISDB-Tb Universal SDR Receiver & Real-Time Player
+﻿# 📡 ISDB-T / ISDB-Tb Universal SDR Receiver & Real-Time Player
 
 <p align="center">
   <img src="https://img.shields.io/badge/License-GPLv3-blue.svg" alt="License: GPLv3" />
@@ -6,10 +6,10 @@
   <img src="https://img.shields.io/badge/Hardware-RTL--SDR%20(RTL2832U)-red.svg" alt="RTL-SDR" />
   <img src="https://img.shields.io/badge/Platform-Windows%20(x64%20%7C%20x86)%20%7C%20Linux-brightgreen.svg" alt="Platforms" />
   <img src="https://img.shields.io/badge/Player-MPV%20Embedded-darkgreen.svg" alt="MPV Embedded" />
-  <img src="https://img.shields.io/badge/Tests-20%2F20%20Passed-success.svg" alt="CTest Passing" />
+  <img src="https://img.shields.io/badge/Tests-22%2F22%20Passed-success.svg" alt="CTest Passing" />
 </p>
 
-Receptor e decodificador digital completo de televisão aberta no padrão **ISDB-T / ISDB-Tb / SBTVD** (Brasil, Japão, Filipinas e América Latina) para dispositivos **RTL-SDR** (RTL2832U com tuners R820T/R828D/E4000). Desenvolvido em **C++ nativo de alta performance sem dependências do framework GNU Radio**, com fila de captura **SPSC lock-free** com detecção atômica de descontinuidades, **zero alocações no heap** no processamento de símbolos, **arquitetura dual de sincronismo OFDM** (baseline de Van de Beek e modo robusto com aquisição e rastreamento por prefixo cíclico, estimativa inicial de CFO, ajuste de timing/SCO e histerese de re-lock), equalização adaptativa **MMSE regularizada**, ponderação **CSI** sincronizada por linhas de retardo no decodificador Viterbi, multiplicação em $GF(2^8)$ em **$O(1)$** via tabela de 64 KB no Reed-Solomon, varredura inteligente de canais com identificação de nomes via **SDT**, **suporte nativo dual-architecture (64 bits x64 e 32 bits x86)** e **reprodutor MPV embutido com super-resolução e interpolação de movimento em tempo real**.
+Receptor e decodificador digital completo de televisão aberta no padrão **ISDB-T / ISDB-Tb / SBTVD** (Brasil, Japão, Filipinas e América Latina) para dispositivos **RTL-SDR** (RTL2832U com tuners R820T/R828D/E4000). Desenvolvido em **C++ nativo de alta performance sem dependências do framework GNU Radio**, com fila de captura **SPSC lock-free** com detecção atômica de descontinuidades, **zero alocações no heap** no processamento de símbolos, **arquitetura dual de sincronismo OFDM** (sincronizador de Van de Beek padrão e port robusto do `gr-isdbt` com rastreamento ativo de timing, CFO/SCO e histerese de re-lock), equalização adaptativa **MMSE regularizada**, ponderação **CSI** sincronizada por linhas de retardo no decodificador Viterbi, multiplicação em $GF(2^8)$ em **$O(1)$** via tabela de 64 KB no Reed-Solomon, varredura inteligente de canais com identificação de nomes via **SDT**, **suporte nativo dual-architecture (64 bits x64 e 32 bits x86)** e **reprodutor MPV embutido com super-resolução e interpolação de movimento em tempo real**.
 
 ---
 
@@ -252,8 +252,8 @@ O repositório conta com um ecossistema completo de utilitários de diagnóstico
 
 | Utilitário / Diretório | Descrição Técnica & Casos de Uso |
 | :--- | :--- |
-| **[`bench/`](bench/)** | **Suíte de Benchmark (`bench_sync`):** Mede o tempo de processamento por símbolo, uso de CPU e estabilidade de travamento entre os algoritmos OFDM sobre amostras do ar. |
-| **[`samples/`](samples/)** | **Amostras de Referência RF:** Contém a amostra oficial de 2 minutos do Canal 18 (`ch18_2031746sps_2min.cu8`) na taxa exata de 2031746 S/s para testes determinísticos (gerenciada via Git LFS). |
+| **[`bench/`](bench/)** | **Suíte de Benchmark (`bench_sync`):** Executável comparativo (`bench_sync --compare` / `--segment-of 5`) medindo ciclos/símbolo, uso de CPU, RSS e estabilidade entre algoritmos OFDM. |
+| **[`samples/`](samples/)** | **Amostras de Referência RF:** Contém a amostra oficial de 10 segundos do Canal 24 (`ch24_10s_iq.cu8`) na taxa exata de 2031746 S/s para testes determinísticos (gerenciada via Git LFS). |
 | **[`tools/zadig.exe`](tools/zadig.exe)** | Instalador portátil oficial do driver **WinUSB** (v2.9 / libwdi). Vincula o driver à `Interface 0` do RTL2832U em 1 clique. |
 | **[`tools/rtl-sdr/`](tools/rtl-sdr/)** | Conjunto completo de ferramentas e DLLs oficiais do **Osmocom RTL-SDR**: |
 | ↳ `x64/` e `x86/` | Subdiretórios dedicados com `librtlsdr.dll` e utilitários para cada arquitetura. |
@@ -323,7 +323,7 @@ isdb_t_isdb_tb_tuner_player/
 - **Taxa de Amostragem Fundamental Exata ($2031746\text{ S/s}$):** Submúltiplo exato de $1/4$ da taxa de chip do ISDB-T $F_{\text{base}} = 512/63\text{ MHz} \approx 8.126984\text{ MHz}$, garantindo $>90\%$ de correlação no prefixo cíclico e caixas de FFT perfeitamente alinhadas sem filtros de reamostragem racional.
 - **Arquitetura Dual de Sincronismo OFDM:**
   - *Modo 1 (`VanDeBeekSync`, Baseline):* Autocorrelação por prefixo cíclico com estimação de desvio fracionário de frequência (FFO) e máquina de estados tripartite (`Acquisition`, `Tracking` $\pm 4$, `LostLock`).
-  - *Modo 2 (`RobustGRISDBTSync`):* Aquisição e refinamento de timing por correlação de CP, estimativa inicial de CFO pela fase da correlação, ajuste de timing/SCO por malha PI e histerese de re-lock após símbolos consecutivos válidos.
+  - *Modo 2 (`RobustGRISDBTSync`, gr-isdbt port):* Coarse CP acquisition, active Scattered Pilot (SP) timing refinement, integer CFO estimation via TMCC, fractional CFO via SP, sampling clock offset (SCO) phase accumulation, and 3-symbol lock hysteresis.
 - **Fila de Captura USB SPSC Lock-Free (`SpscCaptureQueue`):** Ring buffer estático de 64 slots com semântica de memória acquire-release, contadores atômicos de drops e sinalização explícita de descontinuidades de sequência com resets coordenados de NCO.
 - **Zero Alocações Dinâmicas no Caminho Crítico:** Eliminação completa de `std::deque` e `std::vector::erase` nos desentrelaçadores Forney, de bits e de tempo, substituídos por `FixedDelayLine`, `DynamicDelayLine` e avanço por ponteiro deslizante (`viterbi_stream_offset_`).
 - **Equalização Adaptativa MMSE Regularizada:** Substitui o Zero-Forcing tradicional por MMSE adaptativo ($\sigma^2 = \max(10^{-5}, 0.05 \cdot P_{\text{avg}})$), evitando amplificação de ruído em vales profundos de desvanecimento.

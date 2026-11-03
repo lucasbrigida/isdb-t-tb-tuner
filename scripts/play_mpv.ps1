@@ -41,4 +41,4 @@ Write-Host "  [q] - Fechar Player"
 Write-Host "==============================================================================" -ForegroundColor Cyan
 Write-Host ""
 
-Start-Process -FilePath $MpvBin -ArgumentList @("--config-dir=$MpvConfDir", "--idle=yes", "udp://127.0.0.1:$Port?localaddr=127.0.0.1")
+Start-Process -FilePath $MpvBin -ArgumentList @("--config-dir=$MpvConfDir", "--idle=yes", "--input-ipc-server=\\.\pipe\isdbtb_mpv", "udp://127.0.0.1:$Port")

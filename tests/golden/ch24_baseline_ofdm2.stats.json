@@ -1,0 +1,19 @@
+{
+  "average_evm": 0.5843766923098054,
+  "average_snr_db": 4.670223391889043,
+  "corrected_rs_packets": 1,
+  "elapsed_seconds": 3.857641,
+  "locked_symbols": 8816,
+  "locked_time_ratio": 1.0,
+  "ofdm_mode": 2,
+  "resync_count": 0,
+  "resync_fallback": 0,
+  "resync_recovered": 0,
+  "state_transitions": 1,
+  "sync_loss_count": 0,
+  "total_blocks": 620,
+  "total_symbols": 8816,
+  "ts_sha256": "91efb155702e39ff7036f3f8931432f36905a2b7ac8ac4cbdadd5f3069fb1db2",
+  "uncorrectable_rs_packets": 1910,
+  "valid_ts_packets": 1
+}

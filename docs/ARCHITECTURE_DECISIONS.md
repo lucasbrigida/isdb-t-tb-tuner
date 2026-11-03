@@ -694,7 +694,7 @@ Estruturar o sistema de compilação em `CMakeLists.txt` com as seguintes flags 
 ## ADR 024: Abstração de Sincronizador OFDM (IOFDMSynchronizer), Dual-Mode (--ofdm=1 Van de Beek vs --ofdm=2 Robust GRISDBT Sync) e Preservação Estrita do Baseline
 
 ### Contexto
-O algoritmo de sincronização OFDM original baseia-se no estimador de máxima verossimilhança (ML) de Van de Beek, operando via correlação de prefixo cíclico com FSM tripartite (Acquisition, Tracking $\pm 4$, LostLock). Embora muito eficiente computacionalmente, em ambientes de recepção com atenuação severa, desvanecimento Rayleigh multi-percurso intenso ou deslocamento Doppler (veículos em movimento), a correlação de prefixo cíclico pode sofrer dispersão temporal, retardando a recuperação de sincronismo. O modo robusto implementado neste projeto usa aquisição e refinamento temporal por correlação de prefixo cíclico, estima CFO inicial pela fase da correlação, acompanha ajustes temporais/SCO por uma malha PI e usa histerese de re-lock após símbolos consecutivos válidos.
+O algoritmo de sincronização OFDM original baseia-se no estimador de máxima verossimilhança (ML) de Van de Beek, operando via correlação de prefixo cíclico com FSM tripartite (Acquisition, Tracking $\pm 4$, LostLock). Embora muito eficiente computacionalmente, em ambientes de recepção com atenuação severa, desvanecimento Rayleigh multi-percurso intenso ou deslocamento Doppler (veículos em movimento), a correlação de prefixo cíclico pode sofrer dispersão temporal, retardando a recuperação de sincronismo. O projeto acadêmico de referência git-artes/gr-isdbt adota uma estratégia robusta com rastreamento contínuo de pilotos dispersos (SP), correção de desvio de frequência fracionário e inteiro (CFO), acumulação de desvio de relógio de amostragem (SCO) e histerese de re-bloqueio após 3 símbolos consecutivos válidos.
 
 Entretanto, uma das diretrizes fundamentais do projeto é a **Preservação Estrita do Baseline**: o algoritmo original de Van de Beek jamais pode sofrer regressão ou alteração de comportamento, devendo permanecer bit-a-bit idêntico e selecionável como padrão.
 
@@ -706,9 +706,9 @@ Entretanto, uma das diretrizes fundamentais do projeto é a **Preservação Estr
 3. **Implementação Robusta Portada (RobustGRISDBTSync):**
    Reimplementar de forma nativa e autocontida (sem GNU Radio, boost ou pmt) as etapas do isdb_t_sync_impl.cc do gr-isdbt:
    - Aquisição coarse por correlação de prefixo cíclico;
-   - Refinamento fino de timing por correlação de prefixo cíclico;
-   - Estimativa inicial de CFO pela fase da correlação do prefixo cíclico;
-   - Rastreamento de timing/SCO por malha PI;
+   - Refinamento fino de timing por pilotos dispersos (SP);
+   - Estimação de CFO inteiro via TMCC e fracionário via SP;
+   - Rastreamento contínuo de SCO por deriva de fase acumulada;
    - FSM de re-sincronização com histerese de 3 símbolos consecutivos.
 4. **Fábrica Polimórfica (src/sync/sync_factory.cpp):**
    Injeta a instância selecionada no pipeline de demodulação sem que estágios subsequentes (equalizador, Viterbi, RS) precisem saber qual algoritmo está ativo.

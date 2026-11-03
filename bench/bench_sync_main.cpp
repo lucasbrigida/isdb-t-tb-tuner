@@ -15,7 +15,7 @@ int main(int argc, char** argv) {
     bool compare_mode = false;
     int repeat_count = 1;
     double segment_sec = 0.0;
-    std::string iq_path = "samples/ch18_2min_iq.cu8";
+    std::string iq_path = "samples/ch24_10s_iq.cu8";
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -44,7 +44,7 @@ int main(int argc, char** argv) {
                       << "  --compare            Compara ofdm 1 vs ofdm 2 com tabela ASCII\n"
                       << "  --repeat <N>         Executa N repeticoes e calcula media (ex: --repeat 5)\n"
                       << "  --segment-of <seg>   Segmenta amostra em janelas temporais de <seg> segundos\n"
-                      << "  --input <caminho>    Caminho da amostra IQ (padrao samples/ch18_2min_iq.cu8)\n";
+                      << "  --input <caminho>    Caminho da amostra IQ (padrao samples/ch24_10s_iq.cu8)\n";
             return 0;
         }
     }
@@ -80,7 +80,7 @@ int main(int argc, char** argv) {
     // Modo comparativo (--compare)
     if (segment_sec > 0.0) {
         // R21: Comparativo segmentado por tempo
-        double total_dur_s = 120.0;
+        double total_dur_s = 10.0;
         int num_segments = static_cast<int>(total_dur_s / segment_sec);
         std::cout << "[INFO] Executando comparativo em " << num_segments << " janelas de " << segment_sec << "s...\n";
 
