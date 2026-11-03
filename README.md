@@ -63,9 +63,9 @@ Se você deseja apenas sintonizar e assistir à TV Digital no seu computador com
 
 Baixe o arquivo `.zip` da release para a arquitetura do seu sistema operacional:
 
-- 📦 **Windows x64 (64 bits):** [`releases/windows/20261102_v1.0.0_win64.zip`](releases/windows/20261102_v1.0.0_win64.zip) _(ou na aba [Releases do GitHub](../../releases))_
+- 📦 **Windows x64 (64 bits):** na aba [Releases do GitHub](../../releases)
   - Contém binários nativos de 64 bits, DLLs do RTL-SDR x64, Zadig e MPV portátil de 64 bits.
-- 📦 **Windows x86 (32 bits):** [`releases/windows/20261102_v1.0.0_win32.zip`](releases/windows/20261102_v1.0.0_win32.zip) _(ou na aba [Releases do GitHub](../../releases))_
+- 📦 **Windows x86 (32 bits):** na aba [Releases do GitHub](../../releases)
   - Contém binários nativos de 32 bits, DLLs oficiais de 32 bits, Zadig e MPV oficial de 32 bits (`i686`).
 - Descompacte o arquivo `.zip` em qualquer pasta do seu computador. Todos os componentes já estão inclusos e prontos para uso.
 
@@ -79,7 +79,7 @@ Para que o decodificador converse diretamente com o chip RTL2832U:
 4. No menu suspenso, selecione **`Bulk-In, Interface (Interface 0)`** _(ou `RTL2832U` / `RTL2838UHIDIR`)_.
    > ⚠️ **Atenção:** Se houver `Interface 0` e `Interface 1`, selecione **sempre a `Interface 0`** (o barramento de alta velocidade do sinal de RF; a Interface 1 serve apenas para o controle remoto infravermelho).
 5. Certifique-se de que o driver alvo à direita da seta seja **`WinUSB`** e clique em **`Install Driver`** (ou `Replace Driver`).
-6. Aguarde a mensagem de confirmação: *"The driver was installed successfully"*. O dispositivo está pronto!
+6. Aguarde a mensagem de confirmação: _"The driver was installed successfully"_. O dispositivo está pronto!
 
 ### 1.3 Comandos Essenciais da CLI
 
@@ -107,6 +107,7 @@ Abra o PowerShell ou Prompt de Comando (CMD) na pasta descompactada:
 ```
 
 #### 📶 Escolha do Algoritmo de Sincronismo (`--ofdm <1|2>`):
+
 O subcomando `play` permite escolher o algoritmo de sincronização OFDM através da flag `--ofdm`:
 
 ```text
@@ -139,14 +140,14 @@ O reprodutor MPV embutido inclui um pipeline gráfico pré-configurado (`mpv.con
 - **Debanding Dinâmico:** Elimina artefatos de compressão e blocos de cor típicos do vídeo H.264 em baixa taxa de bits.
 - **Interpolação de Movimento (`display-resample`):** Sincroniza a taxa do vídeo com a frequência de atualização do seu monitor (60Hz, 120Hz, 144Hz ou 240Hz), eliminando qualquer engasgo (_judder_).
 
-| Tecla de Atalho | Ação no Player MPV |
-| :---: | :--- |
-| **`f`** | Alternar modo **Tela Cheia** (_Fullscreen_) |
-| **`i`** | Exibir painel OSD com estatísticas em tempo real, resolução e taxa de quadros |
-| **`d`** | Ativar / Desativar o filtro de Deband |
-| **`m`** | Ativar / Desativar mudo (_Mute_) |
-| **`9` / `0`** | Diminuir / Aumentar volume |
-| **`q`** | Fechar o player |
+| Tecla de Atalho | Ação no Player MPV                                                            |
+| :-------------: | :---------------------------------------------------------------------------- |
+|     **`f`**     | Alternar modo **Tela Cheia** (_Fullscreen_)                                   |
+|     **`i`**     | Exibir painel OSD com estatísticas em tempo real, resolução e taxa de quadros |
+|     **`d`**     | Ativar / Desativar o filtro de Deband                                         |
+|     **`m`**     | Ativar / Desativar mudo (_Mute_)                                              |
+|  **`9` / `0`**  | Diminuir / Aumentar volume                                                    |
+|     **`q`**     | Fechar o player                                                               |
 
 ---
 
@@ -173,6 +174,7 @@ Para compilação nativa no Windows com máxima velocidade e sem a sobrecarga de
 No terminal do Windows com ambiente MinGW-w64 (ex: `w64devkit`):
 
 #### Compilação para 64 bits (x64):
+
 ```powershell
 # 1. Configurar o projeto com CMake para 64 bits e sincronizador robusto habilitado:
 cmake -S . -B build_x64 -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DTARGET_ARCH=x64 -DISDBT_ENABLE_GRISDBT_SYNC=ON
@@ -182,6 +184,7 @@ cmake --build build_x64 -j
 ```
 
 #### Compilação para 32 bits (x86):
+
 ```powershell
 # 1. Configurar o projeto com CMake para 32 bits com aceleração SSE2:
 cmake -S . -B build_x86 -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DTARGET_ARCH=x86 -DISDBT_ENABLE_GRISDBT_SYNC=ON
@@ -191,6 +194,7 @@ cmake --build build_x86 -j
 ```
 
 #### Opções de Compilação no CMake
+
 - **`-DTARGET_ARCH=x64` / `-DTARGET_ARCH=x86`** _(Padrão: `auto`)_: Define a arquitetura do binário; GCC/Clang recebem `-m64` ou `-m32 -msse2 -mfpmath=sse`, enquanto MSVC deve ser configurado com `-A x64` ou `-A Win32`.
 - **`-DISDBT_ENABLE_GRISDBT_SYNC=ON`** _(Padrão: OFF)_: Habilita o algoritmo de sincronização robusto do `gr-isdbt` (`--ofdm 2` ou `--ofdm=2`).
 - **`-DCMAKE_BUILD_TYPE=Release`**: Ativa otimização `-O3 -DNDEBUG` (GCC/Clang) ou `/O2 /DNDEBUG` (MSVC), desativando assertions em runtime.
@@ -250,22 +254,22 @@ O script monta os arquivos binários, DLLs, Zadig e MPV em `releases/windows/yyy
 
 O repositório conta com um ecossistema completo de utilitários de diagnóstico de hardware, benchmarking e amostras reais de sinal de RF:
 
-| Utilitário / Diretório | Descrição Técnica & Casos de Uso |
-| :--- | :--- |
-| **[`bench/`](bench/)** | **Suíte de Benchmark (`bench_sync`):** Executável comparativo (`bench_sync --compare` / `--segment-of 5`) medindo ciclos/símbolo, uso de CPU, RSS e estabilidade entre algoritmos OFDM. |
-| **[`samples/`](samples/)** | **Amostras de Referência RF:** Contém a amostra oficial de 10 segundos do Canal 24 (`ch24_10s_iq.cu8`) na taxa exata de 2031746 S/s para testes determinísticos (gerenciada via Git LFS). |
-| **[`tools/zadig.exe`](tools/zadig.exe)** | Instalador portátil oficial do driver **WinUSB** (v2.9 / libwdi). Vincula o driver à `Interface 0` do RTL2832U em 1 clique. |
-| **[`tools/rtl-sdr/`](tools/rtl-sdr/)** | Conjunto completo de ferramentas e DLLs oficiais do **Osmocom RTL-SDR**: |
-| ↳ `x64/` e `x86/` | Subdiretórios dedicados com `librtlsdr.dll` e utilitários para cada arquitetura. |
-| ↳ `rtl_test.exe` | **Diagnóstico de Estabilidade USB:** Testa a largura de banda do barramento USB e travamento de PLL do tuner na taxa exata (2031746 S/s):<br>`.\tools\rtl-sdr\x86\rtl_test.exe -s 2031746 -t` |
-| ↳ `rtl_sdr.exe` | **Gravador de RF I/Q:** Captura amostras brutas de RF para arquivos binários `.raw`/`.cu8` para simulação offline. |
-| ↳ `rtl_power.exe` | **Analisador de Espectro FFT:** Mede a densidade espectral e o piso de ruído térmico em toda a faixa de UHF (470 a 806 MHz). |
-| ↳ `rtl_tcp.exe` | **Servidor de Streaming TCP:** Transmite dados I/Q digitalizados através de sockets de rede para processamento remoto. |
-| **[`tools/mpv/`](tools/mpv/)** | Reprodutor oficial **MPV portátil** segregado simetricamente por arquitetura: |
-| ↳ `x64/` | Reprodutor MPV portátil de 64 bits integrado com shaders de upscaling em tempo real. |
-| ↳ `x86/` | Reprodutor oficial MPV portátil (i686 32 bits) para máxima compatibilidade com hardware legado. |
-| **[`tools/calibrate_ppm.py`](tools/calibrate_ppm.py)** | **Calibração de PPM:** Ferramenta Python para estimativa precisa do erro de oscilador local em 2031746 S/s. |
-| **[`tools/quick_rf_scan.py`](tools/quick_rf_scan.py)** | **Varredura Rápida de RF:** Varre rapidamente o espectro UHF (canais 14 a 45) reportando níveis de sinal. |
+| Utilitário / Diretório                                 | Descrição Técnica & Casos de Uso                                                                                                                                                              |
+| :----------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **[`bench/`](bench/)**                                 | **Suíte de Benchmark (`bench_sync`):** Executável comparativo (`bench_sync --compare` / `--segment-of 5`) medindo ciclos/símbolo, uso de CPU, RSS e estabilidade entre algoritmos OFDM.       |
+| **[`samples/`](samples/)**                             | **Amostras de Referência RF:** Contém a amostra oficial de 10 segundos do Canal 24 (`ch24_10s_iq.cu8`) na taxa exata de 2031746 S/s para testes determinísticos (gerenciada via Git LFS).     |
+| **[`tools/zadig.exe`](tools/zadig.exe)**               | Instalador portátil oficial do driver **WinUSB** (v2.9 / libwdi). Vincula o driver à `Interface 0` do RTL2832U em 1 clique.                                                                   |
+| **[`tools/rtl-sdr/`](tools/rtl-sdr/)**                 | Conjunto completo de ferramentas e DLLs oficiais do **Osmocom RTL-SDR**:                                                                                                                      |
+| ↳ `x64/` e `x86/`                                      | Subdiretórios dedicados com `librtlsdr.dll` e utilitários para cada arquitetura.                                                                                                              |
+| ↳ `rtl_test.exe`                                       | **Diagnóstico de Estabilidade USB:** Testa a largura de banda do barramento USB e travamento de PLL do tuner na taxa exata (2031746 S/s):<br>`.\tools\rtl-sdr\x86\rtl_test.exe -s 2031746 -t` |
+| ↳ `rtl_sdr.exe`                                        | **Gravador de RF I/Q:** Captura amostras brutas de RF para arquivos binários `.raw`/`.cu8` para simulação offline.                                                                            |
+| ↳ `rtl_power.exe`                                      | **Analisador de Espectro FFT:** Mede a densidade espectral e o piso de ruído térmico em toda a faixa de UHF (470 a 806 MHz).                                                                  |
+| ↳ `rtl_tcp.exe`                                        | **Servidor de Streaming TCP:** Transmite dados I/Q digitalizados através de sockets de rede para processamento remoto.                                                                        |
+| **[`tools/mpv/`](tools/mpv/)**                         | Reprodutor oficial **MPV portátil** segregado simetricamente por arquitetura:                                                                                                                 |
+| ↳ `x64/`                                               | Reprodutor MPV portátil de 64 bits integrado com shaders de upscaling em tempo real.                                                                                                          |
+| ↳ `x86/`                                               | Reprodutor oficial MPV portátil (i686 32 bits) para máxima compatibilidade com hardware legado.                                                                                               |
+| **[`tools/calibrate_ppm.py`](tools/calibrate_ppm.py)** | **Calibração de PPM:** Ferramenta Python para estimativa precisa do erro de oscilador local em 2031746 S/s.                                                                                   |
+| **[`tools/quick_rf_scan.py`](tools/quick_rf_scan.py)** | **Varredura Rápida de RF:** Varre rapidamente o espectro UHF (canais 14 a 45) reportando níveis de sinal.                                                                                     |
 
 ### 2.6 Mapa da Arquitetura do Código
 
@@ -322,8 +326,8 @@ isdb_t_isdb_tb_tuner_player/
 
 - **Taxa de Amostragem Fundamental Exata ($2031746\text{ S/s}$):** Submúltiplo exato de $1/4$ da taxa de chip do ISDB-T $F_{\text{base}} = 512/63\text{ MHz} \approx 8.126984\text{ MHz}$, garantindo $>90\%$ de correlação no prefixo cíclico e caixas de FFT perfeitamente alinhadas sem filtros de reamostragem racional.
 - **Arquitetura Dual de Sincronismo OFDM:**
-  - *Modo 1 (`VanDeBeekSync`, Baseline):* Autocorrelação por prefixo cíclico com estimação de desvio fracionário de frequência (FFO) e máquina de estados tripartite (`Acquisition`, `Tracking` $\pm 4$, `LostLock`).
-  - *Modo 2 (`RobustGRISDBTSync`, gr-isdbt port):* Coarse CP acquisition, active Scattered Pilot (SP) timing refinement, integer CFO estimation via TMCC, fractional CFO via SP, sampling clock offset (SCO) phase accumulation, and 3-symbol lock hysteresis.
+  - _Modo 1 (`VanDeBeekSync`, Baseline):_ Autocorrelação por prefixo cíclico com estimação de desvio fracionário de frequência (FFO) e máquina de estados tripartite (`Acquisition`, `Tracking` $\pm 4$, `LostLock`).
+  - _Modo 2 (`RobustGRISDBTSync`, gr-isdbt port):_ Coarse CP acquisition, active Scattered Pilot (SP) timing refinement, integer CFO estimation via TMCC, fractional CFO via SP, sampling clock offset (SCO) phase accumulation, and 3-symbol lock hysteresis.
 - **Fila de Captura USB SPSC Lock-Free (`SpscCaptureQueue`):** Ring buffer estático de 64 slots com semântica de memória acquire-release, contadores atômicos de drops e sinalização explícita de descontinuidades de sequência com resets coordenados de NCO.
 - **Zero Alocações Dinâmicas no Caminho Crítico:** Eliminação completa de `std::deque` e `std::vector::erase` nos desentrelaçadores Forney, de bits e de tempo, substituídos por `FixedDelayLine`, `DynamicDelayLine` e avanço por ponteiro deslizante (`viterbi_stream_offset_`).
 - **Equalização Adaptativa MMSE Regularizada:** Substitui o Zero-Forcing tradicional por MMSE adaptativo ($\sigma^2 = \max(10^{-5}, 0.05 \cdot P_{\text{avg}})$), evitando amplificação de ruído em vales profundos de desvanecimento.
@@ -335,13 +339,13 @@ isdb_t_isdb_tb_tuner_player/
 
 Para formulações matemáticas detalhadas, decisões de projeto e aprofundamento técnico, consulte os documentos na pasta [`docs/`](docs/):
 
-| Documento | Conteúdo & Finalidade |
-| :--- | :--- |
-| 🏛️ [`docs/ARCHITECTURE_DECISIONS.md`](docs/ARCHITECTURE_DECISIONS.md) | **Registros de Decisões de Arquitetura (ADR 001 a 025):** Histórico completo de todos os algoritmos avaliados, introduzidos e substituídos com justificativas matemáticas formais. |
-| 📖 [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) | **Guia do Usuário:** Instruções detalhadas de uso, guia de sintonia fina com `--ofdm`, calibração de ganho de RF e solução de problemas. |
-| 📐 [`docs/blueprint_isdbt_decoder.md`](docs/blueprint_isdbt_decoder.md) | **Blueprint de Engenharia ISDB-T:** Especificações das normas ABNT NBR 15601/15603 e ARIB STD-B31, diagramas de desentrelaçadores e estruturas de quadro. |
-| 🤖 [`AGENTS.md`](AGENTS.md) | **Guia de Orientação para Agentes de IA:** Invariantes de código ("Não Quebre"), catálogo histórico de 20 erros corrigidos e diretrizes absolutas de conformidade. |
-| 📊 [`docs/samples/README.md`](docs/samples/README.md) | **Documentação das Amostras RF de Referência:** Metodologia de gravação do Canal 18, parâmetros físicos e hashes de validação. |
+| Documento                                                               | Conteúdo & Finalidade                                                                                                                                                              |
+| :---------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 🏛️ [`docs/ARCHITECTURE_DECISIONS.md`](docs/ARCHITECTURE_DECISIONS.md)   | **Registros de Decisões de Arquitetura (ADR 001 a 025):** Histórico completo de todos os algoritmos avaliados, introduzidos e substituídos com justificativas matemáticas formais. |
+| 📖 [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md)                           | **Guia do Usuário:** Instruções detalhadas de uso, guia de sintonia fina com `--ofdm`, calibração de ganho de RF e solução de problemas.                                           |
+| 📐 [`docs/blueprint_isdbt_decoder.md`](docs/blueprint_isdbt_decoder.md) | **Blueprint de Engenharia ISDB-T:** Especificações das normas ABNT NBR 15601/15603 e ARIB STD-B31, diagramas de desentrelaçadores e estruturas de quadro.                          |
+| 🤖 [`AGENTS.md`](AGENTS.md)                                             | **Guia de Orientação para Agentes de IA:** Invariantes de código ("Não Quebre"), catálogo histórico de 20 erros corrigidos e diretrizes absolutas de conformidade.                 |
+| 📊 [`docs/samples/README.md`](docs/samples/README.md)                   | **Documentação das Amostras RF de Referência:** Metodologia de gravação do Canal 18, parâmetros físicos e hashes de validação.                                                     |
 
 ---
 

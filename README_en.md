@@ -63,9 +63,9 @@ If you simply want to tune and watch digital TV on your computer with an RTL-SDR
 
 Download the latest portable release archive for your operating system architecture:
 
-- 📦 **Windows x64 (64-bit):** [`releases/windows/20261102_v1.0.0_win64.zip`](releases/windows/20261102_v1.0.0_win64.zip) _(or from [GitHub Releases](../../releases))_
+- 📦 **Windows x64 (64-bit):** from [GitHub Releases](../../releases)
   - Contains 64-bit native binaries, 64-bit RTL-SDR runtime DLLs, Zadig, and 64-bit portable MPV player.
-- 📦 **Windows x86 (32-bit):** [`releases/windows/20261102_v1.0.0_win32.zip`](releases/windows/20261102_v1.0.0_win32.zip) _(or from [GitHub Releases](../../releases))_
+- 📦 **Windows x86 (32-bit):** from [GitHub Releases](../../releases)
   - Contains 32-bit native binaries, official 32-bit RTL-SDR DLLs, Zadig, and official 32-bit MPV player (`i686`).
 - Extract the `.zip` archive to any folder on your computer. All required binaries, runtime DLLs, the Zadig utility, and the embedded MPV player with custom shaders are included out of the box.
 
@@ -107,6 +107,7 @@ Open PowerShell or the Command Prompt (CMD) in the extracted folder:
 ```
 
 #### 📶 Choosing the Synchronization Algorithm (`--ofdm <1|2>`):
+
 The `play` subcommand supports two OFDM synchronization algorithms via the `--ofdm` flag:
 
 ```text
@@ -172,6 +173,7 @@ For native Windows compilation with maximum speed and without the bloat of heavy
 In a Windows terminal with MinGW-w64 (e.g. `w64devkit`):
 
 #### 64-bit Build (x64):
+
 ```powershell
 # 1. Configure CMake for 64-bit Release with robust gr-isdbt sync enabled:
 cmake -S . -B build_x64 -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DTARGET_ARCH=x64 -DISDBT_ENABLE_GRISDBT_SYNC=ON
@@ -181,6 +183,7 @@ cmake --build build_x64 -j
 ```
 
 #### 32-bit Build (x86):
+
 ```powershell
 # 1. Configure CMake for 32-bit Release with SSE2 math acceleration:
 cmake -S . -B build_x86 -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DTARGET_ARCH=x86 -DISDBT_ENABLE_GRISDBT_SYNC=ON
@@ -190,6 +193,7 @@ cmake --build build_x86 -j
 ```
 
 #### CMake Build Flags & Optimization Options
+
 - **`-DTARGET_ARCH=x64` / `-DTARGET_ARCH=x86`** _(Default: `auto`)_: Sets target architecture; GCC/Clang receive `-m64` or `-m32 -msse2 -mfpmath=sse`, while MSVC must be configured with `-A x64` or `-A Win32`.
 - **`-DISDBT_ENABLE_GRISDBT_SYNC=ON`** _(Default: OFF)_: Enables compilation of the robust `gr-isdbt` OFDM synchronization engine (`--ofdm 2` or `--ofdm=2`).
 - **`-DCMAKE_BUILD_TYPE=Release`**: Enforces `-O3 -DNDEBUG` (GCC/Clang) or `/O2 /DNDEBUG` (MSVC), stripping runtime assertions and maximizing loop unrolling.
@@ -249,22 +253,22 @@ The script stages the binaries, DLLs, Zadig, architecture-specific embedded MPV,
 
 The repository hosts a complete ecosystem of standalone tools and reference utilities for RF bench testing, USB hardware diagnosis, and high-performance playback:
 
-| Utility / Directory | Technical Description & Developer Use Cases |
-| :--- | :--- |
-| **[`bench/`](bench/)** | **Benchmark Suite (`bench_sync`):** Comparative benchmark tool (`bench_sync --compare` / `--segment-of 5`) measuring cycles/symbol, CPU usage, RSS, and stability across OFDM algorithms. |
-| **[`samples/`](samples/)** | **RF Reference Captures:** Contains the official 10-second Channel 24 reference dataset (`ch24_10s_iq.cu8`) sampled at exact 2031746 S/s for deterministic regression testing (managed via Git LFS). |
-| **[`tools/zadig.exe`](tools/zadig.exe)** | Official portable **WinUSB** driver installer (v2.9 / libwdi). Links the WinUSB driver to `Interface 0` of the RTL2832U device with 1 click. |
-| **[`tools/rtl-sdr/`](tools/rtl-sdr/)** | Complete collection of official **Osmocom RTL-SDR** diagnostic binaries and runtime libraries: |
-| ↳ `x64/` & `x86/` | Dedicated architecture folders containing 64-bit and 32-bit `librtlsdr.dll` and diagnostic tools. |
-| ↳ `rtl_test.exe` | **USB Stability & Benchmark Tool:** Tests USB bus bandwidth and tuner PLL lock stability at the exact ISDB-T sampling rate (2031746 S/s):<br>`.\tools\rtl-sdr\x86\rtl_test.exe -s 2031746 -t` |
-| ↳ `rtl_sdr.exe` | **Raw RF I/Q Recorder:** Captures raw RF samples directly from the air to `.raw` binary files for offline simulation. |
-| ↳ `rtl_power.exe` | **FFT Spectrum Analyzer:** Measures broadband RF power spectral density and thermal noise floor across the entire UHF broadcast band (470 to 806 MHz). |
-| ↳ `rtl_tcp.exe` | **Network I/Q Streaming Server:** Streams raw digitized I/Q data over TCP/IP sockets for remote SDR processing. |
-| **[`tools/mpv/`](tools/mpv/)** | Official **portable MPV player** symmetrically segregated by architecture: |
-| ↳ `x64/` | 64-bit portable MPV player integrated with real-time upscaling shaders. |
-| ↳ `x86/` | Official 32-bit (i686) portable MPV player for legacy hardware compatibility. |
-| **[`tools/calibrate_ppm.py`](tools/calibrate_ppm.py)** | **PPM Calibration:** Python tool for local oscillator PPM offset calibration at 2031746 S/s. |
-| **[`tools/quick_rf_scan.py`](tools/quick_rf_scan.py)** | **Quick RF Spectrum Check:** Fast spectrum scanner across UHF channels 14 to 45 reporting RSSI levels. |
+| Utility / Directory                                    | Technical Description & Developer Use Cases                                                                                                                                                          |
+| :----------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **[`bench/`](bench/)**                                 | **Benchmark Suite (`bench_sync`):** Comparative benchmark tool (`bench_sync --compare` / `--segment-of 5`) measuring cycles/symbol, CPU usage, RSS, and stability across OFDM algorithms.            |
+| **[`samples/`](samples/)**                             | **RF Reference Captures:** Contains the official 10-second Channel 24 reference dataset (`ch24_10s_iq.cu8`) sampled at exact 2031746 S/s for deterministic regression testing (managed via Git LFS). |
+| **[`tools/zadig.exe`](tools/zadig.exe)**               | Official portable **WinUSB** driver installer (v2.9 / libwdi). Links the WinUSB driver to `Interface 0` of the RTL2832U device with 1 click.                                                         |
+| **[`tools/rtl-sdr/`](tools/rtl-sdr/)**                 | Complete collection of official **Osmocom RTL-SDR** diagnostic binaries and runtime libraries:                                                                                                       |
+| ↳ `x64/` & `x86/`                                      | Dedicated architecture folders containing 64-bit and 32-bit `librtlsdr.dll` and diagnostic tools.                                                                                                    |
+| ↳ `rtl_test.exe`                                       | **USB Stability & Benchmark Tool:** Tests USB bus bandwidth and tuner PLL lock stability at the exact ISDB-T sampling rate (2031746 S/s):<br>`.\tools\rtl-sdr\x86\rtl_test.exe -s 2031746 -t`        |
+| ↳ `rtl_sdr.exe`                                        | **Raw RF I/Q Recorder:** Captures raw RF samples directly from the air to `.raw` binary files for offline simulation.                                                                                |
+| ↳ `rtl_power.exe`                                      | **FFT Spectrum Analyzer:** Measures broadband RF power spectral density and thermal noise floor across the entire UHF broadcast band (470 to 806 MHz).                                               |
+| ↳ `rtl_tcp.exe`                                        | **Network I/Q Streaming Server:** Streams raw digitized I/Q data over TCP/IP sockets for remote SDR processing.                                                                                      |
+| **[`tools/mpv/`](tools/mpv/)**                         | Official **portable MPV player** symmetrically segregated by architecture:                                                                                                                           |
+| ↳ `x64/`                                               | 64-bit portable MPV player integrated with real-time upscaling shaders.                                                                                                                              |
+| ↳ `x86/`                                               | Official 32-bit (i686) portable MPV player for legacy hardware compatibility.                                                                                                                        |
+| **[`tools/calibrate_ppm.py`](tools/calibrate_ppm.py)** | **PPM Calibration:** Python tool for local oscillator PPM offset calibration at 2031746 S/s.                                                                                                         |
+| **[`tools/quick_rf_scan.py`](tools/quick_rf_scan.py)** | **Quick RF Spectrum Check:** Fast spectrum scanner across UHF channels 14 to 45 reporting RSSI levels.                                                                                               |
 
 ### 2.6 Codebase Architecture Map
 
@@ -321,8 +325,8 @@ isdb_t_isdb_tb_tuner_player/
 
 - **Exact Fundamental Sampling Rate ($2031746\text{ S/s}$):** Exactly $1/4$ of the ISDB-T chip rate $F_{base} = 512/63\text{ MHz} \approx 8.126984\text{ MHz}$, ensuring $>90\%$ cyclic prefix correlation and perfectly aligned FFT bins without rational resampling filters.
 - **Dual-Engine OFDM Synchronization:**
-  - *Mode 1 (`VanDeBeekSync`, Baseline):* Sliding cyclic prefix autocorrelation with fractional frequency offset (FFO) estimation and three-state FSM (`Acquisition`, `Tracking` $\pm 4$, `LostLock`).
-  - *Mode 2 (`RobustGRISDBTSync`, gr-isdbt port):* Coarse CP acquisition, active Scattered Pilot (SP) timing refinement, integer CFO estimation via TMCC, fractional CFO via SP, sampling clock offset (SCO) phase accumulation, and 3-symbol lock hysteresis.
+  - _Mode 1 (`VanDeBeekSync`, Baseline):_ Sliding cyclic prefix autocorrelation with fractional frequency offset (FFO) estimation and three-state FSM (`Acquisition`, `Tracking` $\pm 4$, `LostLock`).
+  - _Mode 2 (`RobustGRISDBTSync`, gr-isdbt port):_ Coarse CP acquisition, active Scattered Pilot (SP) timing refinement, integer CFO estimation via TMCC, fractional CFO via SP, sampling clock offset (SCO) phase accumulation, and 3-symbol lock hysteresis.
 - **Lock-Free SPSC USB Capture Queue (`SpscCaptureQueue`):** Static 64-slot ring buffer with acquire-release memory semantics, atomic drop counters, and explicit sequence gap detection triggering coordinated NCO resets.
 - **Zero Dynamic Allocations in Hot Path:** Complete elimination of `std::deque` and `std::vector::erase` across time, bit, and Forney deinterleavers, replaced with `FixedDelayLine`, `DynamicDelayLine`, and offset sliding (`viterbi_stream_offset_`).
 - **Regularized MMSE Channel Equalization:** Replaces traditional Zero-Forcing with adaptive MMSE ($\sigma^2 = \max(10^{-5}, 0.05 \cdot P_{\text{avg}})$), preventing severe noise amplification in deep fading nulls.
@@ -334,13 +338,13 @@ isdb_t_isdb_tb_tuner_player/
 
 For detailed mathematical formulations, architectural trade-offs, and deep dives, refer to the documents inside the [`docs/`](docs/) directory:
 
-| Document | Content & Purpose |
-| :--- | :--- |
-| 🏛️ [`docs/ARCHITECTURE_DECISIONS.md`](docs/ARCHITECTURE_DECISIONS.md) | **Architecture Decision Records (ADR 001 to 025):** Complete history of all algorithms used and replaced (IOFDMSynchronizer, Dual-Arch CMake, Lock-Free SPSC, Zero-Allocation DelayLines, 128-Centered CSI, 3-State OFDM Sync, O(1) GF Table, IPO/LTO, MMSE, Two-Pass Scan, MPV Job Object, 1316-byte UDP MTU alignment, and bug fixes against `gr-isdbt`) with their full mathematical justifications. |
-| 📖 [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) | **In-Depth User Guide:** Step-by-step setup instructions, advanced CLI options, `--ofdm` tuning guide, manual RF gain tuning, and troubleshooting FAQ. |
-| 📐 [`docs/blueprint_isdbt_decoder.md`](docs/blueprint_isdbt_decoder.md) | **ISDB-T Engineering Blueprint:** Standard specifications (ABNT NBR 15601/15603 and ARIB STD-B31), interleavers, and frame structures. |
-| 🤖 [`AGENTS.md`](AGENTS.md) | **AI Agent & Developer Guide:** Non-negotiable architectural invariants ("Do Not Break"), historical bug registry (Bugs 1–20), and absolute compliance directives. |
-| 📊 [`docs/samples/README.md`](docs/samples/README.md) | **RF Reference Dataset Documentation:** Channel 18 reference capture parameters, sampling rates, and verification hashes. |
+| Document                                                                | Content & Purpose                                                                                                                                                                                                                                                                                                                                                                                       |
+| :---------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 🏛️ [`docs/ARCHITECTURE_DECISIONS.md`](docs/ARCHITECTURE_DECISIONS.md)   | **Architecture Decision Records (ADR 001 to 025):** Complete history of all algorithms used and replaced (IOFDMSynchronizer, Dual-Arch CMake, Lock-Free SPSC, Zero-Allocation DelayLines, 128-Centered CSI, 3-State OFDM Sync, O(1) GF Table, IPO/LTO, MMSE, Two-Pass Scan, MPV Job Object, 1316-byte UDP MTU alignment, and bug fixes against `gr-isdbt`) with their full mathematical justifications. |
+| 📖 [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md)                           | **In-Depth User Guide:** Step-by-step setup instructions, advanced CLI options, `--ofdm` tuning guide, manual RF gain tuning, and troubleshooting FAQ.                                                                                                                                                                                                                                                  |
+| 📐 [`docs/blueprint_isdbt_decoder.md`](docs/blueprint_isdbt_decoder.md) | **ISDB-T Engineering Blueprint:** Standard specifications (ABNT NBR 15601/15603 and ARIB STD-B31), interleavers, and frame structures.                                                                                                                                                                                                                                                                  |
+| 🤖 [`AGENTS.md`](AGENTS.md)                                             | **AI Agent & Developer Guide:** Non-negotiable architectural invariants ("Do Not Break"), historical bug registry (Bugs 1–20), and absolute compliance directives.                                                                                                                                                                                                                                      |
+| 📊 [`docs/samples/README.md`](docs/samples/README.md)                   | **RF Reference Dataset Documentation:** Channel 18 reference capture parameters, sampling rates, and verification hashes.                                                                                                                                                                                                                                                                               |
 
 ---
 
