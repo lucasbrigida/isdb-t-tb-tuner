@@ -123,10 +123,10 @@ function Ensure-GlobalDependencies {
     # 3.3 RTL-SDR x86
     New-Item -ItemType Directory -Force -Path "tools\rtl-sdr\x86" | Out-Null
     if (-not (Test-Path "tools\rtl-sdr\x86\librtlsdr.dll")) {
-        Write-Host "⬇️  Baixando librtlsdr.dll oficial de 32 bits..." -ForegroundColor Yellow
+        Write-Host "⬇️  Baixando librtlsdr.dll oficial Osmocom de 32 bits..." -ForegroundColor Yellow
         $w32Zip = "tools\rtl-sdr\x86\rtlsdr_w32.zip"
-        curl.exe -L -o $w32Zip https://github.com/librtlsdr/librtlsdr/releases/download/v0.9.0/rtlsdr-bin-w32_dlldep.zip
-        tar.exe -xf $w32Zip -C "tools\rtl-sdr\x86"
+        curl.exe -L -o $w32Zip https://ftp.osmocom.org/binaries/windows/rtl-sdr/rtl-sdr-32bit-20261018.zip
+        tar.exe -xf $w32Zip --strip-components=1 -C "tools\rtl-sdr\x86"
         Remove-Item -Force $w32Zip
     }
 
@@ -172,7 +172,7 @@ function Build-And-Package-Release([string]$targetArch) {
     if (-not $SkipBuild) {
         if (-not (Test-Path $buildDir)) {
             Write-Host "🔨 Configurando CMake ($targetArch, Release)..." -ForegroundColor Cyan
-            cmake -S . -B $buildDir -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DTARGET_ARCH=$targetArch -DISDBT_ENABLE_GRISDBT_SYNC=ON
+            cmake -S . -B $buildDir -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release "-DTARGET_ARCH=$targetArch" -DISDBT_ENABLE_GRISDBT_SYNC=ON
             if ($LASTEXITCODE -ne 0) { throw "Falha na configuração do CMake para $targetArch." }
         }
         Write-Host "🔨 Compilando isdbtb_rx ($targetArch)..." -ForegroundColor Cyan
@@ -209,19 +209,7 @@ function Build-And-Package-Release([string]$targetArch) {
     Copy-Item $mainExe "$stagingDir\"
 
     # DLLs de RTL-SDR de acordo com a arquitetura
-    if ($targetArch -eq 'x64') {
-        if (Test-Path "$buildDir\librtlsdr.dll") {
-            Copy-Item "$buildDir\*.dll" "$stagingDir\" -Force
-        } else {
-            Copy-Item "tools\rtl-sdr\x64\*.dll" "$stagingDir\" -Force
-        }
-    } else {
-        if (Test-Path "$buildDir\librtlsdr.dll") {
-            Copy-Item "$buildDir\librtlsdr.dll" "$stagingDir\" -Force
-        } else {
-            Copy-Item "tools\rtl-sdr\x86\librtlsdr.dll" "$stagingDir\" -Force
-        }
-    }
+    Copy-Item "tools\rtl-sdr\$targetArch\*.dll" "$stagingDir\" -Force
 
     # Ferramenta MPV
     if ($targetArch -eq 'x64') {
@@ -250,6 +238,9 @@ function Build-And-Package-Release([string]$targetArch) {
         Copy-Item "README_en.md" "$stagingDir\README_en.md"
     }
     Copy-Item "scripts\play_mpv.bat" "$stagingDir\scripts\"
+    if (Test-Path "scripts\play_mpv_x86.bat") {
+        Copy-Item "scripts\play_mpv_x86.bat" "$stagingDir\scripts\"
+    }
     if (Test-Path "scripts\play_mpv.ps1") {
         Copy-Item "scripts\play_mpv.ps1" "$stagingDir\scripts\"
     }

@@ -114,7 +114,7 @@ bool launch_mpv(uint16_t udp_port) {
             conf_dir = (root / "tools" / "mpv").string();
         }
     }
-    std::string cmdline = "\"" + mpv_bin + "\" --config-dir=\"" + conf_dir + "\" --input-ipc-server=\\\\.\\pipe\\isdbtb_mpv udp://127.0.0.1:" + std::to_string(udp_port);
+    std::string cmdline = "\"" + mpv_bin + "\" --config-dir=\"" + conf_dir + "\" --idle=yes --input-ipc-server=\\\\.\\pipe\\isdbtb_mpv \"udp://127.0.0.1:" + std::to_string(udp_port) + "?localaddr=127.0.0.1\"";
 
     STARTUPINFOA si{};
     si.cb = sizeof(si);
@@ -172,7 +172,7 @@ bool reload_mpv_player(uint16_t udp_port) {
     if (hPipe == INVALID_HANDLE_VALUE) {
         return false;
     }
-    std::string cmd = "{\"command\": [\"loadfile\", \"udp://127.0.0.1:" + std::to_string(udp_port) + "\", \"replace\"]}\n";
+    std::string cmd = "{\"command\": [\"loadfile\", \"udp://127.0.0.1:" + std::to_string(udp_port) + "?localaddr=127.0.0.1\", \"replace\"]}\n";
     DWORD written = 0;
     WriteFile(hPipe, cmd.data(), static_cast<DWORD>(cmd.size()), &written, NULL);
     CloseHandle(hPipe);

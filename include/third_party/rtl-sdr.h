@@ -13,8 +13,17 @@ namespace rtlsdr_dyn {
         static bool tried = false;
         if (!tried) {
             tried = true;
+            // 1. Tenta carregar do diretorio do executavel ou PATH padrao
             h = LoadLibraryA("librtlsdr.dll");
             if (!h) h = LoadLibraryA("rtlsdr.dll");
+            // 2. Se executado dentro da arvore do repositorio, tenta carregar da pasta tools/ correspondente
+            if (!h) {
+                if (sizeof(void*) == 4) {
+                    h = LoadLibraryA("tools\\rtl-sdr\\x86\\librtlsdr.dll");
+                } else {
+                    h = LoadLibraryA("tools\\rtl-sdr\\x64\\librtlsdr.dll");
+                }
+            }
         }
         return h;
     }

@@ -392,6 +392,7 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
         float tracked_ffo_hz = 0.0f;
         float last_peak_corr = 0.0f;
         int unlock_counter = 0;
+        int low_snr_counter = 0;
         uint64_t total_air_packets = 0;
         uint64_t total_standby_packets = 0;
 
@@ -494,18 +495,49 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
                             reset_play_reception_stream(sync, demod, stream_iq_buf,
                                                         ofdm_locked, tracked_ffo_hz, frac_pos,
                                                         GI_LEN, SYM_LEN, unlock_counter, &dsp_metrics);
+                            low_snr_counter = 0;
                         }
                     } else {
-                        unlock_counter = 0;
-                        const float spacing = static_cast<float>(sample_rate) / static_cast<float>(FFT_LEN);
-                        float residual = sync_res.ffo_hz - tracked_ffo_hz;
-                        residual -= spacing * std::round(residual / spacing);
-                        tracked_ffo_hz += 0.1f * residual;
-                    }
+                        // Monitora recuperacao apos queda de correlacao (unlock_counter > 0)
+                        // ou dessincronizacao de janela FFT (SNR deprimido com correlacao OFDM alta)
+                        bool need_realign = false;
+                        if (unlock_counter > 0 && sync_res.peak_correlation >= 0.50f) {
+                            need_realign = true;
+                        } else if (ofdm_locked && sync_res.peak_correlation >= 0.70f) {
+                            if (demod.average_snr_db() > 0.0 && demod.average_snr_db() < 2.5) {
+                                if (++low_snr_counter >= 50) { // ~800ms em SNR baixo apesar do OFDM forte
+                                    need_realign = true;
+                                    low_snr_counter = 0;
+                                }
+                            } else {
+                                low_snr_counter = 0;
+                            }
+                        }
 
-                    if (ofdm_locked) {
-                        sync.correct_frequency_offset(iq_buf.data(), iq_buf.size(), tracked_ffo_hz);
-                        stream_iq_buf.append(iq_buf.data(), iq_buf.size());
+                        if (need_realign) {
+                            GI_LEN = static_cast<size_t>(sync.gi_size());
+                            SYM_LEN = FFT_LEN + GI_LEN;
+                            tracked_ffo_hz = sync_res.ffo_hz;
+                            sync.reset_phase();
+                            sync.correct_frequency_offset(iq_buf.data(), iq_buf.size(), tracked_ffo_hz);
+
+                            size_t gi_start = (sync_res.symbol_offset >= static_cast<int>(GI_LEN))
+                                              ? static_cast<size_t>(sync_res.symbol_offset - static_cast<int>(GI_LEN))
+                                              : 0;
+                            stream_iq_buf.assign(iq_buf.data() + gi_start, iq_buf.size() - gi_start);
+                            frac_pos = 0.0f;
+                            demod.reset_sync_state();
+                            unlock_counter = 0;
+                        } else {
+                            unlock_counter = 0;
+                            const float spacing = static_cast<float>(sample_rate) / static_cast<float>(FFT_LEN);
+                            float residual = sync_res.ffo_hz - tracked_ffo_hz;
+                            residual -= spacing * std::round(residual / spacing);
+                            tracked_ffo_hz += 0.1f * residual;
+
+                            sync.correct_frequency_offset(iq_buf.data(), iq_buf.size(), tracked_ffo_hz);
+                            stream_iq_buf.append(iq_buf.data(), iq_buf.size());
+                        }
                     }
                 }
 
