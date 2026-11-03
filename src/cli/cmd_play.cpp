@@ -199,8 +199,11 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
 
     constexpr int VISIBLE_CHANNELS = 8;
     std::vector<ChannelInfo> channels = saved_channels;
-    const bool has_scroll = channels.size() > VISIBLE_CHANNELS;
-    const int visible_count = channels.empty() ? 1 : std::min(static_cast<int>(channels.size()), VISIBLE_CHANNELS);
+    int visible_count = 1;
+    bool has_scroll = false;
+    bool show_scroll_markers = false;
+    int previous_channel_first_row = 0;
+    int previous_channel_line_count = 0;
 
     int selected_index = 0;
     for (size_t i = 0; i < channels.size(); ++i) {
@@ -211,6 +214,19 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
     }
 
     int window_start = 0;
+    auto update_layout = [&]() {
+        const TerminalSize sz = get_terminal_size();
+        const int row_capacity = std::max(1, sz.height - 3);
+        const int max_visible = std::min(VISIBLE_CHANNELS, row_capacity);
+        visible_count = channels.empty()
+            ? 1
+            : std::min(static_cast<int>(channels.size()), max_visible);
+        has_scroll = channels.size() > static_cast<size_t>(visible_count);
+        if (has_scroll && row_capacity >= 3) {
+            visible_count = std::min(VISIBLE_CHANNELS, row_capacity - 2);
+        }
+        show_scroll_markers = has_scroll && row_capacity >= visible_count + 2;
+    };
     auto update_window = [&]() {
         if (!has_scroll) {
             window_start = 0;
@@ -224,9 +240,8 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
         int max_start = std::max(0, static_cast<int>(channels.size()) - visible_count);
         window_start = std::clamp(window_start, 0, max_start);
     };
+    update_layout();
     update_window();
-
-    const int channel_section_lines = (has_scroll ? 1 : 0) + visible_count + (has_scroll ? 1 : 0);
 
     std::string last_status_str;
     if (verbose) {
@@ -262,46 +277,62 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
         std::cout << "\033[" << sz.height << ";1H\033[2K\033[30;47m" << nav_bar << "\033[0m" << std::flush;
     };
 
-    auto render_channels = [&](bool move_up) {
-        if (move_up) {
-            std::cout << "\033[" << channel_section_lines + 2 << "F";
-        }
+    auto render_channels = [&]() {
+        const TerminalSize sz = get_terminal_size();
+        update_layout();
+        update_window();
+
+        std::vector<std::string> lines;
         if (channels.empty()) {
-            std::cout << "\033[2K  Nenhum canal salvo. Execute scan para realizar a busca de canais\n";
+            lines.emplace_back("  Nenhum canal salvo. Execute scan para realizar a busca de canais");
         } else {
-            if (has_scroll) {
+            if (show_scroll_markers) {
                 if (window_start > 0) {
-                    std::cout << "\033[2K  ▲ (mais " << window_start << " canais acima)\n";
+                    lines.emplace_back("  ▲ (mais " + std::to_string(window_start) + " canais acima)");
                 } else {
-                    std::cout << "\033[2K\n";
+                    lines.emplace_back("");
                 }
             }
             for (int i = 0; i < visible_count; ++i) {
                 int idx = window_start + i;
                 bool is_sel = (idx == selected_index);
                 bool is_act = (channels[idx].channel_number == active_channel_num);
-                std::cout << "\033[2K" << format_channel_line(channels[idx], is_sel, is_act) << "\n";
+                lines.push_back(format_channel_line(channels[idx], is_sel, is_act));
             }
-            if (has_scroll) {
+            if (show_scroll_markers) {
                 int rem = static_cast<int>(channels.size()) - (window_start + visible_count);
                 if (rem > 0) {
-                    std::cout << "\033[2K  ▼ (mais " << rem << " canais abaixo)\n";
+                    lines.emplace_back("  ▼ (mais " + std::to_string(rem) + " canais abaixo)");
                 } else {
-                    std::cout << "\033[2K\n";
+                    lines.emplace_back("");
                 }
             }
         }
+
+        const int first_row = std::max(1, sz.height - 2 - static_cast<int>(lines.size()));
+        for (int i = 0; i < previous_channel_line_count; ++i) {
+            const int row = previous_channel_first_row + i;
+            if (row <= sz.height) {
+                std::cout << "\033[" << row << ";1H\033[2K";
+            }
+        }
+        for (size_t i = 0; i < lines.size(); ++i) {
+            std::cout << "\033[" << (first_row + static_cast<int>(i)) << ";1H\033[2K"
+                      << lines[i];
+        }
+        previous_channel_first_row = first_row;
+        previous_channel_line_count = static_cast<int>(lines.size());
         std::cout << std::flush;
     };
 
-    auto render_dynamic_ui = [&](bool move_up) {
-        render_channels(move_up);
+    auto render_dynamic_ui = [&]() {
+        render_channels();
         render_bottom_bars();
     };
 
     // 5. Renderizacao inicial consistente (apenas modo interativo)
     if (!headless) {
-        render_dynamic_ui(false);
+        render_dynamic_ui();
     }
 
     const size_t chunk_samples = 32768;
@@ -683,10 +714,7 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
                         const auto* info = mgr.find_by_number(active_channel_num);
                         ch_name = (info != nullptr) ? info->name : ("Canal " + std::to_string(active_channel_num));
 
-                        // 1. Envia burst de descontinuidade MPEG-TS para players externos (VLC/MPV)
-                        streamer.send_discontinuity_burst();
-
-                        // 2. Solicita retune a reader_thread
+                        // Solicita retune a reader_thread
                         retune_in_progress.store(true, std::memory_order_release);
                         retune_target_freq_hz.store(freq_hz, std::memory_order_release);
                         while (retune_in_progress.load(std::memory_order_acquire) && g_running) {
@@ -714,7 +742,7 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
             }
 
             if (need_redraw) {
-                render_dynamic_ui(true);
+                render_dynamic_ui();
             }
         }
 
@@ -743,7 +771,7 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
                         break;
                     }
                 }
-                render_dynamic_ui(true);
+                render_dynamic_ui();
             } else if (verbose) {
                 std::stringstream status_ss;
                 status_ss << "[Status] Ch " << active_channel_num << " | RSSI: " << std::fixed << std::setprecision(1) << snap.rssi_dbfs << " dBFS | "
