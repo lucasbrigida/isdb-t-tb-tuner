@@ -198,6 +198,7 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
     }
 
     constexpr int VISIBLE_CHANNELS = 8;
+    constexpr int FIRST_CHANNEL_ROW = 18;
     std::vector<ChannelInfo> channels = saved_channels;
     int visible_count = 1;
     bool has_scroll = false;
@@ -216,7 +217,7 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
     int window_start = 0;
     auto update_layout = [&]() {
         const TerminalSize sz = get_terminal_size();
-        const int row_capacity = std::max(1, sz.height - 3);
+        const int row_capacity = std::max(1, sz.height - FIRST_CHANNEL_ROW - 2);
         const int max_visible = std::min(VISIBLE_CHANNELS, row_capacity);
         visible_count = channels.empty()
             ? 1
@@ -309,7 +310,8 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
             }
         }
 
-        const int first_row = std::max(1, sz.height - 2 - static_cast<int>(lines.size()));
+        const int first_row = std::max(FIRST_CHANNEL_ROW,
+                                       sz.height - 2 - static_cast<int>(lines.size()));
         for (int i = 0; i < previous_channel_line_count; ++i) {
             const int row = previous_channel_first_row + i;
             if (row <= sz.height) {
