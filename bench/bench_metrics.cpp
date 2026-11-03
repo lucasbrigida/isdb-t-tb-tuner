@@ -8,6 +8,9 @@
 #include <numeric>
 #include <algorithm>
 #include <cmath>
+#include <atomic>
+#include <cstdlib>
+#include <new>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -19,6 +22,41 @@
 #include <sys/time.h>
 #include <x86intrin.h>
 #endif
+
+namespace {
+std::atomic<bool> track_hot_allocations{false};
+std::atomic<uint64_t> hot_allocation_count{0};
+}
+
+void* operator new(std::size_t size) {
+    if (void* ptr = std::malloc(size == 0 ? 1 : size)) {
+        if (track_hot_allocations.load(std::memory_order_relaxed)) {
+            hot_allocation_count.fetch_add(1, std::memory_order_relaxed);
+        }
+        return ptr;
+    }
+    throw std::bad_alloc();
+}
+
+void* operator new[](std::size_t size) {
+    return ::operator new(size);
+}
+
+void operator delete(void* ptr) noexcept {
+    std::free(ptr);
+}
+
+void operator delete[](void* ptr) noexcept {
+    ::operator delete(ptr);
+}
+
+void operator delete(void* ptr, std::size_t) noexcept {
+    ::operator delete(ptr);
+}
+
+void operator delete[](void* ptr, std::size_t) noexcept {
+    ::operator delete(ptr);
+}
 
 namespace isdbt {
 
@@ -157,6 +195,9 @@ BenchRunResult run_benchmark(int ofdm_mode, const std::string& iq_path,
         rssi_vals.push_back(rssi_dbfs);
 
         uint64_t t0 = __rdtsc();
+        std::vector<std::vector<uint8_t>> decoded_pkts;
+        hot_allocation_count.store(0, std::memory_order_relaxed);
+        track_hot_allocations.store(true, std::memory_order_relaxed);
         synchronizer->process(iq_buf.data(), chunk_samples, useful_symbols);
         uint64_t t1 = __rdtsc();
 
@@ -172,6 +213,13 @@ BenchRunResult run_benchmark(int ofdm_mode, const std::string& iq_path,
 
         bool is_locked = (cur_state == SyncState::Tracking);
         size_t n_syms = useful_symbols.size() / 2048;
+        for (size_t s = 0; s + 2048 <= useful_symbols.size(); s += 2048) {
+            demod.process_symbol(&useful_symbols[s], decoded_pkts);
+            res.symbols_processed++;
+            if (is_locked) res.symbols_locked++;
+        }
+        track_hot_allocations.store(false, std::memory_order_relaxed);
+
         if (n_syms > 0) {
             uint64_t cycles_each = (t1 - t0) / n_syms;
             for (size_t s = 0; s < n_syms; ++s) {
@@ -179,17 +227,11 @@ BenchRunResult run_benchmark(int ofdm_mode, const std::string& iq_path,
             }
         }
 
-        std::vector<std::vector<uint8_t>> decoded_pkts;
-        for (size_t s = 0; s + 2048 <= useful_symbols.size(); s += 2048) {
-            demod.process_symbol(&useful_symbols[s], decoded_pkts);
-            res.symbols_processed++;
-            if (is_locked) res.symbols_locked++;
-        }
-
         for (const auto& pkt : decoded_pkts) {
             psi.parse_packet(pkt.data());
             res.valid_ts_packets++;
         }
+        res.heap_allocs_hot += hot_allocation_count.load(std::memory_order_relaxed);
 
         if (bytes_read_total >= max_bytes) break;
     }
@@ -200,7 +242,6 @@ BenchRunResult run_benchmark(int ofdm_mode, const std::string& iq_path,
     res.cpu_user_s = timer.elapsed_cpu_user_s();
     res.cpu_sys_s = timer.elapsed_cpu_sys_s();
     res.peak_rss_mb = BenchTimer::get_peak_rss_mb();
-    res.heap_allocs_hot = 0; // Garantia zero-alloc em hot path
 
     if (!cycles_per_symbol.empty()) {
         uint64_t sum_cyc = std::accumulate(cycles_per_symbol.begin(), cycles_per_symbol.end(), uint64_t(0));
@@ -231,4 +272,3 @@ BenchRunResult run_benchmark(int ofdm_mode, const std::string& iq_path,
 }
 
 } // namespace isdbt
-

@@ -7,7 +7,6 @@
 #include "dsp/constants.hpp"
 #include "dsp/dsp_metrics.hpp"
 #include "dsp/spsc_capture_queue.hpp"
-#include "dsp/iq_stream_buffer.hpp"
 #include "dsp/ofdm_sync.hpp"
 #include "dsp/oneseg_demodulator.hpp"
 #include "streaming/udp_streamer.hpp"
@@ -51,25 +50,12 @@ struct SharedPlaybackStatus {
 };
 
 static void reset_play_reception_stream(
-    OfdmSync& sync,
+    IOFDMSynchronizer& sync,
     OneSegDemodulator& demod,
-    IqStreamBuffer& stream_iq_buf,
     bool& ofdm_locked,
-    float& tracked_ffo_hz,
-    float& frac_pos,
-    std::size_t& gi_len,
-    std::size_t& sym_len,
-    int& unlock_counter,
     DspMetrics* metrics = nullptr) {
 
-    stream_iq_buf.clear();
-    frac_pos = 0.0f;
     ofdm_locked = false;
-    tracked_ffo_hz = 0.0f;
-    unlock_counter = 0;
-    gi_len = 0;
-    sym_len = 0;
-
     sync.reset();
     demod.reset();
 
@@ -142,6 +128,14 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
 
     rtlsdr_dev_t* dev = nullptr;
     constexpr uint32_t sample_rate = constants::SAMPLE_RATE;
+    SyncParams sync_params;
+    sync_params.sample_rate = static_cast<float>(sample_rate);
+    auto sync = make_synchronizer(
+        ofdm_mode == 2 ? OFDMAlgorithm::RobustGRISDBT : OFDMAlgorithm::VanDeBeek,
+        sync_params);
+    if (!sync) {
+        return 1;
+    }
 
     if (!input_file.empty()) {
         ch_name = "Arquivo IQ";
@@ -354,8 +348,10 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
             SpscCaptureQueue<64>::WriteView view;
             if (!raw_queue->try_acquire_write(view)) {
                 if (input_file.empty()) raw_queue->record_drop();
-                ++sequence;
-                pending_discontinuity = true;
+                if (input_file.empty()) {
+                    ++sequence;
+                    pending_discontinuity = true;
+                }
                 std::this_thread::sleep_for(std::chrono::microseconds(200));
                 continue;
             }
@@ -399,25 +395,21 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
         SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
 #endif
         constexpr size_t FFT_LEN = 2048;
-        size_t GI_LEN  = 128;
-        size_t SYM_LEN = FFT_LEN + GI_LEN;
-        float frac_pos = 0.0f;
         auto last_pat_time = std::chrono::steady_clock::now();
         auto last_null_burst = std::chrono::steady_clock::now();
 
-        OfdmSync sync(OfdmMode::MODE_1_2K, GuardInterval::GI_1_16, static_cast<float>(sample_rate));
         OneSegDemodulator demod(OfdmMode::MODE_1_2K, GuardInterval::GI_1_16);
         PsiParser psi;
         TsGenerator channel_ts_gen;
 
         std::vector<std::complex<float>> iq_buf(chunk_samples);
-        IqStreamBuffer stream_iq_buf(chunk_samples * 2);
+        std::vector<std::complex<float>> useful_symbols;
+        useful_symbols.reserve(chunk_samples);
 
         bool ofdm_locked = false;
-        float tracked_ffo_hz = 0.0f;
         float last_peak_corr = 0.0f;
         int unlock_counter = 0;
-        int low_snr_counter = 0;
+        bool reception_started = false;
         uint64_t total_air_packets = 0;
         uint64_t total_standby_packets = 0;
 
@@ -438,10 +430,11 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
                 }
 
                 psi.reset();
-                reset_play_reception_stream(sync, demod, stream_iq_buf, ofdm_locked, tracked_ffo_hz,
-                                            frac_pos, GI_LEN, SYM_LEN, unlock_counter, &dsp_metrics);
+                reset_play_reception_stream(*sync, demod, ofdm_locked, &dsp_metrics);
                 total_air_packets = 0;
                 have_expected_sequence = false;
+                reception_started = false;
+                unlock_counter = 0;
                 last_pat_time = std::chrono::steady_clock::now();
 
                 {
@@ -477,9 +470,9 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
             dsp_metrics.input_blocks++;
 
             if (discontinuity) {
-                reset_play_reception_stream(sync, demod, stream_iq_buf,
-                                            ofdm_locked, tracked_ffo_hz, frac_pos,
-                                            GI_LEN, SYM_LEN, unlock_counter, &dsp_metrics);
+                reset_play_reception_stream(*sync, demod, ofdm_locked, &dsp_metrics);
+                reception_started = false;
+                unlock_counter = 0;
             }
 
             if (block.size == chunk_bytes) {
@@ -493,106 +486,33 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
                 }
                 float rssi_dbfs = 10.0f * std::log10((pwr_sum / chunk_samples) + 1e-12f);
 
-                auto sync_res = sync.find_symbol_boundary(iq_buf.data(), chunk_samples);
-                last_peak_corr = sync_res.peak_correlation;
+                sync->process(iq_buf.data(), chunk_samples, useful_symbols);
+                last_peak_corr = sync->peak_correlation();
+                bool synchronizer_locked = sync->state() == SyncState::Tracking;
+                bool has_synchronized_symbols = !useful_symbols.empty();
                 std::vector<std::vector<uint8_t>> decoded_pkts;
 
-                if (!ofdm_locked) {
-                    if (sync_res.locked) {
-                        ofdm_locked = true;
-                        unlock_counter = 0;
-                        GI_LEN = static_cast<size_t>(sync.gi_size());
-                        SYM_LEN = FFT_LEN + GI_LEN;
-                        frac_pos = 0.0f;
-                        tracked_ffo_hz = sync_res.ffo_hz;
-                        sync.reset_phase();
-                        sync.correct_frequency_offset(iq_buf.data(), iq_buf.size(), tracked_ffo_hz);
-
-                        size_t gi_start = (sync_res.symbol_offset >= static_cast<int>(GI_LEN))
-                                          ? static_cast<size_t>(sync_res.symbol_offset - static_cast<int>(GI_LEN))
-                                          : 0;
-                        stream_iq_buf.assign(iq_buf.data() + gi_start, iq_buf.size() - gi_start);
-                    }
+                if (synchronizer_locked || has_synchronized_symbols) {
+                    ofdm_locked = true;
+                    reception_started = true;
+                    unlock_counter = 0;
                 } else {
-                    if (!sync_res.locked) {
-                        unlock_counter++;
-                        if (unlock_counter > 200) {
-                            reset_play_reception_stream(sync, demod, stream_iq_buf,
-                                                        ofdm_locked, tracked_ffo_hz, frac_pos,
-                                                        GI_LEN, SYM_LEN, unlock_counter, &dsp_metrics);
-                            low_snr_counter = 0;
+                    if (reception_started) {
+                        ofdm_locked = true;
+                        if (++unlock_counter > 200) {
+                            reset_play_reception_stream(*sync, demod, ofdm_locked, &dsp_metrics);
+                            reception_started = false;
+                            unlock_counter = 0;
                         }
                     } else {
-                        // Monitora recuperacao apos queda de correlacao (unlock_counter > 0)
-                        // ou dessincronizacao de janela FFT (SNR deprimido com correlacao OFDM alta)
-                        bool need_realign = false;
-                        if (unlock_counter > 0 && sync_res.peak_correlation >= 0.50f) {
-                            need_realign = true;
-                        } else if (ofdm_locked && sync_res.peak_correlation >= 0.70f) {
-                            if (demod.average_snr_db() > 0.0 && demod.average_snr_db() < 2.5) {
-                                if (++low_snr_counter >= 50) { // ~800ms em SNR baixo apesar do OFDM forte
-                                    need_realign = true;
-                                    low_snr_counter = 0;
-                                }
-                            } else {
-                                low_snr_counter = 0;
-                            }
-                        }
-
-                        if (need_realign) {
-                            GI_LEN = static_cast<size_t>(sync.gi_size());
-                            SYM_LEN = FFT_LEN + GI_LEN;
-                            tracked_ffo_hz = sync_res.ffo_hz;
-                            sync.reset_phase();
-                            sync.correct_frequency_offset(iq_buf.data(), iq_buf.size(), tracked_ffo_hz);
-
-                            size_t gi_start = (sync_res.symbol_offset >= static_cast<int>(GI_LEN))
-                                              ? static_cast<size_t>(sync_res.symbol_offset - static_cast<int>(GI_LEN))
-                                              : 0;
-                            stream_iq_buf.assign(iq_buf.data() + gi_start, iq_buf.size() - gi_start);
-                            frac_pos = 0.0f;
-                            demod.reset_sync_state();
-                            unlock_counter = 0;
-                        } else {
-                            unlock_counter = 0;
-                            const float spacing = static_cast<float>(sample_rate) / static_cast<float>(FFT_LEN);
-                            float residual = sync_res.ffo_hz - tracked_ffo_hz;
-                            residual -= spacing * std::round(residual / spacing);
-                            tracked_ffo_hz += 0.1f * residual;
-
-                            sync.correct_frequency_offset(iq_buf.data(), iq_buf.size(), tracked_ffo_hz);
-                            stream_iq_buf.append(iq_buf.data(), iq_buf.size());
-                        }
+                        ofdm_locked = false;
                     }
                 }
 
                 if (ofdm_locked) {
-                    while (static_cast<size_t>(std::lround(frac_pos)) + SYM_LEN + 8 <= stream_iq_buf.available()) {
-                        int base_pos = static_cast<int>(std::lround(frac_pos));
-                        int max_neg = (base_pos >= 4) ? 4 : base_pos;
-                        int best_sh = 0;
-                        float best_mag = -1.0f;
-                        for (int sh = -max_neg; sh <= 4; ++sh) {
-                            std::complex<float> g(0.0f, 0.0f);
-                            for (size_t m = 0; m < GI_LEN; ++m) {
-                                g += stream_iq_buf[base_pos + sh + m] * std::conj(stream_iq_buf[base_pos + sh + m + FFT_LEN]);
-                            }
-                            float mag = std::norm(g);
-                            if (mag > best_mag) { best_mag = mag; best_sh = sh; }
-                        }
-                        frac_pos += 0.25f * static_cast<float>(best_sh);
-                        int sym_d = std::max(0, static_cast<int>(std::lround(frac_pos)));
-                        if (static_cast<size_t>(sym_d) + SYM_LEN > stream_iq_buf.available()) break;
-
-                        demod.process_symbol(stream_iq_buf.data_at(sym_d + GI_LEN), decoded_pkts);
-                        frac_pos += static_cast<float>(SYM_LEN);
+                    for (size_t s = 0; s + FFT_LEN <= useful_symbols.size(); s += FFT_LEN) {
+                        demod.process_symbol(&useful_symbols[s], decoded_pkts);
                         dsp_metrics.processed_symbols++;
-                    }
-
-                    int consume_i = static_cast<int>(std::floor(frac_pos)) - 8;
-                    if (consume_i > 0 && static_cast<size_t>(consume_i) <= stream_iq_buf.available()) {
-                        stream_iq_buf.consume(static_cast<size_t>(consume_i));
-                        frac_pos -= static_cast<float>(consume_i);
                     }
 
                     for (const auto& pkt : decoded_pkts) {

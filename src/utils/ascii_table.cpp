@@ -75,6 +75,32 @@ std::string AsciiTable::render(size_t max_total_width) const {
         col_widths[c] = std::max(col_widths[c], size_t(1));
     }
 
+    const size_t fixed_width = 3 * num_cols + 1;
+    if (max_total_width < fixed_width + num_cols) return "";
+
+    size_t content_width = std::accumulate(col_widths.begin(), col_widths.end(), size_t(0));
+    const size_t content_budget = max_total_width - fixed_width;
+    if (content_width > content_budget) {
+        size_t extra_width = content_width - num_cols;
+        size_t extra_budget = content_budget - num_cols;
+        size_t used_width = num_cols;
+        for (size_t& width : col_widths) {
+            width = 1 + ((width - 1) * extra_budget) / extra_width;
+            used_width += width - 1;
+        }
+
+        for (size_t c = 0; used_width < content_budget; c = (c + 1) % num_cols) {
+            size_t original_width = std::max(headers_.size() > c ? headers_[c].length() : size_t(0), size_t(1));
+            for (const auto& row : rows_) {
+                if (c < row.size()) original_width = std::max(original_width, row[c].length());
+            }
+            if (col_widths[c] < original_width) {
+                ++col_widths[c];
+                ++used_width;
+            }
+        }
+    }
+
     // Calcula borda horizontal: +---+---+
     auto build_border = [&]() -> std::string {
         std::string border = "+";
@@ -128,4 +154,3 @@ void AsciiTable::print(std::ostream& os, size_t max_total_width) const {
 }
 
 } // namespace isdbt
-

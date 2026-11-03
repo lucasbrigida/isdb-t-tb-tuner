@@ -29,6 +29,8 @@ public:
      */
     virtual const SyncState& state() const noexcept = 0;
 
+    virtual float peak_correlation() const noexcept = 0;
+
     /**
      * @brief Reinicia o estado interno, NCO e filtros de sincronismo.
      */
@@ -36,4 +38,3 @@ public:
 };
 
 } // namespace isdbt
-

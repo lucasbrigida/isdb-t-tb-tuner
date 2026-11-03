@@ -43,7 +43,15 @@ int main() {
         TEST_ASSERT(line.length() <= 100);
     }
 
+    isdbt::AsciiTable wide_table({"very long first heading", "very long second heading"});
+    wide_table.add_row({"a cell with a lot of text", "another very long cell"});
+    std::string bounded = wide_table.render(20);
+    std::stringstream bounded_stream(bounded);
+    while (std::getline(bounded_stream, line)) {
+        TEST_ASSERT(line.length() <= 20);
+    }
+    TEST_ASSERT(wide_table.render(8).empty());
+
     std::cout << "[PASS] Formatador AsciiTable aprovado com sucesso.\n";
     return 0;
 }
-

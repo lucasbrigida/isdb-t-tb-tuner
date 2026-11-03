@@ -18,7 +18,6 @@
 #include "dsp/iq_stream_buffer.hpp"
 #include <vector>
 #include <complex>
-#include <array>
 #include <cstdint>
 
 namespace isdbt {
@@ -28,7 +27,7 @@ namespace isdbt {
  */
 enum class RobustSyncState {
     Acquisition, ///< Aquisicao coarse exaustiva via correlacao de CP
-    Tracking,    ///< Rastreamento fino ativo (SP + CFO + SCO)
+    Tracking,    ///< Rastreamento fino ativo baseado em CP e ajuste de SCO
     LostLock,    ///< Perda de sincronismo por degradacao de metricas
     Resync       ///< Re-sincronizacao rapida com histerese de 3 simbolos
 };
@@ -38,9 +37,8 @@ enum class RobustSyncState {
  *
  * Caracteristicas:
  * - Aquisicao coarse de borda e estimativa de FFO por prefixo ciclico.
- * - Refinamento fino de timing por correlacao de pilotos dispersos (SP).
- * - Estimacao e correcao de Carrier Frequency Offset (CFO fracionario e inteiro).
- * - Malha de segunda ordem (PI) para rastreamento de Sampling Clock Offset (SCO).
+ * - Refinamento fino de timing e estimativa inicial de CFO pela correlacao do CP.
+ * - Malha de segunda ordem (PI) para rastreamento de timing/SCO.
  * - FSM de 4 estados com confirmacao de re-lock apos 3 simbolos validos consecutivos.
  * - Zero alocacoes dinamicas no heap durante o caminho critico (process).
  */
@@ -53,6 +51,7 @@ public:
                  std::vector<std::complex<float>>& out) override;
 
     const SyncState& state() const noexcept override;
+    float peak_correlation() const noexcept override { return peak_correlation_; }
     RobustSyncState robust_state() const noexcept { return robust_state_; }
 
     void reset() noexcept override;
@@ -76,15 +75,10 @@ private:
     // Buffers pre-alocados para zero alocacao no hot path (N5)
     IqStreamBuffer stream_buf_;
     std::vector<std::complex<float>> derot_buf_;
-    std::array<std::complex<float>, 2048> fft_in_scratch_;
-    std::array<std::complex<float>, 2048> fft_out_scratch_;
-
-    // Tabela de portadoras de pilotos dispersos para os 4 simbolos do ciclo SP
-    std::array<std::vector<int>, 4> sp_indices_;
-
     // Variaveis de rastreamento de fase e timing
     double nco_phase_ = 0.0;
     float current_cfo_hz_ = 0.0f;
+    float peak_correlation_ = 0.0f;
     float sco_ppm_ = 0.0f;
     double frac_timing_offset_ = 0.0;
     double sco_integrator_ = 0.0;
@@ -100,9 +94,9 @@ private:
     uint64_t resync_fallback_ = 0;
 
     void set_robust_state(RobustSyncState new_state);
-    void init_sp_tables();
     float compute_cp_correlation(const std::complex<float>* ptr, size_t gi, size_t fft) const;
-    int refine_timing_sp(const std::complex<float>* symbol_time, float* out_metric = nullptr);
+    int refine_timing_cp(const std::complex<float>* symbol_time, size_t left_context,
+                         float* out_metric = nullptr);
 };
 
 } // namespace isdbt

@@ -213,19 +213,7 @@ void OneSegDemodulator::reset() {
 }
 
 void OneSegDemodulator::reset_sync_state() {
-    viterbi_.reset();
-    descrambler_.reset();
-    viterbi_byte_stream_.clear();
-    viterbi_stream_offset_ = 0;
-    viterbi_sync_offset_ = -1;
-    sync_miss_count_ = 0;
-    forney_blocks_fed_ = 0;
-    packet_idx_in_frame_ = -1;
-    tmcc_miss_frames_ = 0;
-
-    for (size_t j = 0; j < 12; ++j) {
-        forney_delay_lines_[j].reset(0);
-    }
+    reset();
 }
 
 void OneSegDemodulator::set_parameters(CarrierModulation mod, CodeRate rate, int time_interleave_I) {

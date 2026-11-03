@@ -36,27 +36,14 @@ RobustGRISDBTSync::RobustGRISDBTSync(const SyncParams& params)
     }
 
     derot_buf_.reserve(65536 * 2);
-    init_sp_tables();
     reset();
-}
-
-void RobustGRISDBTSync::init_sp_tables() {
-    // No ISDB-T Modo 3 amostrado a Fs = 2031746 S/s (FFT de 2048 pontos),
-    // o Segmento 0 contem 432 subportadoras.
-    // Os pilotos dispersos (SP) ocorrem a cada 12 portadoras com deslocamento 3 * (l % 4).
-    for (int l = 0; l < 4; ++l) {
-        sp_indices_[l].clear();
-        int offset = 3 * l;
-        for (int k = offset; k < static_cast<int>(fft_size_); k += 12) {
-            sp_indices_[l].push_back(k);
-        }
-    }
 }
 
 void RobustGRISDBTSync::reset() noexcept {
     stream_buf_.clear();
     nco_phase_ = 0.0;
     current_cfo_hz_ = 0.0f;
+    peak_correlation_ = 0.0f;
     sco_ppm_ = 0.0f;
     frac_timing_offset_ = 0.0;
     sco_integrator_ = 0.0;
@@ -103,17 +90,18 @@ float RobustGRISDBTSync::compute_cp_correlation(const std::complex<float>* ptr, 
     return std::abs(sum_cross) / sum_pwr;
 }
 
-int RobustGRISDBTSync::refine_timing_sp(const std::complex<float>* symbol_time, float* out_metric) {
-    // Estimador de timing fino de Van de Beek / gr-isdbt:
-    // avalia correlacao do prefixo ciclico em janela estreita [-4 .. +4]
+int RobustGRISDBTSync::refine_timing_cp(const std::complex<float>* symbol_time,
+                                        size_t left_context, float* out_metric) {
     int best_shift = 0;
     float best_corr = -1.0f;
-    for (int sh = -4; sh <= 4; ++sh) {
+    int min_shift = -static_cast<int>(std::min<size_t>(4, left_context));
+    for (int sh = min_shift; sh <= 4; ++sh) {
         std::complex<float> g(0.0f, 0.0f);
         float pwr = 0.0f;
+        const std::complex<float>* shifted = symbol_time + sh;
         for (size_t m = 0; m < gi_size_; ++m) {
-            std::complex<float> a = symbol_time[sh + m];
-            std::complex<float> b = symbol_time[sh + m + fft_size_];
+            std::complex<float> a = shifted[m];
+            std::complex<float> b = shifted[m + fft_size_];
             g += a * std::conj(b);
             pwr += 0.5f * (std::norm(a) + std::norm(b));
         }
@@ -131,6 +119,7 @@ void RobustGRISDBTSync::process(const std::complex<float>* in, size_t n,
                                std::vector<std::complex<float>>& out) {
     out.clear();
     if (in == nullptr || n == 0) return;
+    peak_correlation_ = 0.0f;
 
     // Zero-allocation: redimensiona derot_buf_ se necessario (somente na inicializacao)
     if (derot_buf_.size() < n) {
@@ -181,6 +170,7 @@ void RobustGRISDBTSync::process(const std::complex<float>* in, size_t n,
                 best_cross = cross;
             }
         }
+        peak_correlation_ = std::max(0.0f, max_corr);
 
         if (max_corr >= 0.20f) {
             // Estima CFO fracionario inicial
@@ -188,7 +178,6 @@ void RobustGRISDBTSync::process(const std::complex<float>* in, size_t n,
             float ffo_hz = -angle / (2.0f * static_cast<float>(M_PI) * (static_cast<float>(fft_size_) / params_.sample_rate));
             current_cfo_hz_ = ffo_hz;
 
-            best_d = best_d % symbol_len_;
             frac_timing_offset_ = static_cast<double>(best_d);
             consecutive_good_symbols_ = 1;
             consecutive_bad_symbols_ = 0;
@@ -209,7 +198,8 @@ void RobustGRISDBTSync::process(const std::complex<float>* in, size_t n,
         while (static_cast<size_t>(std::lround(frac_timing_offset_)) + symbol_len_ + 8 <= stream_buf_.available()) {
             size_t base_idx = static_cast<size_t>(std::lround(frac_timing_offset_));
             float metric = 0.0f;
-            int fine_sh = refine_timing_sp(stream_buf_.data_at(base_idx), &metric);
+            int fine_sh = refine_timing_cp(stream_buf_.data_at(base_idx), base_idx, &metric);
+            peak_correlation_ = metric;
 
             bool is_good = (metric >= params_.min_correlation);
             if (is_good) {

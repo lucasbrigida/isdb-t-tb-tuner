@@ -20,6 +20,7 @@ public:
                  std::vector<std::complex<float>>& out) override;
 
     const SyncState& state() const noexcept override;
+    float peak_correlation() const noexcept override { return peak_correlation_; }
     void reset() noexcept override;
 
     // Acesso direto ao sincronizador interno para interoperabilidade
@@ -34,6 +35,7 @@ private:
 
     bool ofdm_locked_ = false;
     float tracked_ffo_hz_ = 0.0f;
+    float peak_correlation_ = 0.0f;
     int unlock_counter_ = 0;
     size_t gi_len_ = 128;
     size_t sym_len_ = 2048 + 128;
@@ -42,4 +44,3 @@ private:
 };
 
 } // namespace isdbt
-

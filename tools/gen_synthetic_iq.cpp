@@ -3,6 +3,7 @@
 #include <vector>
 #include <complex>
 #include <cmath>
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 
@@ -71,4 +72,3 @@ int main(int argc, char** argv) {
     std::cout << "[gen_synthetic_iq] Salvo com sucesso em " << out_path << " (" << written * 2 << " bytes).\n";
     return 0;
 }
-

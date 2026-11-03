@@ -9,7 +9,7 @@
   <img src="https://img.shields.io/badge/Tests-20%2F20%20Passed-success.svg" alt="CTest Passing" />
 </p>
 
-Receptor e decodificador digital completo de televisão aberta no padrão **ISDB-T / ISDB-Tb / SBTVD** (Brasil, Japão, Filipinas e América Latina) para dispositivos **RTL-SDR** (RTL2832U com tuners R820T/R828D/E4000). Desenvolvido em **C++ nativo de alta performance sem dependências do framework GNU Radio**, com fila de captura **SPSC lock-free** com detecção atômica de descontinuidades, **zero alocações no heap** no processamento de símbolos, **arquitetura dual de sincronismo OFDM** (sincronizador de Van de Beek padrão e port robusto do `gr-isdbt` com rastreamento ativo de timing, CFO/SCO e histerese de re-lock), equalização adaptativa **MMSE regularizada**, ponderação **CSI** sincronizada por linhas de retardo no decodificador Viterbi, multiplicação em $GF(2^8)$ em **$O(1)$** via tabela de 64 KB no Reed-Solomon, varredura inteligente de canais com identificação de nomes via **SDT**, **suporte nativo dual-architecture (64 bits x64 e 32 bits x86)** e **reprodutor MPV embutido com super-resolução e interpolação de movimento em tempo real**.
+Receptor e decodificador digital completo de televisão aberta no padrão **ISDB-T / ISDB-Tb / SBTVD** (Brasil, Japão, Filipinas e América Latina) para dispositivos **RTL-SDR** (RTL2832U com tuners R820T/R828D/E4000). Desenvolvido em **C++ nativo de alta performance sem dependências do framework GNU Radio**, com fila de captura **SPSC lock-free** com detecção atômica de descontinuidades, **zero alocações no heap** no processamento de símbolos, **arquitetura dual de sincronismo OFDM** (baseline de Van de Beek e modo robusto com aquisição e rastreamento por prefixo cíclico, estimativa inicial de CFO, ajuste de timing/SCO e histerese de re-lock), equalização adaptativa **MMSE regularizada**, ponderação **CSI** sincronizada por linhas de retardo no decodificador Viterbi, multiplicação em $GF(2^8)$ em **$O(1)$** via tabela de 64 KB no Reed-Solomon, varredura inteligente de canais com identificação de nomes via **SDT**, **suporte nativo dual-architecture (64 bits x64 e 32 bits x86)** e **reprodutor MPV embutido com super-resolução e interpolação de movimento em tempo real**.
 
 ---
 
@@ -191,7 +191,7 @@ cmake --build build_x86 -j
 ```
 
 #### Opções de Compilação no CMake
-- **`-DTARGET_ARCH=x64` / `-DTARGET_ARCH=x86`** _(Padrão: `auto`)_: Define a arquitetura do binário (`-m64` ou `-m32 -msse2 -mfpmath=sse`).
+- **`-DTARGET_ARCH=x64` / `-DTARGET_ARCH=x86`** _(Padrão: `auto`)_: Define a arquitetura do binário; GCC/Clang recebem `-m64` ou `-m32 -msse2 -mfpmath=sse`, enquanto MSVC deve ser configurado com `-A x64` ou `-A Win32`.
 - **`-DISDBT_ENABLE_GRISDBT_SYNC=ON`** _(Padrão: OFF)_: Habilita o algoritmo de sincronização robusto do `gr-isdbt` (`--ofdm 2` ou `--ofdm=2`).
 - **`-DCMAKE_BUILD_TYPE=Release`**: Ativa otimização `-O3 -DNDEBUG` (GCC/Clang) ou `/O2 /DNDEBUG` (MSVC), desativando assertions em runtime.
 - **`-DISDBT_ENABLE_FAST_MATH=ON`** _(Padrão: OFF)_: Adiciona `-ffast-math` ou `/fp:fast` para acelerar vetorizações AVX2/FMA no cálculo de métricas e NCO.
@@ -226,7 +226,7 @@ Os 20 testes determinísticos cobrem:
 16. `SyncRegressionScan`: Garantia de não-regressão do scanner, operando estritamente sob Van de Beek baseline.
 17. `BenchAsciiTable`: Formatador de tabelas ASCII para relatórios de telemetria e benchmark.
 18. `RegressionOfdm1`: Teste de regressão do modo Van de Beek baseline ancorado na amostra de referência de TV aberta.
-19. `SyncGrisdbtRobust`: Validação matemática do sincronizador robusto do `gr-isdbt` (timing fino por SP, CFO inteiro/fracionário, SCO e FSM de re-lock).
+19. `SyncGrisdbtRobust`: Validação do sincronizador robusto baseado em CP (timing, estimativa inicial de CFO, SCO e FSM de re-lock).
 20. `RegressionOfdm2`: Teste de regressão do sincronizador robusto ancorado na amostra de referência de TV aberta.
 
 ### 2.4 Automação de Releases (`build_release.ps1`)
@@ -323,7 +323,7 @@ isdb_t_isdb_tb_tuner_player/
 - **Taxa de Amostragem Fundamental Exata ($2031746\text{ S/s}$):** Submúltiplo exato de $1/4$ da taxa de chip do ISDB-T $F_{\text{base}} = 512/63\text{ MHz} \approx 8.126984\text{ MHz}$, garantindo $>90\%$ de correlação no prefixo cíclico e caixas de FFT perfeitamente alinhadas sem filtros de reamostragem racional.
 - **Arquitetura Dual de Sincronismo OFDM:**
   - *Modo 1 (`VanDeBeekSync`, Baseline):* Autocorrelação por prefixo cíclico com estimação de desvio fracionário de frequência (FFO) e máquina de estados tripartite (`Acquisition`, `Tracking` $\pm 4$, `LostLock`).
-  - *Modo 2 (`RobustGRISDBTSync`, port do gr-isdbt):* Aquisição coarse por CP, refinamento fino de timing via pilotos dispersos (SP), estimação de CFO inteiro via TMCC, CFO fracionário via SP, compensação contínua de desvio de clock de amostragem (SCO) e histerese de travamento após 3 símbolos consecutivos válidos.
+  - *Modo 2 (`RobustGRISDBTSync`):* Aquisição e refinamento de timing por correlação de CP, estimativa inicial de CFO pela fase da correlação, ajuste de timing/SCO por malha PI e histerese de re-lock após símbolos consecutivos válidos.
 - **Fila de Captura USB SPSC Lock-Free (`SpscCaptureQueue`):** Ring buffer estático de 64 slots com semântica de memória acquire-release, contadores atômicos de drops e sinalização explícita de descontinuidades de sequência com resets coordenados de NCO.
 - **Zero Alocações Dinâmicas no Caminho Crítico:** Eliminação completa de `std::deque` e `std::vector::erase` nos desentrelaçadores Forney, de bits e de tempo, substituídos por `FixedDelayLine`, `DynamicDelayLine` e avanço por ponteiro deslizante (`viterbi_stream_offset_`).
 - **Equalização Adaptativa MMSE Regularizada:** Substitui o Zero-Forcing tradicional por MMSE adaptativo ($\sigma^2 = \max(10^{-5}, 0.05 \cdot P_{\text{avg}})$), evitando amplificação de ruído em vales profundos de desvanecimento.

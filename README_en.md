@@ -9,7 +9,7 @@
   <img src="https://img.shields.io/badge/Tests-20%2F20%20Passed-success.svg" alt="CTest Passing" />
 </p>
 
-Complete digital broadcast TV receiver and demodulator for the **ISDB-T / ISDB-Tb / SBTVD** standard (Brazil, Japan, Philippines, and Latin America) powered by **RTL-SDR** hardware (RTL2832U with R820T/R828D/E4000 tuners). Built in **pure, high-performance native C++ without GNU Radio dependencies**, featuring a **lock-free SPSC ring buffer** with sequence tracking and coordinated resets, **zero heap allocations** in symbol processing, a **dual-engine OFDM synchronization architecture** (standard Van de Beek and robust `gr-isdbt` port with active timing, CFO/SCO, and re-sync hysteresis), **Regularized MMSE** channel equalization, **128-centered CSI soft scaling** with synchronized bit delay lines in the continuous Viterbi decoder, **$O(1)$ 64 KB direct Galois field table** in Reed-Solomon, smart two-pass spectrum scan with official station name resolution via **SDT**, **dual-target Windows releases (64-bit x64 & 32-bit x86)**, and an **embedded MPV player with real-time super-resolution upscaling and motion interpolation**.
+Complete digital broadcast TV receiver and demodulator for the **ISDB-T / ISDB-Tb / SBTVD** standard (Brazil, Japan, Philippines, and Latin America) powered by **RTL-SDR** hardware (RTL2832U with R820T/R828D/E4000 tuners). Built in **pure, high-performance native C++ without GNU Radio dependencies**, featuring a **lock-free SPSC ring buffer** with sequence tracking and coordinated resets, **zero heap allocations** in symbol processing, a **dual-engine OFDM synchronization architecture** (Van de Beek baseline and robust cyclic-prefix acquisition/tracking with initial CFO estimation, timing/SCO adjustment, and re-lock hysteresis), **Regularized MMSE** channel equalization, **128-centered CSI soft scaling** with synchronized bit delay lines in the continuous Viterbi decoder, **$O(1)$ 64 KB direct Galois field table** in Reed-Solomon, smart two-pass spectrum scan with official station name resolution via **SDT**, **dual-target Windows releases (64-bit x64 & 32-bit x86)**, and an **embedded MPV player with real-time super-resolution upscaling and motion interpolation**.
 
 ---
 
@@ -190,7 +190,7 @@ cmake --build build_x86 -j
 ```
 
 #### CMake Build Flags & Optimization Options
-- **`-DTARGET_ARCH=x64` / `-DTARGET_ARCH=x86`** _(Default: `auto`)_: Sets target binary architecture (`-m64` or `-m32 -msse2 -mfpmath=sse`).
+- **`-DTARGET_ARCH=x64` / `-DTARGET_ARCH=x86`** _(Default: `auto`)_: Sets target architecture; GCC/Clang receive `-m64` or `-m32 -msse2 -mfpmath=sse`, while MSVC must be configured with `-A x64` or `-A Win32`.
 - **`-DISDBT_ENABLE_GRISDBT_SYNC=ON`** _(Default: OFF)_: Enables compilation of the robust `gr-isdbt` OFDM synchronization engine (`--ofdm 2` or `--ofdm=2`).
 - **`-DCMAKE_BUILD_TYPE=Release`**: Enforces `-O3 -DNDEBUG` (GCC/Clang) or `/O2 /DNDEBUG` (MSVC), stripping runtime assertions and maximizing loop unrolling.
 - **`-DISDBT_ENABLE_FAST_MATH=ON`** _(Default: OFF)_: Injects `-ffast-math` or `/fp:fast` to enable aggressive AVX2/FMA vectorization across MMSE equalization, NCO phase accumulation, and soft metric calculations.
@@ -225,7 +225,7 @@ The 20 deterministic tests validate:
 16. `SyncRegressionScan`: Ensures channel scanner operates strictly under baseline Van de Beek synchronization with zero regression.
 17. `BenchAsciiTable`: Validates ASCII table formatting for benchmark telemetry reports.
 18. `RegressionOfdm1`: Baseline Van de Beek regression test anchored to reference broadcast capture.
-19. `SyncGrisdbtRobust`: Validates the robust `gr-isdbt` synchronization engine (active SP timing, integer/fractional CFO, SCO, and FSM hysteresis).
+19. `SyncGrisdbtRobust`: Validates the robust CP-based synchronization engine (timing, initial CFO estimate, SCO, and FSM hysteresis).
 20. `RegressionOfdm2`: Robust `gr-isdbt` synchronization regression test anchored to reference broadcast capture.
 
 ### 2.4 Automated Release Packaging (`build_release.ps1`)
@@ -322,7 +322,7 @@ isdb_t_isdb_tb_tuner_player/
 - **Exact Fundamental Sampling Rate ($2031746\text{ S/s}$):** Exactly $1/4$ of the ISDB-T chip rate $F_{base} = 512/63\text{ MHz} \approx 8.126984\text{ MHz}$, ensuring $>90\%$ cyclic prefix correlation and perfectly aligned FFT bins without rational resampling filters.
 - **Dual-Engine OFDM Synchronization:**
   - *Mode 1 (`VanDeBeekSync`, Baseline):* Sliding cyclic prefix autocorrelation with fractional frequency offset (FFO) estimation and three-state FSM (`Acquisition`, `Tracking` $\pm 4$, `LostLock`).
-  - *Mode 2 (`RobustGRISDBTSync`, gr-isdbt port):* Coarse CP acquisition, active Scattered Pilot (SP) timing refinement, integer CFO estimation via TMCC, fractional CFO via SP, sampling clock offset (SCO) phase accumulation, and 3-symbol lock hysteresis.
+  - *Mode 2 (`RobustGRISDBTSync`):* CP-correlation acquisition and timing refinement, initial CFO estimation from correlation phase, PI timing/SCO adjustment, and re-lock hysteresis after consecutive valid symbols.
 - **Lock-Free SPSC USB Capture Queue (`SpscCaptureQueue`):** Static 64-slot ring buffer with acquire-release memory semantics, atomic drop counters, and explicit sequence gap detection triggering coordinated NCO resets.
 - **Zero Dynamic Allocations in Hot Path:** Complete elimination of `std::deque` and `std::vector::erase` across time, bit, and Forney deinterleavers, replaced with `FixedDelayLine`, `DynamicDelayLine`, and offset sliding (`viterbi_stream_offset_`).
 - **Regularized MMSE Channel Equalization:** Replaces traditional Zero-Forcing with adaptive MMSE ($\sigma^2 = \max(10^{-5}, 0.05 \cdot P_{\text{avg}})$), preventing severe noise amplification in deep fading nulls.

@@ -5,6 +5,7 @@
 #include <vector>
 #include <chrono>
 #include <sstream>
+#include <iomanip>
 #include <filesystem>
 
 namespace fs = std::filesystem;
@@ -155,4 +156,3 @@ int main(int argc, char** argv) {
     auto sanity = isdbt::BenchReport::verify_sanity(avg1, avg2);
     return sanity.passed ? 0 : 1;
 }
-

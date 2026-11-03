@@ -15,14 +15,30 @@ option(ISDBT_ENABLE_GRISDBT_SYNC "Habilitar algoritmo de sincronizacao robusto d
 set(TARGET_ARCH "auto" CACHE STRING "Arquitetura alvo: auto, x64 ou x86")
 
 if(TARGET_ARCH STREQUAL "x86" OR TARGET_ARCH STREQUAL "32")
-    message(STATUS "Configurando compilacao para 32 bits (x86 / -m32)")
-    add_compile_options(-m32 -msse2 -mfpmath=sse)
-    add_link_options(-m32)
+    message(STATUS "Configurando compilacao para 32 bits (x86)")
+    if(MSVC)
+        if(NOT CMAKE_SIZEOF_VOID_P EQUAL 4)
+            message(FATAL_ERROR "Configure a arquitetura x86 do MSVC com -A Win32.")
+        endif()
+    elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        add_compile_options(-m32 -msse2 -mfpmath=sse)
+        add_link_options(-m32)
+    else()
+        message(FATAL_ERROR "TARGET_ARCH=x86 requer MSVC Win32 ou um compilador GNU/Clang.")
+    endif()
     set(IS_32BIT TRUE)
 elseif(TARGET_ARCH STREQUAL "x64" OR TARGET_ARCH STREQUAL "64")
-    message(STATUS "Configurando compilacao para 64 bits (x64 / -m64)")
-    add_compile_options(-m64)
-    add_link_options(-m64)
+    message(STATUS "Configurando compilacao para 64 bits (x64)")
+    if(MSVC)
+        if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+            message(FATAL_ERROR "Configure a arquitetura x64 do MSVC com -A x64.")
+        endif()
+    elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        add_compile_options(-m64)
+        add_link_options(-m64)
+    else()
+        message(FATAL_ERROR "TARGET_ARCH=x64 requer MSVC x64 ou um compilador GNU/Clang.")
+    endif()
     set(IS_32BIT FALSE)
 else()
     if(CMAKE_SIZEOF_VOID_P EQUAL 4)
@@ -32,6 +48,12 @@ else()
         set(IS_32BIT FALSE)
         message(STATUS "Arquitetura detectada automaticamente: 64 bits (x64)")
     endif()
+endif()
+
+set(HASH_LIBS "")
+if(NOT WIN32)
+    find_package(OpenSSL REQUIRED COMPONENTS Crypto)
+    set(HASH_LIBS OpenSSL::Crypto)
 endif()
 
 if(ISDBT_ENABLE_GRISDBT_SYNC)
@@ -224,7 +246,7 @@ add_executable(freeze_baseline_ofdm1
     src/dsp/oneseg_demodulator.cpp
     src/mpegts/psi_parser.cpp
 )
-target_link_libraries(freeze_baseline_ofdm1 PRIVATE ${DSP_EXTERNAL_LIBS})
+target_link_libraries(freeze_baseline_ofdm1 PRIVATE ${DSP_EXTERNAL_LIBS} ${HASH_LIBS})
 
 add_executable(test_cli_ofdm_flag
     tests/test_cli_ofdm_flag.cpp
@@ -251,7 +273,7 @@ add_executable(test_regression_ofdm1
     src/dsp/descrambler.cpp
     src/mpegts/psi_parser.cpp
 )
-target_link_libraries(test_regression_ofdm1 PRIVATE ${DSP_EXTERNAL_LIBS})
+target_link_libraries(test_regression_ofdm1 PRIVATE ${DSP_EXTERNAL_LIBS} ${HASH_LIBS})
 
 add_executable(test_sync_grisdbt_robust
     tests/test_sync_grisdbt_robust.cpp
@@ -270,7 +292,7 @@ add_executable(test_regression_ofdm2
     src/dsp/descrambler.cpp
     src/mpegts/psi_parser.cpp
 )
-target_link_libraries(test_regression_ofdm2 PRIVATE ${DSP_EXTERNAL_LIBS})
+target_link_libraries(test_regression_ofdm2 PRIVATE ${DSP_EXTERNAL_LIBS} ${HASH_LIBS})
 
 # Target dedicado de Benchmark (R17)
 add_executable(bench_sync
@@ -289,6 +311,7 @@ add_executable(bench_sync
     src/mpegts/psi_parser.cpp
 )
 target_link_libraries(bench_sync PRIVATE ${DSP_EXTERNAL_LIBS})
+target_compile_definitions(bench_sync PRIVATE ISDBT_ENABLE_GRISDBT_SYNC=1)
 if(WIN32)
     target_link_libraries(bench_sync PRIVATE psapi)
 endif()
@@ -315,7 +338,9 @@ add_test(NAME SyncRegressionScan COMMAND test_sync_regression_scan)
 add_test(NAME BenchAsciiTable COMMAND test_bench_ascii_table)
 add_test(NAME RegressionOfdm1 COMMAND test_regression_ofdm1)
 add_test(NAME SyncGrisdbtRobust COMMAND test_sync_grisdbt_robust)
-add_test(NAME RegressionOfdm2 COMMAND test_regression_ofdm2)
+add_test(NAME RegressionOfdm2 COMMAND test_regression_ofdm2
+    "${CMAKE_CURRENT_SOURCE_DIR}/samples/ch18_2min_iq.cu8"
+    "${CMAKE_CURRENT_SOURCE_DIR}")
 add_test(NAME BenchSync COMMAND bench_sync --compare)
 set_tests_properties(BenchSync PROPERTIES LABELS "bench")
 

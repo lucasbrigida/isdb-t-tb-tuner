@@ -10,7 +10,7 @@ Universal native CLI decoder and player for ISDB-T / ISDB-Tb (1-Seg) digital TV 
   - Zero dynamic heap allocations in hot loop using `FixedDelayLine` and `DynamicDelayLine`.
   - **Dual-Engine OFDM Synchronization** via `IOFDMSynchronizer`:
     - **Mode 1 (`VanDeBeekSync`, Baseline):** Tripartite OFDM synchronization state machine (`Acquisition`, `Tracking` $\pm 4$ samples, `LostLock`), cyclic prefix correlation & Fractional Frequency Offset (FFO) estimation via Van de Beek ML algorithm with SIMD VOLK vector math.
-    - **Mode 2 (`RobustGRISDBTSync`, gr-isdbt port):** Coarse CP acquisition, active Scattered Pilot (SP) timing refinement, integer CFO estimation via TMCC, fractional CFO via SP, sampling clock offset (SCO) phase accumulation, and 3-symbol lock hysteresis.
+    - **Mode 2 (`RobustGRISDBTSync`):** CP-correlation acquisition and timing refinement, initial CFO estimation from correlation phase, PI timing/SCO adjustment, and re-lock hysteresis after consecutive valid symbols.
   - 2048-point FFT via FFTW3 with continuous fine symbol timing tracking.
   - Integer Frequency Offset (IFO) tracking and Continuous/Scattered Pilots (SP/CP) channel equalization ($X^{11} + X^2 + 1$).
   - Regularized MMSE channel equalization with adaptive noise floor.
@@ -39,7 +39,7 @@ Universal native CLI decoder and player for ISDB-T / ISDB-Tb (1-Seg) digital TV 
 ## Build and Testing
 - Build system: CMake 3.20+ with MinGW-w64 (`w64devkit`) / GCC / MSVC.
 - Build configurations:
-  - `-DTARGET_ARCH=x64` / `-DTARGET_ARCH=x86`: Target architecture (`-m64` or `-m32 -msse2 -mfpmath=sse`).
+  - `-DTARGET_ARCH=x64` / `-DTARGET_ARCH=x86`: Target architecture; GCC/Clang use `-m64` or `-m32 -msse2 -mfpmath=sse`, while MSVC uses the generator platform `-A x64` or `-A Win32`.
   - `-DISDBT_ENABLE_GRISDBT_SYNC=ON` (Optional): Compiles the robust `gr-isdbt` synchronizer (`--ofdm=2`).
   - `-DCMAKE_BUILD_TYPE=Release`: `-O3 -DNDEBUG` (GCC) / `/O2 /DNDEBUG` (MSVC).
   - Interprocedural Optimization (IPO / LTO): Automatically detected and enabled for Release.

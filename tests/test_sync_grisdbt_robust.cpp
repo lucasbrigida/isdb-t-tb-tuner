@@ -3,6 +3,7 @@
 #include <complex>
 #include <cassert>
 #include <cmath>
+#include <algorithm>
 #include "sync/robust_grisdbt_sync.h"
 #include "dsp/constants.hpp"
 
@@ -50,6 +51,16 @@ int main() {
             signal[pos] = (m < N_GI) ? useful[N_FFT - N_GI + m] : useful[m - N_GI];
         }
     }
+
+    std::vector<std::complex<float>> offset_signal(32768);
+    constexpr size_t offset_samples = 2 * SYM_LEN + 2;
+    std::copy_n(signal.begin(), std::min(signal.size(), offset_signal.size() - offset_samples),
+                offset_signal.begin() + offset_samples);
+    isdbt::RobustGRISDBTSync offset_sync(params);
+    std::vector<std::complex<float>> offset_output;
+    offset_sync.process(offset_signal.data(), offset_signal.size(), offset_output);
+    TEST_ASSERT(offset_sync.robust_state() == isdbt::RobustSyncState::Tracking);
+    TEST_ASSERT(!offset_output.empty());
 
     std::vector<std::complex<float>> out_symbols;
     out_symbols.reserve(SYM_LEN * 4);

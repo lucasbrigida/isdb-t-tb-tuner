@@ -101,8 +101,8 @@ O comando `play` permite selecionar o algoritmo de sincronismo OFDM através da 
 # Modo 1 (Padrão): Van de Beek baseline. Mais leve e econômico para a CPU:
 .\isdbtb_rx.exe play -c 23 --player
 
-# Modo 2 (Reforçado): Port robusto do gr-isdbt com rastreamento ativo de timing por pilotos (SP),
-# correção de desvio de frequência fracionário e inteiro (CFO) e relógio de amostragem (SCO):
+# Modo 2 (Reforçado): aquisição e rastreamento de timing por correlação do prefixo cíclico,
+# estimativa inicial de CFO e ajuste de timing/SCO:
 .\isdbtb_rx.exe play -c 23 --ofdm 2 --player
 ```
 

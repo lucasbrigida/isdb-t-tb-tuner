@@ -17,6 +17,7 @@ void VanDeBeekSync::reset() noexcept {
     sync_.reset();
     ofdm_locked_ = false;
     tracked_ffo_hz_ = 0.0f;
+    peak_correlation_ = 0.0f;
     unlock_counter_ = 0;
     frac_pos_ = 0.0f;
     gi_len_ = static_cast<size_t>(sync_.gi_size());
@@ -41,6 +42,7 @@ void VanDeBeekSync::process(const std::complex<float>* in, size_t n,
     std::copy(in, in + n, temp_buf_.begin());
 
     auto sync_res = sync_.find_symbol_boundary(in, n);
+    peak_correlation_ = sync_res.peak_correlation;
     cur_state_ = sync_.sync_state();
 
     if (!ofdm_locked_) {
@@ -115,4 +117,3 @@ void VanDeBeekSync::process(const std::complex<float>* in, size_t n,
 }
 
 } // namespace isdbt
-

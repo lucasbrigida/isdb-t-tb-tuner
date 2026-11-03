@@ -46,10 +46,27 @@ fi
 
 # Localiza utilitário rtl_sdr
 RTL_SDR_BIN=""
-if [ -f "${ROOT_DIR}/tools/rtl-sdr/x64/rtl_sdr.exe" ]; then
-    RTL_SDR_BIN="${ROOT_DIR}/tools/rtl-sdr/x64/rtl_sdr.exe"
-elif [ -f "${ROOT_DIR}/tools/rtl-sdr/x86/rtl_sdr.exe" ]; then
-    RTL_SDR_BIN="${ROOT_DIR}/tools/rtl-sdr/x86/rtl_sdr.exe"
+case "$(uname -m 2>/dev/null || echo unknown)" in
+    x86_64|amd64) RTL_ARCH="x64" ;;
+    i?86|x86) RTL_ARCH="x86" ;;
+    *)
+        if [ "$(getconf LONG_BIT 2>/dev/null || echo 64)" = "32" ]; then
+            RTL_ARCH="x86"
+        else
+            RTL_ARCH="x64"
+        fi
+        ;;
+esac
+
+FALLBACK_ARCH="x64"
+if [ "${RTL_ARCH}" = "x64" ]; then
+    FALLBACK_ARCH="x86"
+fi
+
+if [ -f "${ROOT_DIR}/tools/rtl-sdr/${RTL_ARCH}/rtl_sdr.exe" ]; then
+    RTL_SDR_BIN="${ROOT_DIR}/tools/rtl-sdr/${RTL_ARCH}/rtl_sdr.exe"
+elif [ -f "${ROOT_DIR}/tools/rtl-sdr/${FALLBACK_ARCH}/rtl_sdr.exe" ]; then
+    RTL_SDR_BIN="${ROOT_DIR}/tools/rtl-sdr/${FALLBACK_ARCH}/rtl_sdr.exe"
 elif [ -f "${ROOT_DIR}/tools/rtl-sdr/rtl_sdr.exe" ]; then
     RTL_SDR_BIN="${ROOT_DIR}/tools/rtl-sdr/rtl_sdr.exe"
 elif command -v rtl_sdr >/dev/null 2>&1; then
@@ -102,4 +119,3 @@ echo "[SUCESSO] Captura concluída com sucesso."
 echo "  Arquivo:  ${OUTPUT_FILE}"
 echo "  SHA-256:  ${SHA256_HASH}"
 echo "  Metadados: ${META_FILE}"
-
