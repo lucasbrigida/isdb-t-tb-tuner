@@ -220,7 +220,7 @@ Os 20 testes determinísticos cobrem:
 10. `ResetRecovery`: Recuperação determinística do pipeline DSP e estabilização de NCO após gaps de sequência e resets coordenados.
 11. `SyncStateAndCsi`: Máquina de estados tripartite de sincronismo OFDM (`Acquisition` $\to$ `Tracking` $\to$ `LostLock`) e escala de ponderação CSI centrada em 128.
 12. `FrequencyPlan`: Síntese de frequências e cálculo de portadoras para todos os canais UHF 14 a 69.
-13. `ChannelManager`: Operações em memória e persistência JSON (`channels.json`) entre plataformas.
+13. `ChannelManager`: Operações em memória e persistência JSON estritamente local e portátil (`channels.json`).
 14. `PsiParser`: Parsers de MPEG-TS PAT, PMT e SDT com resolução de emissoras e síntese de PAT de fallback.
 15. `CliOfdmFlag`: Validação de parsing de linha de comando da flag `--ofdm` (`--ofdm 1`, `--ofdm 2`, `--ofdm=1`, `--ofdm=2`), rejeição estrita de valores inválidos e descarte silencioso fora de `play`.
 16. `SyncRegressionScan`: Garantia de não-regressão do scanner, operando estritamente sob Van de Beek baseline.
@@ -261,8 +261,11 @@ O repositório conta com um ecossistema completo de utilitários de diagnóstico
 | ↳ `rtl_sdr.exe` | **Gravador de RF I/Q:** Captura amostras brutas de RF para arquivos binários `.raw`/`.cu8` para simulação offline. |
 | ↳ `rtl_power.exe` | **Analisador de Espectro FFT:** Mede a densidade espectral e o piso de ruído térmico em toda a faixa de UHF (470 a 806 MHz). |
 | ↳ `rtl_tcp.exe` | **Servidor de Streaming TCP:** Transmite dados I/Q digitalizados através de sockets de rede para processamento remoto. |
-| **[`tools/mpv/`](tools/mpv/)** | Reprodutor **MPV portátil (x64)** integrado com shaders de upscaling em tempo real. |
-| **[`tools/mpv/x86/`](tools/mpv/x86/)** | Reprodutor oficial **MPV portátil (i686 32 bits)** para ambientes Windows de 32 bits. |
+| **[`tools/mpv/`](tools/mpv/)** | Reprodutor oficial **MPV portátil** segregado simetricamente por arquitetura: |
+| ↳ `x64/` | Reprodutor MPV portátil de 64 bits integrado com shaders de upscaling em tempo real. |
+| ↳ `x86/` | Reprodutor oficial MPV portátil (i686 32 bits) para máxima compatibilidade com hardware legado. |
+| **[`tools/calibrate_ppm.py`](tools/calibrate_ppm.py)** | **Calibração de PPM:** Ferramenta Python para estimativa precisa do erro de oscilador local em 2031746 S/s. |
+| **[`tools/quick_rf_scan.py`](tools/quick_rf_scan.py)** | **Varredura Rápida de RF:** Varre rapidamente o espectro UHF (canais 14 a 45) reportando níveis de sinal. |
 
 ### 2.6 Mapa da Arquitetura do Código
 
@@ -293,13 +296,19 @@ isdb_t_isdb_tb_tuner_player/
 ├── samples/                    # Amostras de RF de referência (Canal 18, 2031746 S/s, Git LFS)
 ├── tools/
 │   ├── zadig.exe               # Instalador de driver USB (WinUSB v2.9)
-│   ├── mpv/                    # Reprodutor MPV embutido portátil (x64) com shaders
+│   ├── calibrate_ppm.py        # Utilitário de calibração de PPM de oscilador local a 2031746 S/s
+│   ├── quick_rf_scan.py        # Utilitário de varredura rápida de RF dos canais UHF
+│   ├── mpv/                    # Reprodutor MPV embutido portátil segregado por arquitetura
+│   │   ├── x64/                # Reprodutor oficial MPV portátil (x64) com shaders
 │   │   └── x86/                # Reprodutor oficial MPV portátil (i686 32 bits)
-│   └── rtl-sdr/                # Ferramentas oficiais e DLLs Osmocom RTL-SDR (x64 / x86)
+│   └── rtl-sdr/                # Ferramentas oficiais e DLLs Osmocom RTL-SDR segregadas
+│       ├── x64/                # DLLs e utilitários de 64 bits (rtl_test, rtl_sdr, etc.)
+│       └── x86/                # DLLs e utilitários de 32 bits (rtl_test, rtl_sdr, etc.)
 ├── scripts/
 │   ├── build_release.ps1       # Automação de release dual-arch e validação PE
-│   ├── play_mpv.bat            # Script auxiliar para reprodução manual com MPV
-│   └── calibrate_ppm.py        # Ferramenta de calibração de PPM de oscilador local a 2031746 S/s
+│   ├── play_mpv.bat            # Script auxiliar para reprodução com MPV (auto/x64/x86)
+│   ├── play_mpv_x86.bat        # Atalho dedicado para executar o MPV de 32 bits
+│   └── play_mpv.ps1            # Script PowerShell de reprodução com MPV
 ├── releases/                   # Pacotes de release prontos para uso (win64.zip / win32.zip)
 ├── docs/                       # Registros de decisões de arquitetura (ADR 001 a 025) e especificações
 └── tests/                      # 20 casos de testes determinísticos CTest e suítes de regressão

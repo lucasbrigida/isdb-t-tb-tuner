@@ -43,9 +43,15 @@ if ((Test-Path $OutputFile) -and (Test-Path $ShaFile)) {
     }
 }
 
-$RtlSdrBin = Join-Path $RootDir "tools\rtl-sdr\rtl_sdr.exe"
+$RtlSdrBin = Join-Path $RootDir "tools\rtl-sdr\x64\rtl_sdr.exe"
 if (-not (Test-Path $RtlSdrBin)) {
-    Write-Error "Utilitario rtl_sdr.exe nao encontrado em tools/rtl-sdr!"
+    $RtlSdrBin = Join-Path $RootDir "tools\rtl-sdr\x86\rtl_sdr.exe"
+}
+if (-not (Test-Path $RtlSdrBin)) {
+    $RtlSdrBin = Join-Path $RootDir "tools\rtl-sdr\rtl_sdr.exe"
+}
+if (-not (Test-Path $RtlSdrBin)) {
+    Write-Error "Utilitario rtl_sdr.exe nao encontrado em tools/rtl-sdr/x64 nem em tools/rtl-sdr/x86!"
     exit 1
 }
 

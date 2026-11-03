@@ -17,9 +17,12 @@ DEFAULT_CENTER_FREQ_HZ = 473142857  # Canal 14 UHF (470 + 3 + 1/7 MHz)
 # Procura DLL tanto em tools/rtl-sdr quanto em deps
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_dir = os.path.dirname(script_dir)
+arch = "x64" if ctypes.sizeof(ctypes.c_void_p) == 8 else "x86"
 possible_dirs = [
-    os.path.join(project_dir, "tools", "rtl-sdr"),
-    os.path.join(project_dir, "deps", "rtlsdr", "x64")
+    os.path.join(project_dir, "tools", "rtl-sdr", arch),
+    os.path.join(project_dir, "tools", "rtl-sdr", "x64"),
+    os.path.join(project_dir, "tools", "rtl-sdr", "x86"),
+    os.path.join(project_dir, "deps", "rtlsdr", arch)
 ]
 
 dll_dir = None

@@ -41,10 +41,9 @@ Qualquer agente que editar o código-fonte deve respeitar estritamente as seguin
 - No Windows, a saída padrão (`stdout`) e arquivos binários abrem em modo texto por padrão (onde bytes `0x0A` (`\n`) viram `0x0D 0x0A` (`\r\n`)).
 - **Regra:** Se for redirecionar pacotes TS para pipes (`stdout`), `Platform::set_binary_stdout()` (`_setmode(_fileno(stdout), _O_BINARY)`) deve permanecer ativo.
 
-### 4. Persistência de Canais em JSON
-- Windows: `%APPDATA%\isdbtb_rx\channels.json`
-- Linux: `~/.config/isdbtb_rx/channels.json`
-- **Regra:** Use sempre a classe `ChannelManager` e `std::filesystem` para manipular caminhos.
+### 4. Persistência de Canais em JSON (Modo Portátil e Estritamente Local)
+- O arquivo de persistência de canais `channels.json` é armazenado **estritamente e exclusivamente no diretório local de execução do aplicativo** (`./channels.json`).
+- **Regra:** Não utilize nem consulte pastas ocultas de sistema do usuário (`%APPDATA%` ou `~/.config/`). Isso garante portabilidade total (*portable app*), elimina falhas de permissão e permite que o executável rode de qualquer pasta ou pendrive de forma independente. Use sempre a classe `ChannelManager` e `std::filesystem`.
 
 ### 5. Fila SPSC Lock-Free e Resets Coordenados de NCO
 - O desacoplamento entre a leitura USB e o processamento DSP **DEVE** utilizar `SpscCaptureQueue<64>` com ring buffer estático pré-alocado.
@@ -82,7 +81,8 @@ Qualquer agente que editar o código-fonte deve respeitar estritamente as seguin
 ### 11. Compilação Dual-Architecture (`TARGET_ARCH=x64` e `TARGET_ARCH=x86`)
 - O projeto suporta nativamente 64 bits (`-m64`) e 32 bits (`-m32 -msse2 -mfpmath=sse`).
 - Handlers e callbacks Win32 no x86 exigem convenção `WINAPI` (`__stdcall`) estrita.
-- DLLs de 32 bits e 64 bits do RTL-SDR e MPV devem ser mantidas estritamente isoladas em suas pastas de arquitetura (`tools/rtl-sdr/x86/` e `tools/rtl-sdr/x64/`).
+- Executáveis e DLLs de 32 bits e 64 bits do RTL-SDR e MPV devem ser mantidos estritamente isolados em suas pastas de arquitetura (`tools/rtl-sdr/x86/`, `tools/rtl-sdr/x64/`, `tools/mpv/x86/` e `tools/mpv/x64/`).
+- Utilitários diagnósticos Python (`calibrate_ppm.py`, `quick_rf_scan.py`) e ferramentas de captura/síntese residem formalmente no diretório `tools/`, mantendo `scripts/` reservado a automações operacionais e lançadores de player.
 
 ---
 

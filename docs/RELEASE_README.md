@@ -53,7 +53,7 @@ Realiza a varredura inteligente em dois passos nos canais UHF (14 a 69):
 ```powershell
 .\isdbtb_rx.exe scan
 ```
-> Os canais encontrados são salvos automaticamente no arquivo `%APPDATA%\isdbtb_rx\channels.json`.
+> Os canais encontrados são salvos automaticamente no arquivo local `channels.json` (aplicação 100% autocontida e portátil).
 
 ### 3. Listar Canais Salvos (`list`)
 Exibe a lista de emissoras salvas na varredura:

@@ -16,6 +16,7 @@
     #include <signal.h>
     #include <termios.h>
     #include <sys/select.h>
+    #include <sys/ioctl.h>
 #endif
 
 namespace isdbt {
@@ -104,11 +105,17 @@ bool launch_mpv(uint16_t udp_port) {
     if (sizeof(void*) == 4 && std::filesystem::exists("tools\\mpv\\x86\\mpv.exe")) {
         mpv_bin = "tools\\mpv\\x86\\mpv.exe";
         conf_dir = "tools\\mpv\\x86";
+    } else if (sizeof(void*) == 8 && std::filesystem::exists("tools\\mpv\\x64\\mpv.exe")) {
+        mpv_bin = "tools\\mpv\\x64\\mpv.exe";
+        conf_dir = "tools\\mpv\\x64";
     } else if (!std::filesystem::exists(mpv_bin)) {
         auto root = std::filesystem::current_path();
         if (sizeof(void*) == 4 && std::filesystem::exists(root / "tools" / "mpv" / "x86" / "mpv.exe")) {
             mpv_bin = (root / "tools" / "mpv" / "x86" / "mpv.exe").string();
             conf_dir = (root / "tools" / "mpv" / "x86").string();
+        } else if (sizeof(void*) == 8 && std::filesystem::exists(root / "tools" / "mpv" / "x64" / "mpv.exe")) {
+            mpv_bin = (root / "tools" / "mpv" / "x64" / "mpv.exe").string();
+            conf_dir = (root / "tools" / "mpv" / "x64").string();
         } else if (std::filesystem::exists(root / "tools" / "mpv" / "mpv.exe")) {
             mpv_bin = (root / "tools" / "mpv" / "mpv.exe").string();
             conf_dir = (root / "tools" / "mpv").string();
@@ -208,6 +215,27 @@ int console_getch() {
     tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
     return ch;
 #endif
+}
+
+TerminalSize get_terminal_size() {
+    TerminalSize sz{80, 24};
+#ifdef _WIN32
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (hOut != INVALID_HANDLE_VALUE && GetConsoleScreenBufferInfo(hOut, &csbi)) {
+        sz.width = csbi.srWindow.Right - csbi.srWindow.Left + 1;
+        sz.height = csbi.srWindow.Bottom - csbi.srWindow.Top + 1;
+    }
+#else
+    struct winsize ws;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0 && ws.ws_row > 0) {
+        sz.width = ws.ws_col;
+        sz.height = ws.ws_row;
+    }
+#endif
+    if (sz.width < 20) sz.width = 80;
+    if (sz.height < 5) sz.height = 24;
+    return sz;
 }
 
 } // namespace isdbt

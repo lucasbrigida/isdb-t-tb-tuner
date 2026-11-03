@@ -755,3 +755,43 @@ Embora sistemas modernos Windows operem predominantemente em arquiteturas de 64 
 - Cobertura universal de plataformas Windows (Windows 7/8/10/11 tanto em x64 quanto em x86).
 - Pacotes de release 100% autocontidos, portáteis e sem dependências externas instaladas no sistema.
 - Garantia matemática de que o código compila e passa em 100% dos testes determinísticos em ambas as larguras de palavra (32 e 64 bits).
+
+---
+
+## ADR 026: Persistência Exclusivamente Local e Portátil (`channels.json`)
+
+### Contexto
+Originalmente, a classe `ChannelManager` consultava variáveis de ambiente do sistema operacional para salvar a lista de canais sintonizados em diretórios de perfil de usuário (`%APPDATA%\isdbtb_rx\channels.json` no Windows e `~/.config/isdbtb_rx/channels.json` no Linux). Em ambientes restritos, contas de usuário sem privilégios administrativos, terminais sem `%APPDATA%` configurado ou ao executar a aplicação a partir de mídias portáteis (como pendrives), essa abordagem gerava limitações de permissão, caminhos ocultos de difícil inspeção e inconsistências entre múltiplas instâncias instaladas.
+
+### Decisão
+Eliminar qualquer dependência ou consulta a variáveis de ambiente de pastas de usuário (`%APPDATA%`, `USERPROFILE`, `HOME`).
+1. `ChannelManager::get_default_config_path()` passa a retornar estritamente e exclusivamente `"channels.json"`.
+2. A leitura e gravação ocorrem sempre no diretório local de trabalho da aplicação (modo portátil puro).
+3. O arquivo `channels.json` foi devidamente blindado no `.gitignore` para evitar poluição do repositório em testes locais.
+
+### Consequências
+- A aplicação é agora 100% autocontida (*portable app*): descompactar o ZIP e executar em qualquer pasta ou pendrive funciona imediatamente.
+- Zero erros de permissão de escrita em diretórios ocultos do sistema operacional.
+
+---
+
+## ADR 027: Segregação Simétrica de Ferramentas por Arquitetura e Layout Dinâmico no Terminal
+
+### Contexto
+1. Arquivos de 64 bits do MPV e Osmocom RTL-SDR residiam soltos na raiz de `tools/mpv/` e `tools/rtl-sdr/`, enquanto os de 32 bits estavam em subpastas `x86/`. Além disso, ferramentas diagnósticas em Python estavam misturadas em `scripts/`.
+2. No comando `play -v`, a renderização do status em tempo real gerava quebra de linha (*word wrap*) e duplicava linhas ao redimensionar a janela do terminal, poluindo a visualização da lista de canais.
+
+### Decisão
+1. **Simetria Completa de Ferramentas:**
+   - `tools/rtl-sdr/x64/` e `tools/rtl-sdr/x86/` contêm todas as DLLs e executáveis oficiais de cada ABI.
+   - `tools/mpv/x64/` e `tools/mpv/x86/` contêm a distribuição portátil completa do MPV para cada ABI.
+   - Utilitários diagnósticos (`calibrate_ppm.py`, `quick_rf_scan.py`) movidos formalmente para `tools/`.
+   - `scripts/` reservado a scripts de automação (`build_release.ps1`) e lançadores do player.
+2. **Layout Estável no Terminal:**
+   - Adicionada detecção da geometria do console (`get_terminal_size()`).
+   - Com `-v`, o status de RF é exibido via posicionamento absoluto ANSI na **antepenúltima linha** (`height - 2`), com truncamento dinâmico estrito em `width - 1` caracteres, eliminando *word wrap* ao redimensionar o terminal.
+   - A última linha (`height`) exibe em alto contraste com **fundo branco e letras pretas** (`\033[30;47m`) a legenda de navegação, sem emitir `\n` final para não rolar o buffer da tela.
+
+### Consequências
+- Repositório limpo, simétrico e padronizado por arquitetura.
+- Experiência do usuário (UX) estável e sem piscar ou duplicar linhas no terminal.

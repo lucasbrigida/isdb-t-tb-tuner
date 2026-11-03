@@ -213,10 +213,11 @@ function Build-And-Package-Release([string]$targetArch) {
 
     # Ferramenta MPV
     if ($targetArch -eq 'x64') {
-        Copy-Item "tools\mpv\mpv.exe" "$stagingDir\tools\mpv\"
-        Copy-Item "tools\mpv\mpv.conf" "$stagingDir\tools\mpv\"
-        if (Test-Path "tools\mpv\d3dcompiler_43.dll") {
-            Copy-Item "tools\mpv\d3dcompiler_43.dll" "$stagingDir\tools\mpv\"
+        $mpvSrc = if (Test-Path "tools\mpv\x64\mpv.exe") { "tools\mpv\x64" } else { "tools\mpv" }
+        Copy-Item "$mpvSrc\mpv.exe" "$stagingDir\tools\mpv\"
+        Copy-Item "$mpvSrc\mpv.conf" "$stagingDir\tools\mpv\"
+        if (Test-Path "$mpvSrc\d3dcompiler_43.dll") {
+            Copy-Item "$mpvSrc\d3dcompiler_43.dll" "$stagingDir\tools\mpv\"
         }
     } else {
         Copy-Item "tools\mpv\x86\mpv.exe" "$stagingDir\tools\mpv\"

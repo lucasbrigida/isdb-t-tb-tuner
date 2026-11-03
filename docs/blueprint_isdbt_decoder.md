@@ -13,7 +13,7 @@ Este documento sintetiza todas as decisões técnicas acordadas durante a sessã
    - **Linux:** GCC/Clang + CMake nativo.
    - **Dependências Matemáticas:** VOLK + FFTW3 + `librtlsdr`, compiladas diretamente para o ambiente.
 3. **Calibração e Pré-Voo:**
-   - **Abordagem Híbrida:** Script Python auxiliar (`scripts/calibrate_ppm.py` via `pyrtlsdr`) para estimativa de PPM/DC offset, integrado ao fluxo da CLI.
+   - **Abordagem Híbrida:** Script Python auxiliar (`tools/calibrate_ppm.py` via `pyrtlsdr`) para estimativa de PPM/DC offset, integrado ao fluxo da CLI.
 4. **Scanner de Frequências (Channel Scanner):**
    - **Varredura Sequencial Profunda:** Foco em máxima sensibilidade. Tenta travar sincronismo OFDM e decodificar tabelas PSI/SI (SDT/NIT) em cada canal da lista de frequências globais (UHF Brasil 14–51 / Japão 13–52).
 5. **Streaming e Apresentação ao Usuário:**

@@ -8,16 +8,7 @@
 namespace isdbt {
 
 std::string ChannelManager::get_default_config_path() {
-#ifdef _WIN32
-    const char* appdata = std::getenv("APPDATA");
-    if (!appdata) appdata = std::getenv("USERPROFILE");
-    if (!appdata) return "channels.json";
-    return std::string(appdata) + "\\isdbtb_rx\\channels.json";
-#else
-    const char* home = std::getenv("HOME");
-    if (!home) return "channels.json";
-    return std::string(home) + "/.config/isdbtb_rx/channels.json";
-#endif
+    return "channels.json";
 }
 
 ChannelManager::ChannelManager(const std::string& custom_path)

@@ -106,6 +106,7 @@ void test_persistence() {
 }
 
 int main() {
+    TEST_ASSERT(isdbt::ChannelManager::get_default_config_path() == "channels.json");
     test_in_memory_operations();
     test_persistence();
 

@@ -219,7 +219,7 @@ The 20 deterministic tests validate:
 10. `ResetRecovery`: Verifies coordinated stream reset and NCO phase recovery following simulated USB transfer drops.
 11. `SyncStateAndCsi`: Validates the three-state OFDM synchronization engine (`Acquisition` $\to$ `Tracking` $\to$ `LostLock`) and 128-centered CSI soft metric scaling.
 12. `FrequencyPlan`: Frequency synthesis and carrier calculations for all 14–69 UHF channels.
-13. `ChannelManager`: In-memory operations and JSON persistence (`channels.json`) across platforms.
+13. `ChannelManager`: In-memory operations and portable, strictly local JSON persistence (`channels.json`).
 14. `PsiParser`: MPEG-TS PAT, PMT, and SDT parsing with station name extraction and fallback PAT synthesis.
 15. `CliOfdmFlag`: Validates `--ofdm` CLI argument parsing (`--ofdm 1`, `--ofdm 2`, `--ofdm=1`, `--ofdm=2`), strict rejection of invalid values, and silent ignoring outside `play`.
 16. `SyncRegressionScan`: Ensures channel scanner operates strictly under baseline Van de Beek synchronization with zero regression.
@@ -260,8 +260,11 @@ The repository hosts a complete ecosystem of standalone tools and reference util
 | ↳ `rtl_sdr.exe` | **Raw RF I/Q Recorder:** Captures raw RF samples directly from the air to `.raw` binary files for offline simulation. |
 | ↳ `rtl_power.exe` | **FFT Spectrum Analyzer:** Measures broadband RF power spectral density and thermal noise floor across the entire UHF broadcast band (470 to 806 MHz). |
 | ↳ `rtl_tcp.exe` | **Network I/Q Streaming Server:** Streams raw digitized I/Q data over TCP/IP sockets for remote SDR processing. |
-| **[`tools/mpv/`](tools/mpv/)** | Embedded **MPV Media Player (x64)** distribution with custom GPU scaling shaders. |
-| **[`tools/mpv/x86/`](tools/mpv/x86/)** | Official embedded **MPV Media Player (i686 32-bit)** distribution for 32-bit Windows systems. |
+| **[`tools/mpv/`](tools/mpv/)** | Official **portable MPV player** symmetrically segregated by architecture: |
+| ↳ `x64/` | 64-bit portable MPV player integrated with real-time upscaling shaders. |
+| ↳ `x86/` | Official 32-bit (i686) portable MPV player for legacy hardware compatibility. |
+| **[`tools/calibrate_ppm.py`](tools/calibrate_ppm.py)** | **PPM Calibration:** Python tool for local oscillator PPM offset calibration at 2031746 S/s. |
+| **[`tools/quick_rf_scan.py`](tools/quick_rf_scan.py)** | **Quick RF Spectrum Check:** Fast spectrum scanner across UHF channels 14 to 45 reporting RSSI levels. |
 
 ### 2.6 Codebase Architecture Map
 
@@ -292,13 +295,19 @@ isdb_t_isdb_tb_tuner_player/
 ├── samples/                    # Reference RF captures (Channel 18, 2031746 S/s, Git LFS)
 ├── tools/
 │   ├── zadig.exe               # Official USB driver installation utility (WinUSB v2.9)
-│   ├── mpv/                    # Embedded MPV portable player (x64) with custom scaling shaders
+│   ├── calibrate_ppm.py        # Local oscillator PPM calibration tool running at exact 2031746 S/s
+│   ├── quick_rf_scan.py        # Fast UHF channel RF spectrum scanner
+│   ├── mpv/                    # Embedded MPV portable player segregated by architecture
+│   │   ├── x64/                # Official MPV player (x64) with custom scaling shaders
 │   │   └── x86/                # Embedded official MPV player (i686 32-bit)
-│   └── rtl-sdr/                # Official Osmocom RTL-SDR diagnostic tools & DLLs (x64 / x86)
+│   └── rtl-sdr/                # Official Osmocom RTL-SDR diagnostic tools & DLLs segregated by arch
+│       ├── x64/                # 64-bit DLLs and command-line utilities (rtl_test, rtl_sdr, etc.)
+│       └── x86/                # 32-bit DLLs and command-line utilities (rtl_test, rtl_sdr, etc.)
 ├── scripts/
 │   ├── build_release.ps1       # Dual-architecture release automation and strict PE validation
-│   ├── play_mpv.bat            # Helper script for manual MPV playback
-│   └── calibrate_ppm.py        # Local oscillator PPM calibration tool running at exact 2031746 S/s
+│   ├── play_mpv.bat            # Helper launcher for MPV playback (auto/x64/x86)
+│   ├── play_mpv_x86.bat        # Dedicated shortcut for 32-bit MPV player
+│   └── play_mpv.ps1            # PowerShell MPV launcher script
 ├── releases/                   # Ready-to-use standalone release packages (win64.zip / win32.zip)
 ├── docs/                       # Technical architecture decisions (ADR 001 to 025) and specifications
 └── tests/                      # 20 deterministic CTest test cases and regression suites

@@ -232,9 +232,7 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
     };
     update_window();
 
-    // 1 (Canais) + (top ind) + visible_count + (bot ind) + 2 (\nComandos...)
-    const int channel_section_lines = 1 + (has_scroll ? 1 : 0) + visible_count + (has_scroll ? 1 : 0) + 2;
-    const int dynamic_lines = (verbose ? 2 : 0) + channel_section_lines;
+    const int channel_section_lines = 1 + (has_scroll ? 1 : 0) + visible_count + (has_scroll ? 1 : 0);
 
     std::string last_status_str;
     if (verbose) {
@@ -243,12 +241,36 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
         last_status_str = ss.str();
     }
 
-    auto render_dynamic_ui = [&](bool move_up) {
-        if (move_up) {
-            std::cout << "\033[" << dynamic_lines << "F";
-        }
+    auto render_bottom_bars = [&]() {
+        TerminalSize sz = get_terminal_size();
+
+        // 1. Antepenultima linha (height - 2): Status (apenas com flag -v)
         if (verbose) {
-            std::cout << "\033[2K" << last_status_str << "\n\033[2K\n";
+            std::string safe_status = last_status_str;
+            int max_w = std::max(0, sz.width - 1);
+            if (static_cast<int>(safe_status.length()) > max_w) {
+                safe_status = (max_w > 4) ? safe_status.substr(0, max_w - 3) + "..." : safe_status.substr(0, max_w);
+            }
+            std::cout << "\033[" << (sz.height - 2) << ";1H\033[2K" << safe_status;
+        }
+
+        // 2. Penultima linha (height - 1): Linha limpa de respiro
+        std::cout << "\033[" << (sz.height - 1) << ";1H\033[2K";
+
+        // 3. Ultima linha (height): Barra de navegacao (fundo branco, letras pretas)
+        std::string nav_bar = " Comandos: [▲/▼] Navegar | [Enter] Sintonizar | [q] Sair";
+        int target_len = std::max(0, sz.width - 1);
+        if (static_cast<int>(nav_bar.length()) > target_len) {
+            nav_bar = nav_bar.substr(0, target_len);
+        } else if (static_cast<int>(nav_bar.length()) < target_len) {
+            nav_bar += std::string(target_len - nav_bar.length(), ' ');
+        }
+        std::cout << "\033[" << sz.height << ";1H\033[2K\033[30;47m" << nav_bar << "\033[0m" << std::flush;
+    };
+
+    auto render_channels = [&](bool move_up) {
+        if (move_up) {
+            std::cout << "\033[" << channel_section_lines << "F";
         }
         std::cout << "\033[2KCanais\n";
         if (channels.empty()) {
@@ -276,9 +298,12 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
                 }
             }
         }
-        std::cout << "\033[2K\n";
-        std::cout << "\033[2KComandos: [Setas Cima/Baixo] Navegar | [Enter] Sintonizar | [q] Sair\n";
         std::cout << std::flush;
+    };
+
+    auto render_dynamic_ui = [&](bool move_up) {
+        render_channels(move_up);
+        render_bottom_bars();
     };
 
     // 5. Renderizacao inicial consistente (apenas modo interativo)
@@ -815,7 +840,7 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
                 }
 
                 last_status_str = status_ss.str();
-                render_dynamic_ui(true);
+                render_bottom_bars();
             }
 
             last_render_time = now;
@@ -825,7 +850,8 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
     }
 
     // Restaura o cursor do terminal
-    std::cout << "\033[?25h\n\n[Encerrando] Fechando player, dongle RTL-SDR e encerrando stream UDP...\n";
+    TerminalSize final_sz = get_terminal_size();
+    std::cout << "\033[" << final_sz.height << ";1H\033[2K\033[0m\033[?25h\n[Encerrando] Fechando player, dongle RTL-SDR e encerrando stream UDP...\n";
     }
 
     reader_running.store(false, std::memory_order_release);

@@ -5,8 +5,13 @@ param(
 )
 
 $RootDir = Split-Path -Parent $PSScriptRoot
-$MpvBin = Join-Path $RootDir "tools\mpv\mpv.exe"
-$MpvConfDir = Join-Path $RootDir "tools\mpv"
+$MpvBin = Join-Path $RootDir "tools\mpv\x64\mpv.exe"
+$MpvConfDir = Join-Path $RootDir "tools\mpv\x64"
+
+if (-not (Test-Path $MpvBin)) {
+    $MpvBin = Join-Path $RootDir "tools\mpv\mpv.exe"
+    $MpvConfDir = Join-Path $RootDir "tools\mpv"
+}
 
 # Deteccao automatica ou forçada de ambiente 32-bit (x86)
 $is32Bit = ($Arch -in @('x86', '32')) -or ($Arch -eq 'auto' -and ([IntPtr]::Size -eq 4 -or $env:PROCESSOR_ARCHITECTURE -eq 'x86'))

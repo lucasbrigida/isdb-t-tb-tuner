@@ -28,8 +28,15 @@ if /i "%~2"=="x86" (
     set TARGET_ARCH=x64
 )
 
-set MPV_BIN=tools\mpv\mpv.exe
-set MPV_CONF_DIR=tools\mpv
+set MPV_BIN=tools\mpv\x64\mpv.exe
+set MPV_CONF_DIR=tools\mpv\x64
+
+if not exist "%MPV_BIN%" (
+    if exist "tools\mpv\mpv.exe" (
+        set MPV_BIN=tools\mpv\mpv.exe
+        set MPV_CONF_DIR=tools\mpv
+    )
+)
 
 if "%TARGET_ARCH%"=="x86" (
     if exist "tools\mpv\x86\mpv.exe" (

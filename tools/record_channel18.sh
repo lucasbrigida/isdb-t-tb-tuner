@@ -46,7 +46,11 @@ fi
 
 # Localiza utilitário rtl_sdr
 RTL_SDR_BIN=""
-if [ -f "${ROOT_DIR}/tools/rtl-sdr/rtl_sdr.exe" ]; then
+if [ -f "${ROOT_DIR}/tools/rtl-sdr/x64/rtl_sdr.exe" ]; then
+    RTL_SDR_BIN="${ROOT_DIR}/tools/rtl-sdr/x64/rtl_sdr.exe"
+elif [ -f "${ROOT_DIR}/tools/rtl-sdr/x86/rtl_sdr.exe" ]; then
+    RTL_SDR_BIN="${ROOT_DIR}/tools/rtl-sdr/x86/rtl_sdr.exe"
+elif [ -f "${ROOT_DIR}/tools/rtl-sdr/rtl_sdr.exe" ]; then
     RTL_SDR_BIN="${ROOT_DIR}/tools/rtl-sdr/rtl_sdr.exe"
 elif command -v rtl_sdr >/dev/null 2>&1; then
     RTL_SDR_BIN="rtl_sdr"
