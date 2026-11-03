@@ -226,7 +226,7 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
     };
     update_window();
 
-    const int channel_section_lines = 1 + (has_scroll ? 1 : 0) + visible_count + (has_scroll ? 1 : 0);
+    const int channel_section_lines = (has_scroll ? 1 : 0) + visible_count + (has_scroll ? 1 : 0);
 
     std::string last_status_str;
     if (verbose) {
@@ -264,9 +264,8 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
 
     auto render_channels = [&](bool move_up) {
         if (move_up) {
-            std::cout << "\033[" << channel_section_lines << "F";
+            std::cout << "\033[" << channel_section_lines + 2 << "F";
         }
-        std::cout << "\033[2KCanais\n";
         if (channels.empty()) {
             std::cout << "\033[2K  Nenhum canal salvo. Execute scan para realizar a busca de canais\n";
         } else {
