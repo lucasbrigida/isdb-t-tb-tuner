@@ -1,6 +1,7 @@
 #include "streaming/udp_streamer.hpp"
 #include <iostream>
 #include <array>
+#include <algorithm>
 #include <cstring>
 
 #ifdef _WIN32
@@ -23,7 +24,7 @@
 namespace isdbt {
 
 UdpStreamer::UdpStreamer(const std::string& host, uint16_t port)
-    : host_(host), port_(port), socket_fd_(reinterpret_cast<uintptr_t>(INVALID_SOCK)),
+    : host_(host), port_(port), socket_fd_(static_cast<uintptr_t>(INVALID_SOCK)),
       is_running_(false), last_packet_time_(std::chrono::steady_clock::now()) {
     buffer_.reserve(UDP_PAYLOAD_SIZE);
 }
@@ -67,7 +68,7 @@ void UdpStreamer::stop() {
     socket_t s = static_cast<socket_t>(socket_fd_);
     if (s != INVALID_SOCK) {
         CLOSE_SOCK(s);
-        socket_fd_ = reinterpret_cast<uintptr_t>(INVALID_SOCK);
+        socket_fd_ = static_cast<uintptr_t>(INVALID_SOCK);
     }
 #ifdef _WIN32
     WSACleanup();
@@ -77,6 +78,14 @@ void UdpStreamer::stop() {
 
 bool UdpStreamer::send_ts_packet(const uint8_t* ts_packet188) {
     if (!is_running_ || !ts_packet188) return false;
+    if (ts_packet188[0] == 0x47) {
+        const uint16_t pid = ((static_cast<uint16_t>(ts_packet188[1] & 0x1F)) << 8) | ts_packet188[2];
+        const uint8_t adaptation_control = (ts_packet188[3] >> 4) & 0x03;
+        if (adaptation_control == 1 || adaptation_control == 3) {
+            last_continuity_counter_[pid] = ts_packet188[3] & 0x0F;
+            has_continuity_counter_[pid] = true;
+        }
+    }
     buffer_.insert(buffer_.end(), ts_packet188, ts_packet188 + TS_PACKET_SIZE);
     last_packet_time_ = std::chrono::steady_clock::now();
     if (buffer_.size() >= UDP_PAYLOAD_SIZE) {
@@ -119,24 +128,29 @@ void UdpStreamer::flush() {
     buffer_.clear();
 }
 
-void UdpStreamer::send_discontinuity_burst() {
+void UdpStreamer::send_discontinuity_burst(const std::vector<uint16_t>& pids) {
     if (!is_running_) return;
-    flush(); // Envia quaisquer pacotes pendentes antes da descontinuidade
+    flush();
 
-    // Pacote MPEG-TS de 188 bytes com flag de descontinuidade no campo de adaptacao:
-    // Sync(0x47), PID 0x0000, adaptation_field_control = 0x20 (somente adaptacao),
-    // adaptation_length = 183, discontinuity_indicator = 1 (bit 7 = 0x80), seguido de 182 bytes 0xFF
-    uint8_t disc_pkt[TS_PACKET_SIZE];
-    std::memset(disc_pkt, 0xFF, TS_PACKET_SIZE);
-    disc_pkt[0] = 0x47;
-    disc_pkt[1] = 0x00;
-    disc_pkt[2] = 0x00;
-    disc_pkt[3] = 0x20; // adaptation only
-    disc_pkt[4] = 183;  // adaptation field length
-    disc_pkt[5] = 0x80; // discontinuity_indicator = 1
+    std::vector<uint16_t> discontinuity_pids{0x0000};
+    for (uint16_t pid : pids) {
+        if (pid <= 0x1FFF &&
+            std::find(discontinuity_pids.begin(), discontinuity_pids.end(), pid) == discontinuity_pids.end()) {
+            discontinuity_pids.push_back(pid);
+        }
+    }
 
-    for (size_t i = 0; i < PACKETS_PER_UDP; ++i) {
-        buffer_.insert(buffer_.end(), disc_pkt, disc_pkt + TS_PACKET_SIZE);
+    for (uint16_t pid : discontinuity_pids) {
+        uint8_t disc_pkt[TS_PACKET_SIZE];
+        std::memset(disc_pkt, 0xFF, sizeof(disc_pkt));
+        disc_pkt[0] = 0x47;
+        disc_pkt[1] = static_cast<uint8_t>((pid >> 8) & 0x1F);
+        disc_pkt[2] = static_cast<uint8_t>(pid & 0xFF);
+        const uint8_t cc = has_continuity_counter_[pid] ? last_continuity_counter_[pid] : 0;
+        disc_pkt[3] = static_cast<uint8_t>(0x20 | cc); // adaptation only
+        disc_pkt[4] = 183;
+        disc_pkt[5] = 0x80; // discontinuity_indicator
+        send_ts_packet(disc_pkt);
     }
     flush();
 }

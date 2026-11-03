@@ -198,7 +198,7 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
     }
 
     constexpr int VISIBLE_CHANNELS = 8;
-    constexpr int FIRST_CHANNEL_ROW = 16;
+    constexpr int FIRST_CHANNEL_ROW = 18;
     std::vector<ChannelInfo> channels = saved_channels;
     int visible_count = 1;
     bool has_scroll = false;
@@ -310,8 +310,7 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
             }
         }
 
-        const int first_row = std::max(FIRST_CHANNEL_ROW,
-                                       sz.height - 2 - static_cast<int>(lines.size()));
+        const int first_row = FIRST_CHANNEL_ROW;
         for (int i = 0; i < previous_channel_line_count; ++i) {
             const int row = previous_channel_first_row + i;
             if (row <= sz.height) {
@@ -442,6 +441,7 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
         float last_peak_corr = 0.0f;
         int unlock_counter = 0;
         bool reception_started = false;
+        bool channel_transition_pending = false;
         uint64_t total_air_packets = 0;
         uint64_t total_standby_packets = 0;
 
@@ -453,7 +453,7 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
         while (dsp_running.load(std::memory_order_relaxed) && g_running) {
             // Verifica solicitacao de reset de stream (troca de canal)
             if (dsp_reset_requested.load(std::memory_order_acquire)) {
-                streamer.send_discontinuity_burst();
+                streamer.send_discontinuity_burst(psi.get_discontinuity_pids());
 
                 // Drena amostras pendentes da fila SPSC
                 SpscCaptureQueue<64>::ReadView drain_view;
@@ -462,6 +462,7 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
                 }
 
                 psi.reset();
+                channel_transition_pending = true;
                 reset_play_reception_stream(*sync, demod, ofdm_locked, &dsp_metrics);
                 total_air_packets = 0;
                 have_expected_sequence = false;
@@ -553,6 +554,18 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
 
                     if (!decoded_pkts.empty()) {
                         auto now_pat = std::chrono::steady_clock::now();
+                        if (channel_transition_pending && psi.has_pmt()) {
+                            streamer.send_discontinuity_burst(psi.get_discontinuity_pids());
+                            uint8_t pat_pkt[188];
+                            if (psi.build_pat_packet(pat_pkt)) {
+                                streamer.send_ts_packet(pat_pkt);
+                                if (file_ts_out.is_open()) {
+                                    file_ts_out.write(reinterpret_cast<const char*>(pat_pkt), 188);
+                                }
+                            }
+                            last_pat_time = now_pat;
+                            channel_transition_pending = false;
+                        }
                         if (std::chrono::duration_cast<std::chrono::milliseconds>(now_pat - last_pat_time).count() >= 100) {
                             if (psi.has_pmt()) {
                                 uint8_t pat_pkt[188];

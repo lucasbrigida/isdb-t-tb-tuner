@@ -29,6 +29,20 @@ std::string PsiParser::get_primary_service_name() const {
     return "";
 }
 
+std::vector<uint16_t> PsiParser::get_discontinuity_pids() const {
+    std::vector<uint16_t> pids;
+    for (const auto& [id, service] : services_) {
+        (void)id;
+        for (uint16_t pid : {service.pcr_pid, service.video_pid, service.audio_pid}) {
+            if (pid != 0 && pid != 0x1FFF &&
+                std::find(pids.begin(), pids.end(), pid) == pids.end()) {
+                pids.push_back(pid);
+            }
+        }
+    }
+    return pids;
+}
+
 bool PsiParser::parse_packet(const uint8_t* ts188) {
     if (!ts188 || ts188[0] != 0x47) return false;
 
@@ -151,6 +165,8 @@ void PsiParser::parse_pmt(uint16_t pmt_pid, const uint8_t* payload, size_t len) 
     bool is_new = (pmt_pids_.find(pmt_pid) == pmt_pids_.end() || pmt_pids_[pmt_pid] != service_id);
     services_[service_id].service_id = service_id;
     services_[service_id].pmt_pid = pmt_pid;
+    services_[service_id].pcr_pid =
+        ((static_cast<uint16_t>(payload[8] & 0x1F)) << 8) | payload[9];
     pmt_pids_[pmt_pid] = service_id;
     if (is_new) {
         pat_version_ = (pat_version_ + 1) & 0x1F;

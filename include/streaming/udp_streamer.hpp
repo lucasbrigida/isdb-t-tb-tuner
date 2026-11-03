@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <string>
 #include <vector>
+#include <array>
 #include <chrono>
 #include "dsp/constants.hpp"
 
@@ -73,12 +74,10 @@ public:
     size_t pending_packets() const;
 
     /**
-     * @brief Envia um datagrama UDP de 1316 bytes (7 pacotes TS) com a flag de
-     *        descontinuidade (discontinuity_indicator = 1) no campo de adaptacao.
-     *        Informa o demuxer do MPV e VLC que o relogio de PCR e os timestamps
-     *        (PTS/DTS) foram reiniciados devido a troca de canal.
+     * @brief Envia pacotes TS com discontinuity_indicator nos PIDs informados
+     *        (inclui PID 0) para sinalizar a troca de programa ao demuxer.
      */
-    void send_discontinuity_burst();
+    void send_discontinuity_burst(const std::vector<uint16_t>& pids = {});
 
     /**
      * @brief Envia pacotes nulos MPEG-TS (PID 0x1FFF) para manter o socket UDP
@@ -101,6 +100,8 @@ private:
     std::chrono::steady_clock::time_point last_packet_time_;
 
     std::vector<uint8_t> buffer_; // Buffer acumulador de 1316 bytes
+    std::array<uint8_t, 8192> last_continuity_counter_{};
+    std::array<bool, 8192> has_continuity_counter_{};
     static constexpr size_t TS_PACKET_SIZE = constants::TS_PACKET_SIZE;
     static constexpr size_t PACKETS_PER_UDP = 7;
     static constexpr size_t UDP_PAYLOAD_SIZE = constants::UDP_PACKET_SIZE; // 1316 bytes

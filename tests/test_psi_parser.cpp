@@ -98,6 +98,53 @@ void test_parse_pat_roundtrip() {
     TEST_ASSERT(it->second.pmt_pid == 0x1FC8);
 }
 
+void test_pmt_discontinuity_pids() {
+    std::cout << "[Test] PsiParser identifica PCR, video e audio para marcar descontinuidade..." << std::endl;
+
+    uint8_t pmt_pkt[188];
+    std::memset(pmt_pkt, 0xFF, sizeof(pmt_pkt));
+    pmt_pkt[0] = 0x47;
+    pmt_pkt[1] = 0x5F; // PUSI e PID 0x1FC8
+    pmt_pkt[2] = 0xC8;
+    pmt_pkt[3] = 0x10;
+    pmt_pkt[4] = 0x00; // pointer field
+
+    uint8_t* sec = &pmt_pkt[5];
+    sec[0] = 0x02; // PMT
+    sec[1] = 0xB0;
+    sec[2] = 23; // section length
+    sec[3] = 0x00;
+    sec[4] = 0x01; // service id
+    sec[5] = 0xC1;
+    sec[6] = 0x00;
+    sec[7] = 0x00;
+    sec[8] = 0xE1;
+    sec[9] = 0x00; // PCR PID 0x0100
+    sec[10] = 0xF0;
+    sec[11] = 0x00; // no program descriptors
+    sec[12] = 0x1B; // H.264
+    sec[13] = 0xE1;
+    sec[14] = 0x01; // video PID 0x0101
+    sec[15] = 0xF0;
+    sec[16] = 0x00; // no ES descriptors
+    sec[17] = 0x0F; // AAC
+    sec[18] = 0xE1;
+    sec[19] = 0x02; // audio PID 0x0102
+    sec[20] = 0xF0;
+    sec[21] = 0x00; // no ES descriptors
+
+    isdbt::PsiParser parser;
+    TEST_ASSERT(parser.parse_packet(pmt_pkt));
+    const auto pids = parser.get_discontinuity_pids();
+    TEST_ASSERT(pids.size() == 3);
+    TEST_ASSERT(pids[0] == 0x0100);
+    TEST_ASSERT(pids[1] == 0x0101);
+    TEST_ASSERT(pids[2] == 0x0102);
+
+    parser.reset();
+    TEST_ASSERT(parser.get_discontinuity_pids().empty());
+}
+
 void test_parse_sdt_service_name() {
     std::cout << "[Test] PsiParser parsing de SDT com nome de emissora..." << std::endl;
 
@@ -187,6 +234,7 @@ void test_error_handling() {
 int main() {
     test_build_pat_and_crc();
     test_parse_pat_roundtrip();
+    test_pmt_discontinuity_pids();
     test_parse_sdt_service_name();
     test_error_handling();
 
