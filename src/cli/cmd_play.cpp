@@ -198,7 +198,7 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
     }
 
     constexpr int VISIBLE_CHANNELS = 8;
-    constexpr int FIRST_CHANNEL_ROW = 18;
+    constexpr int FIRST_CHANNEL_ROW = 16;
     std::vector<ChannelInfo> channels = saved_channels;
     int visible_count = 1;
     bool has_scroll = false;
@@ -728,11 +728,6 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
                         dsp_reset_requested.store(true, std::memory_order_release);
                         while (!dsp_reset_done.load(std::memory_order_acquire) && g_running) {
                             std::this_thread::sleep_for(std::chrono::milliseconds(5));
-                        }
-
-                        // 4. Se o MPV player automatico estiver ativo, notifica recarga via IPC sem fechar janela
-                        if (auto_player) {
-                            reload_mpv_player(udp_port);
                         }
 
                         channel_name_learned = false;
