@@ -1,5 +1,6 @@
 #include "mpegts/psi_parser.hpp"
 #include <iostream>
+#include <algorithm>
 #include <cstring>
 
 namespace isdbt {

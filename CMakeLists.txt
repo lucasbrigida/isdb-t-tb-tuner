@@ -179,6 +179,15 @@ add_executable(test_ofdm_sync
 
 target_link_libraries(test_ofdm_sync PRIVATE ${DSP_EXTERNAL_LIBS})
 
+add_executable(test_udp_streamer
+    tests/test_udp_streamer.cpp
+    src/streaming/udp_streamer.cpp
+)
+
+if(WIN32)
+    target_link_libraries(test_udp_streamer PRIVATE ws2_32)
+endif()
+
 add_executable(test_oneseg_e2e
     tests/test_oneseg_e2e.cpp
     src/dsp/reed_solomon.cpp
@@ -333,6 +342,7 @@ add_test(NAME SyncStateAndCsi COMMAND test_sync_state_and_csi)
 add_test(NAME FrequencyPlan COMMAND test_frequency_plan)
 add_test(NAME ChannelManager COMMAND test_channel_manager)
 add_test(NAME PsiParser COMMAND test_psi_parser)
+add_test(NAME UdpStreamer COMMAND test_udp_streamer)
 add_test(NAME CliOfdmFlag COMMAND test_cli_ofdm_flag)
 add_test(NAME SyncRegressionScan COMMAND test_sync_regression_scan)
 add_test(NAME BenchAsciiTable COMMAND test_bench_ascii_table)
