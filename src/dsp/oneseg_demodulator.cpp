@@ -83,6 +83,16 @@ void OneSegDemodulator::init_carrier_layouts() {
         return (c == 7 || c == 89 || c == 206 || c == 209 || c == 226 || c == 244 || c == 377 || c == 407);
     };
 
+    for (size_t phase = 0; phase < 4; ++phase) {
+        size_t pair_count = 0;
+        for (size_t l = 3 * phase; l + 12 < 432; l += 12) {
+            ifo_pilot_pairs_[phase][pair_count++] = {
+                static_cast<uint16_t>(l),
+                static_cast<uint16_t>(l + 12)
+            };
+        }
+    }
+
     for (size_t ph = 0; ph < 4; ++ph) {
         sp_indices_per_phase_[ph].clear();
         for (size_t l = 3 * ph; l < 432; l += 12) {
@@ -100,6 +110,49 @@ void OneSegDemodulator::init_carrier_layouts() {
             }
         }
     }
+}
+
+OneSegDemodulator::IfoSearchResult
+OneSegDemodulator::search_ifo(int base_segment_offset,
+                              int min_delta,
+                              int max_delta,
+                              int delta_step) {
+    IfoSearchResult best;
+    if (delta_step <= 0) return best;
+
+    for (int delta = min_delta; delta <= max_delta; delta += delta_step) {
+        const int seg_start = base_segment_offset + delta;
+        if (seg_start < 16 || seg_start + 433 >= fft_size_ - 16) {
+            continue;
+        }
+
+        for (size_t phase = 0; phase < 4; ++phase) {
+            std::complex<float> sum_corr(0.0f, 0.0f);
+            float sum_energy = 0.0f;
+
+            for (const auto& pair : ifo_pilot_pairs_[phase]) {
+                const auto h0 = fft_carriers_[seg_start + pair.first] *
+                                inv_prbs_pilots_[pair.first];
+                const auto h1 = fft_carriers_[seg_start + pair.second] *
+                                inv_prbs_pilots_[pair.second];
+                sum_corr += h1 * std::conj(h0);
+                sum_energy += std::sqrt(std::norm(h1) * std::norm(h0));
+            }
+
+            const float coherence =
+                (sum_energy > 1e-12f)
+                    ? (std::abs(sum_corr) / sum_energy)
+                    : 0.0f;
+
+            if (coherence > best.coherence) {
+                best.delta = delta;
+                best.phase = phase;
+                best.coherence = coherence;
+            }
+        }
+    }
+
+    return best;
 }
 
 void OneSegDemodulator::init_time_deinterleaver(int I) {
@@ -364,41 +417,53 @@ size_t OneSegDemodulator::process_symbol(const std::complex<float>* symbol_time_
     // Em Modo 3 amostrado a 2031746 S/s (2048 pontos), o Segmento 0 nominal inicia no bin 808
     const int BASE_SEG_OFFSET = (fft_size_ - 432) / 2;
 
-    // 2. Estimativa conjunta de IFO (Integer Frequency Offset) e Fase dos Pilotos Dispersos (sym_mod4 = 0..3)
-    // Uma vez travado com coerencia > 0.60, restringe a busca a [ifo_bins_] para evitar que
-    // ruidos transientes saltem o IFO e corrompam o fluxo TMCC DBPSK
-    int min_delta = ifo_locked_ ? ifo_bins_ : -45;
-    int max_delta = ifo_locked_ ? ifo_bins_ : +45;
-    if (ifo_locked_ && !tmcc_locked_) {
-        // Busca estreita em torno do ifo_bins_ se ainda nao confirmou paridade BCH do TMCC
-        min_delta = std::max(-45, ifo_bins_ - 2);
-        max_delta = std::min(45, ifo_bins_ + 2);
-    }
-
+    // 2. Estimativa conjunta de IFO (Integer Frequency Offset) e fase dos pilotos.
+    // Na aquisicao, uma busca coarse (passo 3) localiza a regiao do pico e uma
+    // busca fine (raio 2) recupera o melhor bin inteiro. Isso cobre todos os
+    // bins de [-45, +45], mas reduz de 91 para no maximo 36 candidatos.
     int best_delta = ifo_bins_;
     size_t best_phase = (sym_mod4_ + 1) % 4;
     float max_coh = -1.0f;
 
-    for (int delta = min_delta; delta <= max_delta; ++delta) {
-        int seg_start = BASE_SEG_OFFSET + delta;
-        if (seg_start < 16 || seg_start + 433 >= fft_size_ - 16) continue;
+    if (!ifo_locked_) {
+        const auto coarse = search_ifo(
+            BASE_SEG_OFFSET,
+            IFO_MIN_DELTA,
+            IFO_MAX_DELTA,
+            IFO_COARSE_STEP);
 
-        for (size_t p = 0; p < 4; ++p) {
-            std::complex<float> sum_corr(0.0f, 0.0f);
-            float sum_energy = 0.0f;
-            for (size_t l = 3 * p; l + 12 < 432; l += 12) {
-                std::complex<float> h0 = fft_carriers_[seg_start + l] * inv_prbs_pilots_[l];
-                std::complex<float> h1 = fft_carriers_[seg_start + l + 12] * inv_prbs_pilots_[l + 12];
-                sum_corr += h1 * std::conj(h0);
-                sum_energy += std::sqrt(std::norm(h1) * std::norm(h0));
-            }
-            float coh = (sum_energy > 1e-12f) ? (std::abs(sum_corr) / sum_energy) : 0.0f;
-            if (coh > max_coh) {
-                max_coh = coh;
-                best_delta = delta;
-                best_phase = p;
-            }
+        const int fine_min = std::max(
+            IFO_MIN_DELTA,
+            coarse.delta - IFO_FINE_RADIUS);
+        const int fine_max = std::min(
+            IFO_MAX_DELTA,
+            coarse.delta + IFO_FINE_RADIUS);
+        const auto fine = search_ifo(
+            BASE_SEG_OFFSET,
+            fine_min,
+            fine_max,
+            1);
+
+        best_delta = fine.delta;
+        best_phase = fine.phase;
+        max_coh = fine.coherence;
+    } else {
+        int min_delta = ifo_bins_;
+        int max_delta = ifo_bins_;
+        if (!tmcc_locked_) {
+            // Busca estreita em torno do ifo_bins_ enquanto o TMCC nao foi confirmado.
+            min_delta = std::max(IFO_MIN_DELTA, ifo_bins_ - 2);
+            max_delta = std::min(IFO_MAX_DELTA, ifo_bins_ + 2);
         }
+
+        const auto tracked = search_ifo(
+            BASE_SEG_OFFSET,
+            min_delta,
+            max_delta,
+            1);
+        best_delta = tracked.delta;
+        best_phase = tracked.phase;
+        max_coh = tracked.coherence;
     }
 
     if (!ifo_locked_) {

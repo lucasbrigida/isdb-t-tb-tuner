@@ -1,3 +1,4 @@
 tools/mpv/mpv.exe filter=lfs diff=lfs merge=lfs -text
+tools/mpv/x64/mpv.exe filter=lfs diff=lfs merge=lfs -text
 tools/mpv/x86/mpv.exe filter=lfs diff=lfs merge=lfs -text
 samples/*.cu8 filter=lfs diff=lfs merge=lfs -text
