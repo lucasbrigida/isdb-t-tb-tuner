@@ -326,6 +326,8 @@ void test_parse_eit_epg() {
     TEST_ASSERT(pres->duration_sec == 4500);
     TEST_ASSERT(pres->is_now == true);
     TEST_ASSERT(!pres->start_time_str.empty());
+    TEST_ASSERT(pres->start_time_str == "14:30");
+    TEST_ASSERT(pres->end_time_str == "15:45");
 }
 
 int main() {

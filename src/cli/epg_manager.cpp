@@ -255,16 +255,54 @@ bool EpgManager::save() {
 
 void EpgManager::prune_expired(std::chrono::system_clock::time_point now_tp) {
     for (auto& [ch_num, entry] : channels_) {
+        // Se ha um evento marcado como is_now, ele serve como ancora oficial
+        const EpgEvent* anchor = nullptr;
+        for (const auto& e : entry.events) {
+            if (e.is_now) {
+                anchor = &e;
+                break;
+            }
+        }
+
         std::vector<EpgEvent> valid_events;
         for (auto& e : entry.events) {
-            // Se possui tempo de termino e ja encerrou, descarta
-            if (e.end_tp != std::chrono::system_clock::time_point{} && e.end_tp <= now_tp) {
+            if (anchor && ((anchor->event_id > 0 && e.event_id == anchor->event_id) ||
+                           (e.title == anchor->title && e.start_time_str == anchor->start_time_str))) {
+                valid_events.push_back(e);
                 continue;
             }
-            // Atualiza flags de status relativo
-            e.is_now = (e.start_tp <= now_tp && now_tp < e.end_tp);
+            if (anchor && anchor->start_tp != std::chrono::system_clock::time_point{} &&
+                e.end_tp != std::chrono::system_clock::time_point{} && e.end_tp <= anchor->start_tp) {
+                continue;
+            }
+            if (!anchor && e.end_tp != std::chrono::system_clock::time_point{} && e.end_tp <= now_tp) {
+                continue;
+            }
             valid_events.push_back(e);
         }
+
+        // Se nao havia ancora, recalcula status com base no relogio da maquina
+        if (!anchor) {
+            bool found_now = false;
+            for (auto& e : valid_events) {
+                e.is_now = false;
+                e.is_next = false;
+            }
+            for (size_t i = 0; i < valid_events.size(); ++i) {
+                auto& e = valid_events[i];
+                if (!found_now && e.start_tp <= now_tp && now_tp < e.end_tp) {
+                    e.is_now = true;
+                    found_now = true;
+                    if (i + 1 < valid_events.size()) {
+                        valid_events[i + 1].is_next = true;
+                    }
+                }
+            }
+            if (!found_now && !valid_events.empty()) {
+                valid_events[0].is_next = true;
+            }
+        }
+
         entry.events = std::move(valid_events);
     }
 }
@@ -278,20 +316,39 @@ bool EpgManager::has_valid_now(int channel_number, std::chrono::system_clock::ti
     const EpgEvent* now_evt = nullptr;
     const EpgEvent* next_evt = nullptr;
 
+    // 1. Prioriza evento marcado com is_now transmitido pela emissora
     for (const auto& e : entry.events) {
-        if (e.start_tp <= now_tp && now_tp < e.end_tp) {
+        if (e.is_now) {
             now_evt = &e;
             break;
         }
     }
 
+    // 2. Fallback: compara com now_tp se nao houver is_now explicito
+    if (!now_evt) {
+        for (const auto& e : entry.events) {
+            if (e.start_tp <= now_tp && now_tp < e.end_tp) {
+                now_evt = &e;
+                break;
+            }
+        }
+    }
+
     if (!now_evt) return false;
 
-    // Busca o proximo programa cronologicamente
+    // Busca o proximo programa
     for (const auto& e : entry.events) {
-        if (e.start_tp >= now_evt->end_tp) {
-            if (!next_evt || e.start_tp < next_evt->start_tp) {
-                next_evt = &e;
+        if (e.is_next) {
+            next_evt = &e;
+            break;
+        }
+    }
+    if (!next_evt) {
+        for (const auto& e : entry.events) {
+            if (e.start_tp >= now_evt->end_tp) {
+                if (!next_evt || e.start_tp < next_evt->start_tp) {
+                    next_evt = &e;
+                }
             }
         }
     }
@@ -324,6 +381,18 @@ void EpgManager::enrich_channel_events(int channel_number, const std::string& na
     entry.signal = signal;
     entry.last_updated_epoch = std::chrono::duration_cast<std::chrono::seconds>(now_tp.time_since_epoch()).count();
 
+    // Procura por evento ancora transmitido ao vivo pela emissora (Tabela 0x4E Secao 0)
+    const EpgEvent* live_anchor = nullptr;
+    const EpgEvent* live_next = nullptr;
+    for (const auto& ne : new_events) {
+        if (ne.is_now && !ne.title.empty()) {
+            live_anchor = &ne;
+        }
+        if (ne.is_next && !ne.title.empty()) {
+            live_next = &ne;
+        }
+    }
+
     // Mescla / enriquece cada novo evento na lista existente
     for (const auto& new_e : new_events) {
         if (new_e.title.empty()) continue;
@@ -345,7 +414,7 @@ void EpgManager::enrich_channel_events(int channel_number, const std::string& na
                     break;
                 }
             }
-            // 3. Identificacao por string de horario idêntica
+            // 3. Identificacao por string de horario identica
             if (!new_e.start_time_str.empty() && old_e.start_time_str == new_e.start_time_str && old_e.title == new_e.title) {
                 match_idx = static_cast<int>(i);
                 break;
@@ -365,19 +434,46 @@ void EpgManager::enrich_channel_events(int channel_number, const std::string& na
             if (new_e.end_tp != std::chrono::system_clock::time_point{}) old_e.end_tp = new_e.end_tp;
             if (!new_e.start_time_str.empty()) old_e.start_time_str = new_e.start_time_str;
             if (!new_e.end_time_str.empty()) old_e.end_time_str = new_e.end_time_str;
+            if (new_e.is_now) old_e.is_now = true;
+            if (new_e.is_next) old_e.is_next = true;
         } else {
             // Adiciona novo evento a grade
             entry.events.push_back(new_e);
         }
     }
 
-    // Descarta eventos passados expirados
+    // Descarta eventos passados
     std::vector<EpgEvent> filtered;
-    for (const auto& e : entry.events) {
-        if (e.end_tp != std::chrono::system_clock::time_point{} && e.end_tp <= now_tp) {
-            continue;
+    if (live_anchor != nullptr) {
+        // Ancora oficial ao vivo (Table 0x4E Secao 0) e verdade absoluta da emissora
+        for (const auto& e : entry.events) {
+            bool is_the_anchor = ((live_anchor->event_id > 0 && e.event_id == live_anchor->event_id) ||
+                                 (e.title == live_anchor->title && e.start_time_str == live_anchor->start_time_str));
+            if (is_the_anchor) {
+                filtered.push_back(e);
+                continue;
+            }
+            // Eventos encerrados antes ou no inicio da ancora ja passaram
+            if (live_anchor->start_tp != std::chrono::system_clock::time_point{} &&
+                e.end_tp != std::chrono::system_clock::time_point{} &&
+                e.end_tp <= live_anchor->start_tp) {
+                continue;
+            }
+            if (live_anchor->start_tp != std::chrono::system_clock::time_point{} &&
+                e.start_tp != std::chrono::system_clock::time_point{} &&
+                e.start_tp < live_anchor->start_tp) {
+                continue;
+            }
+            filtered.push_back(e);
         }
-        filtered.push_back(e);
+    } else {
+        // Fallback: modo offline / sem ancora viva - descarta por relogio do PC
+        for (const auto& e : entry.events) {
+            if (e.end_tp != std::chrono::system_clock::time_point{} && e.end_tp <= now_tp) {
+                continue;
+            }
+            filtered.push_back(e);
+        }
     }
     entry.events = std::move(filtered);
 
@@ -390,25 +486,58 @@ void EpgManager::enrich_channel_events(int channel_number, const std::string& na
     });
 
     // Atualiza marcadores is_now e is_next
-    bool found_now = false;
     for (auto& e : entry.events) {
         e.is_now = false;
         e.is_next = false;
     }
 
-    for (size_t i = 0; i < entry.events.size(); ++i) {
-        auto& e = entry.events[i];
-        if (!found_now && e.start_tp <= now_tp && now_tp < e.end_tp) {
-            e.is_now = true;
-            found_now = true;
-            if (i + 1 < entry.events.size()) {
-                entry.events[i + 1].is_next = true;
+    if (live_anchor != nullptr) {
+        int anchor_idx = -1;
+        for (size_t i = 0; i < entry.events.size(); ++i) {
+            const auto& e = entry.events[i];
+            if ((live_anchor->event_id > 0 && e.event_id == live_anchor->event_id) ||
+                (e.title == live_anchor->title && e.start_time_str == live_anchor->start_time_str)) {
+                anchor_idx = static_cast<int>(i);
+                break;
             }
         }
-    }
-    // Se nenhum evento cobrir estritamente now_tp, marca o primeiro futuro como next
-    if (!found_now && !entry.events.empty()) {
-        entry.events[0].is_next = true;
+
+        if (anchor_idx >= 0) {
+            entry.events[anchor_idx].is_now = true;
+
+            int next_idx = -1;
+            if (live_next != nullptr) {
+                for (size_t i = 0; i < entry.events.size(); ++i) {
+                    const auto& e = entry.events[i];
+                    if ((live_next->event_id > 0 && e.event_id == live_next->event_id) ||
+                        (e.title == live_next->title && e.start_time_str == live_next->start_time_str)) {
+                        next_idx = static_cast<int>(i);
+                        break;
+                    }
+                }
+            }
+            if (next_idx >= 0) {
+                entry.events[next_idx].is_next = true;
+            } else if (anchor_idx + 1 < static_cast<int>(entry.events.size())) {
+                entry.events[anchor_idx + 1].is_next = true;
+            }
+        }
+    } else {
+        // Fallback: modo offline / sem ancora viva - busca por relogio do PC
+        bool found_now = false;
+        for (size_t i = 0; i < entry.events.size(); ++i) {
+            auto& e = entry.events[i];
+            if (!found_now && e.start_tp <= now_tp && now_tp < e.end_tp) {
+                e.is_now = true;
+                found_now = true;
+                if (i + 1 < entry.events.size()) {
+                    entry.events[i + 1].is_next = true;
+                }
+            }
+        }
+        if (!found_now && !entry.events.empty()) {
+            entry.events[0].is_next = true;
+        }
     }
 }
 

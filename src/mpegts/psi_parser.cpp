@@ -108,20 +108,16 @@ static std::chrono::system_clock::time_point parse_mjd_utc(uint16_t mjd, uint8_t
         return {};
     }
 
-    std::tm tm_utc{};
-    tm_utc.tm_year = year - 1900;
-    tm_utc.tm_mon = month - 1;
-    tm_utc.tm_mday = day;
-    tm_utc.tm_hour = hour;
-    tm_utc.tm_min = min;
-    tm_utc.tm_sec = sec;
-    tm_utc.tm_isdst = 0;
+    std::tm tm_local{};
+    tm_local.tm_year = year - 1900;
+    tm_local.tm_mon = month - 1;
+    tm_local.tm_mday = day;
+    tm_local.tm_hour = hour;
+    tm_local.tm_min = min;
+    tm_local.tm_sec = sec;
+    tm_local.tm_isdst = -1;
 
-#if defined(_WIN32)
-    time_t t = _mkgmtime(&tm_utc);
-#else
-    time_t t = timegm(&tm_utc);
-#endif
+    time_t t = mktime(&tm_local);
     if (t == -1) return {};
     return std::chrono::system_clock::from_time_t(t);
 }

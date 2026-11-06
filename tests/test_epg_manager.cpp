@@ -224,9 +224,70 @@ static void test_view_temporal_shift() {
     if (std::filesystem::exists(test_file)) std::filesystem::remove(test_file);
 }
 
+static void test_live_anchor_table_0x4e() {
+    std::cout << "[Test] EpgManager verdade absoluta da Tabela 0x4E (Present/Following)...\n";
+    std::string test_file = "test_epg_anchor.json";
+    if (std::filesystem::exists(test_file)) std::filesystem::remove(test_file);
+
+    EpgManager mgr(test_file);
+    auto now_tp = std::chrono::system_clock::now();
+
+    // Evento antigo que ja encerrou
+    EpgEvent e_past;
+    e_past.event_id = 1;
+    e_past.title = "Telecurso";
+    e_past.start_tp = now_tp - std::chrono::hours(3);
+    e_past.end_tp = now_tp - std::chrono::hours(2);
+    e_past.duration_sec = 3600;
+
+    // Evento ao vivo transmitido na Tabela 0x4E Secao 0 (is_now = true)
+    // Mesmo que o end_tp seja menor ou igual a now_tp (ex: programa estourou o tempo),
+    // a ancora da emissora e verdade absoluta e NUNCA e podada.
+    EpgEvent e_anchor;
+    e_anchor.event_id = 2;
+    e_anchor.title = "Hora Um";
+    e_anchor.start_tp = now_tp - std::chrono::hours(2);
+    e_anchor.end_tp = now_tp - std::chrono::minutes(5); // Nominalmente encerraria ha 5 min
+    e_anchor.duration_sec = 6900;
+    e_anchor.is_now = true;
+
+    // Evento seguinte (Tabela 0x4E Secao 1)
+    EpgEvent e_next;
+    e_next.event_id = 3;
+    e_next.title = "Bom Dia Sao Paulo";
+    e_next.start_tp = e_anchor.end_tp;
+    e_next.end_tp = e_anchor.end_tp + std::chrono::hours(2);
+    e_next.duration_sec = 7200;
+    e_next.is_next = true;
+
+    mgr.enrich_channel_events(18, "Globo HD", 497142857, true, {e_past, e_anchor, e_next}, now_tp);
+
+    auto* ch = mgr.get_channel(18);
+    assert(ch != nullptr);
+    // e_past deve ter sido podado por ser anterior ao inicio da ancora
+    assert(ch->events.size() == 2);
+
+    assert(ch->events[0].title == "Hora Um");
+    assert(ch->events[0].is_now == true);
+    assert(ch->events[0].is_next == false);
+
+    assert(ch->events[1].title == "Bom Dia Sao Paulo");
+    assert(ch->events[1].is_now == false);
+    assert(ch->events[1].is_next == true);
+
+    EpgEvent out_now, out_next;
+    bool has_now = mgr.has_valid_now(18, now_tp, &out_now, &out_next);
+    assert(has_now == true);
+    assert(out_now.title == "Hora Um");
+    assert(out_next.title == "Bom Dia Sao Paulo");
+
+    if (std::filesystem::exists(test_file)) std::filesystem::remove(test_file);
+}
+
 int main() {
     try {
         test_prune_and_valid_now();
+        test_live_anchor_table_0x4e();
         test_enrichment();
         test_save_load_json();
         test_view_temporal_shift();

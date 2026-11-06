@@ -326,12 +326,14 @@ static int run_epg_all(const std::vector<ChannelInfo>& saved_channels, int dev_i
         return 0;
     }
 
-    std::cout << "========================================================================================================================\n"
-              << " Guia Geral de Programacao (EPG) - Todos os Canais Salvos\n"
-              << "========================================================================================================================\n";
-
     AsciiTable table({"Canal", "Emissora", "Horario", "Classif.", "Genero", "Programa Atual (Agora)"});
     table.set_alignments({Alignment::Center, Alignment::Left, Alignment::Center, Alignment::Center, Alignment::Center, Alignment::Left});
+    table.set_column_widths({5, 18, 15, 8, 12, 36});
+
+    std::string banner_line(table.total_width(), '=');
+    std::cout << banner_line << "\n"
+              << " Guia Geral de Programacao (EPG) - Todos os Canais Salvos\n"
+              << banner_line << "\n";
 
     for (const auto& ch : results) {
         std::string time_str = "--";
@@ -596,13 +598,6 @@ static int run_epg_single(int active_channel_num, const std::string& initial_nam
         return 0;
     }
 
-    std::cout << "========================================================================================\n"
-              << " Guia Eletronico de Programacao (EPG) - Canal " << active_channel_num;
-    if (!channel_name.empty()) {
-        std::cout << " (" << channel_name << ")";
-    }
-    std::cout << "\n========================================================================================\n";
-
     const auto* enriched_ch = epg_mgr.get_channel(active_channel_num);
     if (!enriched_ch || enriched_ch->events.empty()) {
         std::cout << "Nenhum evento de programacao (EIT) foi transmitido pela emissora dentro do tempo limite.\n\n";
@@ -611,16 +606,25 @@ static int run_epg_single(int active_channel_num, const std::string& initial_nam
 
     AsciiTable table({"Status", "Horario", "Duracao", "Classif.", "Genero", "Programa"});
     table.set_alignments({Alignment::Center, Alignment::Center, Alignment::Center, Alignment::Center, Alignment::Left, Alignment::Left});
+    table.set_column_widths({9, 13, 7, 8, 12, 45});
+
+    std::string banner_line(table.total_width(), '=');
+    std::cout << banner_line << "\n"
+              << " Guia Eletronico de Programacao (EPG) - Canal " << active_channel_num;
+    if (!channel_name.empty()) {
+        std::cout << " (" << channel_name << ")";
+    }
+    std::cout << "\n" << banner_line << "\n";
 
     const EpgEvent* first_now = nullptr;
 
     for (const auto& e : enriched_ch->events) {
         std::string status = "AGENDA";
         if (e.is_now) {
-            status = "▶ AGORA";
+            status = "[AGORA]";
             if (!first_now) first_now = &e;
         } else if (e.is_next) {
-            status = "⏭ SEGUIR";
+            status = "[SEGUIR]";
         }
 
         std::string time_str = e.start_time_str.empty() ? EpgManager::format_local_time(e.start_tp) : e.start_time_str;
@@ -722,25 +726,27 @@ static int run_epg_view(int active_channel_num, const std::string& name_query, b
             return 0;
         }
 
-        std::cout << "========================================================================================\n"
+        AsciiTable table({"Status", "Horario", "Duracao", "Classif.", "Genero", "Programa"});
+        table.set_alignments({Alignment::Center, Alignment::Center, Alignment::Center, Alignment::Center, Alignment::Left, Alignment::Left});
+        table.set_column_widths({9, 13, 7, 8, 12, 45});
+
+        std::string banner_line(table.total_width(), '=');
+        std::cout << banner_line << "\n"
                   << " Guia de Programacao Salvo (EPG) - Canal " << target_ch;
         if (!ch_entry->channel_name.empty()) {
             std::cout << " (" << ch_entry->channel_name << ")";
         }
         std::cout << "\n [Horario Atual da Maquina: " << EpgManager::format_local_time(now_tp) << "]\n"
-                  << "========================================================================================\n";
-
-        AsciiTable table({"Status", "Horario", "Duracao", "Classif.", "Genero", "Programa"});
-        table.set_alignments({Alignment::Center, Alignment::Center, Alignment::Center, Alignment::Center, Alignment::Left, Alignment::Left});
+                  << banner_line << "\n";
 
         const EpgEvent* first_now = nullptr;
         for (const auto& e : ch_entry->events) {
             std::string status = "AGENDA";
             if (e.is_now) {
-                status = "▶ AGORA";
+                status = "[AGORA]";
                 if (!first_now) first_now = &e;
             } else if (e.is_next) {
-                status = "⏭ SEGUIR";
+                status = "[SEGUIR]";
             }
 
             std::string time_str = e.start_time_str.empty() ? EpgManager::format_local_time(e.start_tp) : e.start_time_str;
@@ -785,13 +791,15 @@ static int run_epg_view(int active_channel_num, const std::string& name_query, b
         return 0;
     }
 
-    std::cout << "========================================================================================================================\n"
-              << " Guia Geral de Programacao Salvo (EPG) - Consulta Local\n"
-              << " [Horario Atual da Maquina: " << EpgManager::format_local_time(now_tp) << "]\n"
-              << "========================================================================================================================\n";
-
     AsciiTable table({"Canal", "Emissora", "Horario", "Classif.", "Genero", "Programa Atual (Agora)"});
     table.set_alignments({Alignment::Center, Alignment::Left, Alignment::Center, Alignment::Center, Alignment::Center, Alignment::Left});
+    table.set_column_widths({5, 18, 15, 8, 12, 36});
+
+    std::string banner_line(table.total_width(), '=');
+    std::cout << banner_line << "\n"
+              << " Guia Geral de Programacao Salvo (EPG) - Consulta Local\n"
+              << " [Horario Atual da Maquina: " << EpgManager::format_local_time(now_tp) << "]\n"
+              << banner_line << "\n";
 
     std::map<int, std::string> channel_names;
     for (const auto& ch : saved_channels) {

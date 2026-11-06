@@ -7,6 +7,8 @@ releases/**/*.zip
 deps/
 .agents/
 .work/
+.manus/
+outputs/
 
 # Local runtime generated files
 channels.json
