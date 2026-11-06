@@ -9,12 +9,17 @@ namespace isdbt {
 int cmd_probe();
 
 // 2. Subcomando SCAN: Executa a varredura profunda dos canais UHF globais
-int cmd_scan(int start_ch, int end_ch, int dev_idx);
+int cmd_scan(int start_ch, int end_ch, int dev_idx, int sdt_timeout_s = 30);
 
 // 3. Subcomando LIST: Lista os canais sintonizados armazenados em channels.json
 int cmd_list();
 
-// 4. Subcomando PLAY: Sintoniza um canal e transmite via UDP para o player
+// 4. Subcomando EPG: Exibe a grade de programacao (EPG) de um canal
+int cmd_epg(int channel_number, const std::string& name_query, int dev_idx,
+            int timeout_s = 30, bool output_json = false, int ofdm_mode = 1,
+            bool force_refresh = false, bool view_only = false);
+
+// 5. Subcomando PLAY: Sintoniza um canal e transmite via UDP para o player
 int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_port,
              int dev_idx, bool test_pattern = false, double gain_db = 28.0, bool auto_player = false,
              bool verbose = false, int ofdm_mode = 1, const std::string& input_file = "",

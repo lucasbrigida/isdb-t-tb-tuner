@@ -231,11 +231,109 @@ void test_error_handling() {
     TEST_ASSERT(!parser.parse_packet(no_payload));
 }
 
+void test_parse_eit_epg() {
+    std::cout << "[Test] PsiParser::parse_eit e extracao de EPG (Present/Following)..." << std::endl;
+
+    isdbt::PsiParser parser;
+    uint8_t eit_pkt[188];
+    std::memset(eit_pkt, 0xFF, sizeof(eit_pkt));
+
+    eit_pkt[0] = 0x47;
+    eit_pkt[1] = 0x40; // PUSI = 1, PID 0x0012
+    eit_pkt[2] = 0x12;
+    eit_pkt[3] = 0x10; // payload only
+    eit_pkt[4] = 0x00; // pointer field
+
+    uint8_t* sec = &eit_pkt[5];
+    sec[0] = 0x4E; // table_id: present/following actual TS
+    sec[3] = 0x00; // service_id: 1
+    sec[4] = 0x01;
+    sec[5] = 0xC1;
+    sec[6] = 0x00; // section_number = 0 (Present / Agora)
+    sec[7] = 0x01; // last_section_number = 1
+    sec[8] = 0x00; // ts_id = 1
+    sec[9] = 0x01;
+    sec[10] = 0x00; // on_id = 1
+    sec[11] = 0x01;
+    sec[12] = 0x00;
+    sec[13] = 0x4E;
+
+    // Event 1
+    uint8_t* evt = &sec[14];
+    evt[0] = 0x12; // event_id = 0x1234
+    evt[1] = 0x34;
+    evt[2] = 0xE6; // MJD = 59000 (0xE678)
+    evt[3] = 0x78;
+    evt[4] = 0x14; // BCD 14:30:00
+    evt[5] = 0x30;
+    evt[6] = 0x00;
+    evt[7] = 0x01; // Duration BCD 01:15:00 (1h15m = 4500s)
+    evt[8] = 0x15;
+    evt[9] = 0x00;
+    evt[10] = 0x00; // running_status=0, free_CA=0
+    evt[11] = 0;    // desc_loop_len preenchido abaixo
+
+    size_t d_idx = 12;
+    // Descriptor 0x4D (Short event descriptor)
+    evt[d_idx + 0] = 0x4D;
+    const std::string title = "Jornal da Noite";
+    const std::string desc = "Principais noticias";
+    uint8_t d_len = static_cast<uint8_t>(3 + 1 + title.size() + 1 + desc.size());
+    evt[d_idx + 1] = d_len;
+    evt[d_idx + 2] = 'p';
+    evt[d_idx + 3] = 'o';
+    evt[d_idx + 4] = 'r';
+    evt[d_idx + 5] = static_cast<uint8_t>(title.size());
+    std::memcpy(&evt[d_idx + 6], title.data(), title.size());
+    size_t desc_offset = d_idx + 6 + title.size();
+    evt[desc_offset] = static_cast<uint8_t>(desc.size());
+    std::memcpy(&evt[desc_offset + 1], desc.data(), desc.size());
+    d_idx += 2 + d_len;
+
+    // Descriptor 0x54 (Content descriptor - Jornalismo)
+    evt[d_idx + 0] = 0x54;
+    evt[d_idx + 1] = 0x02;
+    evt[d_idx + 2] = 0x10; // nibble 1 = 0x1 (Jornalismo)
+    evt[d_idx + 3] = 0x00;
+    d_idx += 4;
+
+    // Descriptor 0xD6 (Parental rating - Livre)
+    evt[d_idx + 0] = 0xD6;
+    evt[d_idx + 1] = 0x04;
+    evt[d_idx + 2] = 'B';
+    evt[d_idx + 3] = 'R';
+    evt[d_idx + 4] = 'A';
+    evt[d_idx + 5] = 0x01; // Livre
+    d_idx += 6;
+
+    size_t total_desc_len = d_idx - 12;
+    evt[10] = static_cast<uint8_t>((total_desc_len >> 8) & 0x0F);
+    evt[11] = static_cast<uint8_t>(total_desc_len & 0xFF);
+
+    size_t total_sec_len = 11 + 12 + total_desc_len + 4; // header + event + descriptors + CRC
+    sec[1] = static_cast<uint8_t>(0xB0 | ((total_sec_len >> 8) & 0x0F));
+    sec[2] = static_cast<uint8_t>(total_sec_len & 0xFF);
+
+    TEST_ASSERT(parser.parse_packet(eit_pkt));
+
+    auto pres = parser.get_present_event(1);
+    TEST_ASSERT(pres.has_value());
+    TEST_ASSERT(pres->event_id == 0x1234);
+    TEST_ASSERT(pres->title == "Jornal da Noite");
+    TEST_ASSERT(pres->short_desc == "Principais noticias");
+    TEST_ASSERT(pres->genre == "Jornalismo");
+    TEST_ASSERT(pres->rating == "Livre");
+    TEST_ASSERT(pres->duration_sec == 4500);
+    TEST_ASSERT(pres->is_now == true);
+    TEST_ASSERT(!pres->start_time_str.empty());
+}
+
 int main() {
     test_build_pat_and_crc();
     test_parse_pat_roundtrip();
     test_pmt_discontinuity_pids();
     test_parse_sdt_service_name();
+    test_parse_eit_epg();
     test_error_handling();
 
     std::cout << "\033[1;32m[PASS] Todos os testes de PsiParser passaram com sucesso!\033[0m\n";

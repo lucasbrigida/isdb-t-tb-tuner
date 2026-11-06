@@ -418,44 +418,31 @@ size_t OneSegDemodulator::process_symbol(const std::complex<float>* symbol_time_
     const int BASE_SEG_OFFSET = (fft_size_ - 432) / 2;
 
     // 2. Estimativa conjunta de IFO (Integer Frequency Offset) e fase dos pilotos.
-    // Na aquisicao, uma busca coarse (passo 3) localiza a regiao do pico e uma
-    // busca fine (raio 2) recupera o melhor bin inteiro. Isso cobre todos os
-    // bins de [-45, +45], mas reduz de 91 para no maximo 36 candidatos.
+    // Durante a aquisicao, preserva-se a busca exaustiva do baseline em todos
+    // os bins de [-45, +45]. A reducao de custo fica restrita ao tracking,
+    // depois que o IFO ja foi confirmado.
     int best_delta = ifo_bins_;
     size_t best_phase = (sym_mod4_ + 1) % 4;
     float max_coh = -1.0f;
 
     if (!ifo_locked_) {
-        const auto coarse = search_ifo(
+        const auto acquisition = search_ifo(
             BASE_SEG_OFFSET,
             IFO_MIN_DELTA,
             IFO_MAX_DELTA,
-            IFO_COARSE_STEP);
-
-        const int fine_min = std::max(
-            IFO_MIN_DELTA,
-            coarse.delta - IFO_FINE_RADIUS);
-        const int fine_max = std::min(
-            IFO_MAX_DELTA,
-            coarse.delta + IFO_FINE_RADIUS);
-        const auto fine = search_ifo(
-            BASE_SEG_OFFSET,
-            fine_min,
-            fine_max,
             1);
-
-        best_delta = fine.delta;
-        best_phase = fine.phase;
-        max_coh = fine.coherence;
+        best_delta = acquisition.delta;
+        best_phase = acquisition.phase;
+        max_coh = acquisition.coherence;
     } else {
-        int min_delta = ifo_bins_;
-        int max_delta = ifo_bins_;
-        if (!tmcc_locked_) {
-            // Busca estreita em torno do ifo_bins_ enquanto o TMCC nao foi confirmado.
-            min_delta = std::max(IFO_MIN_DELTA, ifo_bins_ - 2);
-            max_delta = std::min(IFO_MAX_DELTA, ifo_bins_ + 2);
-        }
-
+        // Depois do lock, restringe a busca a uma janela estreita em torno do
+        // IFO confirmado enquanto a TMCC ainda valida o quadro.
+        const int min_delta = tmcc_locked_
+            ? ifo_bins_
+            : std::max(IFO_MIN_DELTA, ifo_bins_ - IFO_FINE_RADIUS);
+        const int max_delta = tmcc_locked_
+            ? ifo_bins_
+            : std::min(IFO_MAX_DELTA, ifo_bins_ + IFO_FINE_RADIUS);
         const auto tracked = search_ifo(
             BASE_SEG_OFFSET,
             min_delta,

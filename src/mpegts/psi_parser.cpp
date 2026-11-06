@@ -2,8 +2,182 @@
 #include <iostream>
 #include <algorithm>
 #include <cstring>
+#include <ctime>
+#include <cstdio>
+#include <cmath>
 
 namespace isdbt {
+
+static bool is_valid_utf8(const uint8_t* data, size_t len) {
+    size_t i = 0;
+    while (i < len) {
+        uint8_t c = data[i];
+        if (c <= 0x7F) {
+            i++;
+        } else if ((c & 0xE0) == 0xC0) {
+            if (i + 1 >= len || (data[i + 1] & 0xC0) != 0x80 || c < 0xC2) return false;
+            i += 2;
+        } else if ((c & 0xF0) == 0xE0) {
+            if (i + 2 >= len || (data[i + 1] & 0xC0) != 0x80 || (data[i + 2] & 0xC0) != 0x80) return false;
+            i += 3;
+        } else if ((c & 0xF8) == 0xF0) {
+            if (i + 3 >= len || (data[i + 1] & 0xC0) != 0x80 || (data[i + 2] & 0xC0) != 0x80 || (data[i + 3] & 0xC0) != 0x80) return false;
+            i += 4;
+        } else {
+            return false;
+        }
+    }
+    return true;
+}
+
+static std::string clean_text_string(const uint8_t* data, size_t len) {
+    if (!data || len == 0) return "";
+    
+    // Check DVB/ABNT encoding prefix
+    size_t start_idx = 0;
+    if (data[0] == 0x15) { // UTF-8 indicator
+        start_idx = 1;
+    } else if (data[0] < 0x20) { // Other DVB table indicator
+        start_idx = 1;
+    }
+
+    const uint8_t* p = data + start_idx;
+    size_t rem = (len > start_idx) ? (len - start_idx) : 0;
+    if (rem == 0) return "";
+
+    std::string s;
+    if (is_valid_utf8(p, rem)) {
+        s.reserve(rem);
+        for (size_t i = 0; i < rem; ++i) {
+            uint8_t c = p[i];
+            if (c >= 0x20 && c != 0x7F) {
+                s.push_back(static_cast<char>(c));
+            }
+        }
+    } else {
+        // Convert ISO-8859-15 / Latin-1 to valid UTF-8
+        s.reserve(rem * 2);
+        for (size_t i = 0; i < rem; ++i) {
+            uint8_t c = p[i];
+            if (c < 0x20 || c == 0x7F) {
+                continue;
+            }
+            if (c < 0x80) {
+                s.push_back(static_cast<char>(c));
+            } else {
+                switch (c) {
+                    case 0xA4: s += "\xE2\x82\xAC"; break; // €
+                    case 0xA6: s += "\xC5\xA0"; break;     // Š
+                    case 0xA8: s += "\xC5\xA1"; break;     // š
+                    case 0xB4: s += "\xC5\xBD"; break;     // Ž
+                    case 0xB8: s += "\xC5\xBE"; break;     // ž
+                    case 0xBC: s += "\xC5\x92"; break;     // Œ
+                    case 0xBD: s += "\xC5\x93"; break;     // œ
+                    case 0xBE: s += "\xC5\xB8"; break;     // Ÿ
+                    default:
+                        // ISO-8859-1 / ISO-8859-15 to UTF-8
+                        s.push_back(static_cast<char>(0xC0 | (c >> 6)));
+                        s.push_back(static_cast<char>(0x80 | (c & 0x3F)));
+                        break;
+                }
+            }
+        }
+    }
+
+    size_t first = s.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) return "";
+    size_t last = s.find_last_not_of(" \t\r\n");
+    return s.substr(first, (last - first + 1));
+}
+
+static std::chrono::system_clock::time_point parse_mjd_utc(uint16_t mjd, uint8_t bcd_h, uint8_t bcd_m, uint8_t bcd_s) {
+    if (mjd == 0xFFFF || mjd == 0x0000) return {};
+    int y_prime = static_cast<int>((static_cast<double>(mjd) - 15078.2) / 365.25);
+    int m_prime = static_cast<int>((static_cast<double>(mjd) - 14956.1 - static_cast<int>(y_prime * 365.25)) / 30.6001);
+    int day = static_cast<int>(mjd) - 14956 - static_cast<int>(y_prime * 365.25) - static_cast<int>(m_prime * 30.6001);
+    int k = (m_prime == 14 || m_prime == 15) ? 1 : 0;
+    int year = y_prime + k + 1900;
+    int month = m_prime - 1 - k * 12;
+
+    int hour = ((bcd_h >> 4) * 10) + (bcd_h & 0x0F);
+    int min = ((bcd_m >> 4) * 10) + (bcd_m & 0x0F);
+    int sec = ((bcd_s >> 4) * 10) + (bcd_s & 0x0F);
+
+    if (year < 1970 || month < 1 || month > 12 || day < 1 || day > 31 ||
+        hour < 0 || hour > 23 || min < 0 || min > 59 || sec < 0 || sec > 59) {
+        return {};
+    }
+
+    std::tm tm_utc{};
+    tm_utc.tm_year = year - 1900;
+    tm_utc.tm_mon = month - 1;
+    tm_utc.tm_mday = day;
+    tm_utc.tm_hour = hour;
+    tm_utc.tm_min = min;
+    tm_utc.tm_sec = sec;
+    tm_utc.tm_isdst = 0;
+
+#if defined(_WIN32)
+    time_t t = _mkgmtime(&tm_utc);
+#else
+    time_t t = timegm(&tm_utc);
+#endif
+    if (t == -1) return {};
+    return std::chrono::system_clock::from_time_t(t);
+}
+
+static std::string format_time_local(const std::chrono::system_clock::time_point& tp, bool include_date) {
+    if (tp == std::chrono::system_clock::time_point{}) return "--:--";
+    std::time_t t = std::chrono::system_clock::to_time_t(tp);
+    std::tm tm_local{};
+#if defined(_WIN32)
+    localtime_s(&tm_local, &t);
+#else
+    localtime_r(&t, &tm_local);
+#endif
+    char buf[64];
+    if (include_date) {
+        std::snprintf(buf, sizeof(buf), "%02d/%02d %02d:%02d",
+                      tm_local.tm_mday, tm_local.tm_mon + 1,
+                      tm_local.tm_hour, tm_local.tm_min);
+    } else {
+        std::snprintf(buf, sizeof(buf), "%02d:%02d",
+                      tm_local.tm_hour, tm_local.tm_min);
+    }
+    return std::string(buf);
+}
+
+static std::string content_nibble_to_string(uint8_t nibble1) {
+    switch (nibble1) {
+        case 0x1: return "Jornalismo";
+        case 0x2: return "Esporte";
+        case 0x3: return "Educativo";
+        case 0x4: return "Novela/Serie";
+        case 0x5: return "Show/Musica";
+        case 0x6: return "Variedades";
+        case 0x7: return "Reality Show";
+        case 0x8: return "Infantil";
+        case 0x9: return "Humor";
+        case 0xA: return "Filme";
+        case 0xB: return "Sorteio/Televendas";
+        case 0xC: return "Debate/Entrevista";
+        default:  return "";
+    }
+}
+
+static std::string parental_rating_to_string(uint8_t rating_val) {
+    uint8_t level = rating_val & 0x0F;
+    if (level == 0) level = (rating_val >> 4) & 0x0F;
+    switch (level) {
+        case 0x01: return "Livre";
+        case 0x02: return "10 anos";
+        case 0x03: return "12 anos";
+        case 0x04: return "14 anos";
+        case 0x05: return "16 anos";
+        case 0x06: return "18 anos";
+        default:   return "";
+    }
+}
 
 static uint32_t mpeg2_crc32(const uint8_t* data, size_t len) {
     uint32_t crc = 0xFFFFFFFF;
@@ -44,6 +218,56 @@ std::vector<uint16_t> PsiParser::get_discontinuity_pids() const {
     return pids;
 }
 
+void PsiParser::SectionAssembler::push_packet(bool pusi, const uint8_t* payload, size_t len,
+                                              std::vector<std::vector<uint8_t>>& completed) {
+    if (!payload || len == 0) return;
+
+    if (pusi) {
+        size_t pointer_field = payload[0];
+        if (1 + pointer_field > len) return;
+
+        // Se tinhamos uma secao pendente sendo montada e ha espaco antes do ponteiro
+        if (pointer_field > 0 && expected_length > 0 && buffer.size() < expected_length) {
+            size_t fill = std::min(pointer_field, expected_length - buffer.size());
+            buffer.insert(buffer.end(), payload + 1, payload + 1 + fill);
+            if (buffer.size() >= expected_length) {
+                completed.push_back(buffer);
+            }
+        }
+
+        buffer.clear();
+        const uint8_t* sec_start = payload + 1 + pointer_field;
+        size_t sec_avail = len - (1 + pointer_field);
+        if (sec_avail < 3) {
+            expected_length = 0;
+            return;
+        }
+
+        size_t s_len = (((static_cast<size_t>(sec_start[1] & 0x0F)) << 8) | sec_start[2]) + 3;
+        expected_length = s_len;
+        size_t to_copy = std::min(sec_avail, expected_length);
+        buffer.insert(buffer.end(), sec_start, sec_start + to_copy);
+
+        if (buffer.size() >= expected_length) {
+            completed.push_back(buffer);
+            buffer.clear();
+            expected_length = 0;
+        }
+    } else {
+        // Continuacao de secao fragmentada entre pacotes TS consecutivos
+        if (expected_length > 0 && buffer.size() < expected_length) {
+            size_t needed = expected_length - buffer.size();
+            size_t to_copy = std::min(len, needed);
+            buffer.insert(buffer.end(), payload, payload + to_copy);
+            if (buffer.size() >= expected_length) {
+                completed.push_back(buffer);
+                buffer.clear();
+                expected_length = 0;
+            }
+        }
+    }
+}
+
 bool PsiParser::parse_packet(const uint8_t* ts188) {
     if (!ts188 || ts188[0] != 0x47) return false;
 
@@ -66,27 +290,33 @@ bool PsiParser::parse_packet(const uint8_t* ts188) {
     const uint8_t* payload = ts188 + payload_offset;
     size_t payload_len = 188 - payload_offset;
 
-    if (pusi && payload_len > 0) {
-        size_t pointer_field = payload[0];
-        payload += 1 + pointer_field;
-        if (1 + pointer_field >= payload_len) return false;
-        payload_len -= (1 + pointer_field);
+    bool is_psi_pid = (pid == 0x0000 || pid == 0x0011 || pid == 0x0012 ||
+                       pid == 0x0026 || pid == 0x0027 ||
+                       (pid >= 0x1FC8 && pid <= 0x1FCF) ||
+                       pmt_pids_.find(pid) != pmt_pids_.end());
+    if (!is_psi_pid) return false;
+
+    bool updated = false;
+    std::vector<std::vector<uint8_t>> completed_sections;
+    assemblers_[pid].push_packet(pusi, payload, payload_len, completed_sections);
+
+    for (const auto& sec : completed_sections) {
+        if (sec.empty()) continue;
+        if (pid == 0x0000) {
+            parse_pat(sec.data(), sec.size());
+        } else if (pid == 0x0011) {
+            parse_sdt(sec.data(), sec.size());
+            updated = true;
+        } else if (pid == 0x0012 || pid == 0x0026 || pid == 0x0027) {
+            parse_eit(sec.data(), sec.size());
+            updated = true;
+        } else if ((pid >= 0x1FC8 && pid <= 0x1FCF) || pmt_pids_.find(pid) != pmt_pids_.end()) {
+            parse_pmt(pid, sec.data(), sec.size());
+            updated = true;
+        }
     }
 
-    if (pid == 0x0000) {
-        // PAT - Program Association Table
-        parse_pat(payload, payload_len);
-    } else if (pid == 0x0011) {
-        // SDT - Service Description Table
-        parse_sdt(payload, payload_len);
-        return true;
-    } else if ((pid >= 0x1FC8 && pid <= 0x1FCF) || pmt_pids_.find(pid) != pmt_pids_.end()) {
-        // PMT - Program Map Table (em 1-Seg ISDB-Tb, o PMT é transmitido no PID fixo 0x1FC8..0x1FCF)
-        parse_pmt(pid, payload, payload_len);
-        return true;
-    }
-
-    return false;
+    return updated;
 }
 
 bool PsiParser::build_pat_packet(uint8_t* out_ts188) {
@@ -132,6 +362,10 @@ bool PsiParser::build_pat_packet(uint8_t* out_ts188) {
 void PsiParser::reset() {
     services_.clear();
     pmt_pids_.clear();
+    present_events_.clear();
+    following_events_.clear();
+    schedule_events_.clear();
+    assemblers_.clear();
     pat_version_ = (pat_version_ + 1) & 0x1F;
 }
 
@@ -250,6 +484,174 @@ void PsiParser::parse_sdt(const uint8_t* payload, size_t len) {
 
         idx += 5 + loop_len;
     }
+}
+
+void PsiParser::parse_eit(const uint8_t* payload, size_t len) {
+    if (len < 14) return;
+    uint8_t table_id = payload[0];
+    // 0x4E = actual TS present/following
+    // 0x4F = other TS present/following
+    // 0x50..0x5F = actual TS schedule
+    // 0x60..0x6F = other TS schedule
+    if (table_id != 0x4E && (table_id < 0x50 || table_id > 0x5F)) return;
+
+    size_t section_len = (((static_cast<size_t>(payload[1] & 0x0F)) << 8) | payload[2]);
+    if (section_len + 3 > len) section_len = len - 3;
+
+    uint16_t service_id = (static_cast<uint16_t>(payload[3]) << 8) | payload[4];
+    uint8_t section_number = payload[6];
+
+    size_t idx = 14;
+    while (section_len + 3 >= 4 && idx + 12 <= section_len + 3 - 4) {
+        uint16_t event_id = (static_cast<uint16_t>(payload[idx]) << 8) | payload[idx + 1];
+        uint16_t mjd = (static_cast<uint16_t>(payload[idx + 2]) << 8) | payload[idx + 3];
+        uint8_t bcd_h = payload[idx + 4];
+        uint8_t bcd_m = payload[idx + 5];
+        uint8_t bcd_s = payload[idx + 6];
+
+        uint8_t dur_h = payload[idx + 7];
+        uint8_t dur_m = payload[idx + 8];
+        uint8_t dur_s = payload[idx + 9];
+
+        size_t desc_loop_len = (((static_cast<size_t>(payload[idx + 10] & 0x0F)) << 8) | payload[idx + 11]);
+
+        EpgEvent evt;
+        evt.event_id = event_id;
+        evt.service_id = service_id;
+
+        int duration_sec = (((dur_h >> 4) * 10 + (dur_h & 0x0F)) * 3600) +
+                           (((dur_m >> 4) * 10 + (dur_m & 0x0F)) * 60) +
+                           ((dur_s >> 4) * 10 + (dur_s & 0x0F));
+        evt.duration_sec = duration_sec;
+
+        if (mjd != 0xFFFF && mjd != 0x0000) {
+            evt.start_tp = parse_mjd_utc(mjd, bcd_h, bcd_m, bcd_s);
+            if (evt.start_tp != std::chrono::system_clock::time_point{}) {
+                evt.end_tp = evt.start_tp + std::chrono::seconds(duration_sec);
+                evt.start_time_str = format_time_local(evt.start_tp, table_id >= 0x50);
+                evt.end_time_str = format_time_local(evt.end_tp, false);
+            }
+        }
+
+        if (table_id == 0x4E) {
+            if (section_number == 0) evt.is_now = true;
+            else if (section_number == 1) evt.is_next = true;
+        }
+
+        size_t d_idx = idx + 12;
+        size_t d_end = d_idx + desc_loop_len;
+        if (d_end > section_len + 3 - 4) d_end = section_len + 3 - 4;
+
+        while (d_idx + 2 <= d_end && d_idx + 2 <= len) {
+            uint8_t desc_tag = payload[d_idx];
+            uint8_t desc_len = payload[d_idx + 1];
+            size_t next_d = d_idx + 2 + desc_len;
+            if (next_d > len) break;
+
+            if (desc_tag == 0x4D && desc_len >= 4) { // Short event descriptor
+                // lang (3 bytes)
+                uint8_t name_len = payload[d_idx + 5];
+                if (d_idx + 6 + name_len <= next_d) {
+                    evt.title = clean_text_string(&payload[d_idx + 6], name_len);
+                    size_t p = d_idx + 6 + name_len;
+                    if (p < next_d) {
+                        uint8_t text_len = payload[p];
+                        if (p + 1 + text_len <= next_d) {
+                            evt.short_desc = clean_text_string(&payload[p + 1], text_len);
+                        }
+                    }
+                }
+            } else if (desc_tag == 0x4E && desc_len >= 5) { // Extended event descriptor
+                size_t p = d_idx + 6;
+                if (p < next_d) {
+                    uint8_t length_of_items = payload[p++];
+                    p += length_of_items;
+                    if (p < next_d) {
+                        uint8_t text_len = payload[p++];
+                        if (p + text_len <= next_d) {
+                            std::string ext = clean_text_string(&payload[p], text_len);
+                            if (!ext.empty()) {
+                                if (!evt.extended_desc.empty()) evt.extended_desc += " ";
+                                evt.extended_desc += ext;
+                            }
+                        }
+                    }
+                }
+            } else if (desc_tag == 0x54 && desc_len >= 1) { // Content descriptor
+                uint8_t nibble1 = (payload[d_idx + 2] >> 4) & 0x0F;
+                evt.genre = content_nibble_to_string(nibble1);
+            } else if (desc_tag == 0xD6 && desc_len >= 4) { // Parental rating (ABNT NBR 15603)
+                uint8_t rating_val = payload[d_idx + 5];
+                evt.rating = parental_rating_to_string(rating_val);
+            } else if (desc_tag == 0x55 && desc_len >= 4) { // Parental rating (DVB)
+                uint8_t rating_val = payload[d_idx + 5];
+                if (rating_val > 0 && rating_val <= 0x0F) {
+                    evt.rating = std::to_string(rating_val + 3) + " anos";
+                }
+            }
+
+            d_idx = next_d;
+        }
+
+        if (evt.is_now) {
+            present_events_[service_id] = evt;
+        } else if (evt.is_next) {
+            following_events_[service_id] = evt;
+        } else {
+            bool updated = false;
+            for (auto& s : schedule_events_) {
+                if (s.service_id == service_id && s.event_id == event_id) {
+                    s = evt;
+                    updated = true;
+                    break;
+                }
+            }
+            if (!updated) {
+                schedule_events_.push_back(evt);
+            }
+        }
+
+        idx += 12 + desc_loop_len;
+    }
+}
+
+std::optional<EpgEvent> PsiParser::get_present_event(uint16_t service_id) const {
+    if (service_id != 0) {
+        auto it = present_events_.find(service_id);
+        if (it != present_events_.end()) return it->second;
+        return std::nullopt;
+    }
+    if (!present_events_.empty()) {
+        return present_events_.begin()->second;
+    }
+    return std::nullopt;
+}
+
+std::optional<EpgEvent> PsiParser::get_following_event(uint16_t service_id) const {
+    if (service_id != 0) {
+        auto it = following_events_.find(service_id);
+        if (it != following_events_.end()) return it->second;
+        return std::nullopt;
+    }
+    if (!following_events_.empty()) {
+        return following_events_.begin()->second;
+    }
+    return std::nullopt;
+}
+
+std::vector<EpgEvent> PsiParser::get_all_events(uint16_t service_id) const {
+    std::vector<EpgEvent> all;
+    auto pres = get_present_event(service_id);
+    if (pres) all.push_back(*pres);
+    auto foll = get_following_event(service_id);
+    if (foll) all.push_back(*foll);
+
+    for (const auto& evt : schedule_events_) {
+        if (service_id == 0 || evt.service_id == service_id) {
+            all.push_back(evt);
+        }
+    }
+    return all;
 }
 
 } // namespace isdbt

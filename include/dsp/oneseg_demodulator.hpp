@@ -91,7 +91,6 @@ public:
 private:
     static constexpr int IFO_MIN_DELTA = -45;
     static constexpr int IFO_MAX_DELTA = 45;
-    static constexpr int IFO_COARSE_STEP = 3;
     static constexpr int IFO_FINE_RADIUS = 2;
 
     struct IfoSearchResult {

@@ -19,10 +19,12 @@ int main(int argc, char** argv) {
     // 2. Subcomando SCAN
     int scan_start = 14;
     int scan_end = 45;
+    int scan_timeout = 30;
     int dev_idx = 0;
     auto sc_scan = app.add_subcommand("scan", "Executa a varredura profunda dos canais UHF globais");
     sc_scan->add_option("-s,--start", scan_start, "Canal inicial (padrao 14)");
     sc_scan->add_option("-e,--end", scan_end, "Canal final (padrao 45)");
+    sc_scan->add_option("-t,--timeout", scan_timeout, "Tempo maximo de busca do nome do canal via SDT em segundos (padrao 30)");
     sc_scan->add_option("-d,--device", dev_idx, "Indice do dongle RTL-SDR (padrao 0)");
     sc_scan->add_option("--ofdm", global_ignored_ofdm, "")->expected(0, 1)->group("");
 
@@ -30,7 +32,26 @@ int main(int argc, char** argv) {
     auto sc_list = app.add_subcommand("list", "Lista os canais sintonizados armazenados em channels.json");
     sc_list->add_option("--ofdm", global_ignored_ofdm, "")->expected(0, 1)->group("");
 
-    // 4. Subcomando PLAY
+    // 4. Subcomando EPG
+    int epg_ch = 0;
+    std::string epg_name;
+    int epg_timeout = 30;
+    bool epg_json = false;
+    int epg_ofdm = 1;
+    bool epg_refresh = false;
+    bool epg_view = false;
+
+    auto sc_epg = app.add_subcommand("epg", "Exibe o guia eletronico de programacao (EPG) dos canais");
+    sc_epg->add_option("-c,--channel", epg_ch, "Numero do canal (ex: 14, 18, 24)");
+    sc_epg->add_option("-n,--name", epg_name, "Nome da emissora (ex: GLOBO, GAZETA)");
+    sc_epg->add_option("-t,--timeout", epg_timeout, "Tempo de captura de metadados em segundos (padrao 30)");
+    sc_epg->add_flag("-f,--refresh", epg_refresh, "Forca nova sintonia de RF ignorando o cache local valido");
+    sc_epg->add_flag("--view", epg_view, "Consulta a programacao salva");
+    sc_epg->add_flag("--json", epg_json, "Exibe os metadados de programacao em formato JSON");
+    sc_epg->add_option("-d,--device", dev_idx, "Indice do dongle RTL-SDR (padrao 0)");
+    sc_epg->add_option("--ofdm", epg_ofdm, "Modo de sincronismo OFDM (1 ou 2, padrao 1)");
+
+    // 5. Subcomando PLAY
     int play_ch = 0;
     std::string play_name;
     uint16_t udp_port = 1234;
@@ -72,9 +93,11 @@ int main(int argc, char** argv) {
     if (sc_probe->parsed()) {
         return isdbt::cmd_probe();
     } else if (sc_scan->parsed()) {
-        return isdbt::cmd_scan(scan_start, scan_end, dev_idx);
+        return isdbt::cmd_scan(scan_start, scan_end, dev_idx, scan_timeout);
     } else if (sc_list->parsed()) {
         return isdbt::cmd_list();
+    } else if (sc_epg->parsed()) {
+        return isdbt::cmd_epg(epg_ch, epg_name, dev_idx, epg_timeout, epg_json, epg_ofdm, epg_refresh, epg_view);
     } else if (sc_play->parsed()) {
         if (ofdm_mode != 1 && ofdm_mode != 2) {
             std::cerr << "[ERRO] Valor invalido para --ofdm: " << ofdm_mode

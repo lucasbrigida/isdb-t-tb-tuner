@@ -42,6 +42,8 @@ struct PlaybackStatusSnapshot {
     uint32_t rs_dropped = 0;
     uint64_t drop_blocks = 0;
     std::string service_name;
+    std::string epg_now;
+    std::string epg_next;
 };
 
 struct SharedPlaybackStatus {
@@ -65,25 +67,7 @@ static void reset_play_reception_stream(
 }
 
 static void print_players_box(const std::string& vlc_url) {
-    const int inner_width = 84;
-    std::string h_border = "+" + std::string(inner_width + 2, '-') + "+";
-
-    auto print_line = [inner_width](const std::string& text) {
-        std::cout << "| " << text;
-        if (static_cast<int>(text.length()) < inner_width) {
-            std::cout << std::string(inner_width - text.length(), ' ');
-        }
-        std::cout << " |\n";
-    };
-
-    std::cout << h_border << "\n";
-    print_line("Reprodutores de Video Disponiveis:");
-    print_line("  1. MPV Player com Interpolacao em Tempo Real (Recomendado):");
-    print_line("     Execute: .\\scripts\\play_mpv.bat (ou .\\scripts\\play_mpv.ps1)");
-    print_line("  2. VLC Media Player:");
-    std::string vlc_line = "     URL: " + vlc_url + " | Cache: --network-caching=2000 --clock-jitter=1000";
-    print_line(vlc_line);
-    std::cout << h_border << "\n\n";
+    std::cout << " [Stream UDP] URL: " << vlc_url << "\n\n";
 }
 
 static std::string format_channel_line(const ChannelInfo& ch, bool is_selected, bool is_active) {
@@ -329,7 +313,51 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
         std::cout << std::flush;
     };
 
+    SharedPlaybackStatus shared_status;
+    std::string last_rendered_epg_now;
+    std::string last_rendered_epg_next;
+
+    auto render_epg_panel = [&](const std::string& now_text, const std::string& next_text) {
+        if (headless) return;
+        TerminalSize sz = get_terminal_size();
+        int width = std::max(60, std::min(88, sz.width - 2));
+
+        std::string now_str = now_text.empty() ? "Aguardando guia de programacao..." : now_text;
+        std::string next_str = next_text.empty() ? "Aguardando guia de programacao..." : next_text;
+
+        auto format_box_line = [&](const std::string& prefix, const std::string& content) {
+            std::string line = "| " + prefix + " " + content;
+            int inner_width = width - 1;
+            if (static_cast<int>(line.length()) > inner_width) {
+                line = (inner_width > 4) ? line.substr(0, inner_width - 3) + "..." : line.substr(0, inner_width);
+            }
+            if (static_cast<int>(line.length()) < inner_width) {
+                line += std::string(inner_width - line.length(), ' ');
+            }
+            line += "|";
+            return line;
+        };
+
+        std::string top_border = "+-- Programacao (EPG) " + std::string(std::max(0, width - 23), '-') + "+";
+        std::string bot_border = "+" + std::string(std::max(0, width - 1), '-') + "+";
+
+        std::cout << "\033[12;1H\033[2K" << top_border
+                  << "\033[13;1H\033[2K" << format_box_line("▶ AGORA  ", now_str)
+                  << "\033[14;1H\033[2K" << format_box_line("⏭ SEGUIR ", next_str)
+                  << "\033[15;1H\033[2K" << bot_border << std::flush;
+
+        last_rendered_epg_now = now_str;
+        last_rendered_epg_next = next_str;
+    };
+
     auto render_dynamic_ui = [&]() {
+        std::string cur_now, cur_next;
+        {
+            std::lock_guard<std::mutex> lock(shared_status.mtx);
+            cur_now = shared_status.snap.epg_now;
+            cur_next = shared_status.snap.epg_next;
+        }
+        render_epg_panel(cur_now, cur_next);
         render_channels();
         render_bottom_bars();
     };
@@ -349,8 +377,6 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
     std::atomic<bool> retune_in_progress{false};
     std::atomic<bool> dsp_reset_requested{false};
     std::atomic<bool> dsp_reset_done{false};
-
-    SharedPlaybackStatus shared_status;
 
     // THREAD 1: Captura continua (USB ou Arquivo IQ)
     std::thread reader_thread([&]() {
@@ -466,6 +492,12 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
                 }
 
                 psi.reset();
+                {
+                    std::lock_guard<std::mutex> lock(shared_status.mtx);
+                    shared_status.snap.service_name.clear();
+                    shared_status.snap.epg_now.clear();
+                    shared_status.snap.epg_next.clear();
+                }
                 channel_transition_pending = true;
                 transition_wait_blocks = 0;
                 reset_play_reception_stream(*sync, demod, ofdm_locked, &dsp_metrics);
@@ -674,6 +706,32 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
                         if (!s_name.empty()) {
                             shared_status.snap.service_name = s_name;
                         }
+                        auto pres = psi.get_present_event();
+                        auto foll = psi.get_following_event();
+                        std::string now_str;
+                        if (pres && !pres->title.empty()) {
+                            if (!pres->start_time_str.empty()) {
+                                now_str += "[" + pres->start_time_str;
+                                if (!pres->end_time_str.empty()) now_str += " - " + pres->end_time_str;
+                                now_str += "] ";
+                            }
+                            now_str += pres->title;
+                            if (!pres->rating.empty()) now_str += " (" + pres->rating + ")";
+                            if (!pres->genre.empty()) now_str += " [" + pres->genre + "]";
+                        }
+                        std::string next_str;
+                        if (foll && !foll->title.empty()) {
+                            if (!foll->start_time_str.empty()) {
+                                next_str += "[" + foll->start_time_str;
+                                if (!foll->end_time_str.empty()) next_str += " - " + foll->end_time_str;
+                                next_str += "] ";
+                            }
+                            next_str += foll->title;
+                            if (!foll->rating.empty()) next_str += " (" + foll->rating + ")";
+                            if (!foll->genre.empty()) next_str += " [" + foll->genre + "]";
+                        }
+                        shared_status.snap.epg_now = now_str;
+                        shared_status.snap.epg_next = next_str;
                     }
                     last_status_update = now;
                 }
@@ -802,6 +860,10 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
             {
                 std::lock_guard<std::mutex> lock(shared_status.mtx);
                 snap = shared_status.snap;
+            }
+
+            if (snap.epg_now != last_rendered_epg_now || snap.epg_next != last_rendered_epg_next) {
+                render_epg_panel(snap.epg_now, snap.epg_next);
             }
 
             if (!channel_name_learned && !snap.service_name.empty() && active_channel_num > 0) {
