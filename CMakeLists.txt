@@ -124,6 +124,8 @@ set(SOURCES
     src/cli/cmd_scan.cpp
     src/cli/cmd_list.cpp
     src/cli/cmd_play.cpp
+    src/cli/cmd_epg.cpp
+    src/cli/epg_manager.cpp
     src/cli/channel_manager.cpp
     src/dsp/reed_solomon.cpp
     src/dsp/descrambler.cpp
@@ -246,6 +248,12 @@ add_executable(test_psi_parser
     src/mpegts/psi_parser.cpp
 )
 
+add_executable(test_epg_manager
+    tests/test_epg_manager.cpp
+    src/cli/epg_manager.cpp
+    src/mpegts/psi_parser.cpp
+)
+
 add_executable(freeze_baseline_ofdm1
     tools/freeze_baseline_ofdm1.cpp
     src/dsp/reed_solomon.cpp
@@ -342,6 +350,7 @@ add_test(NAME SyncStateAndCsi COMMAND test_sync_state_and_csi)
 add_test(NAME FrequencyPlan COMMAND test_frequency_plan)
 add_test(NAME ChannelManager COMMAND test_channel_manager)
 add_test(NAME PsiParser COMMAND test_psi_parser)
+add_test(NAME EpgManager COMMAND test_epg_manager)
 add_test(NAME UdpStreamer COMMAND test_udp_streamer)
 add_test(NAME CliOfdmFlag COMMAND test_cli_ofdm_flag)
 add_test(NAME SyncRegressionScan COMMAND test_sync_regression_scan)

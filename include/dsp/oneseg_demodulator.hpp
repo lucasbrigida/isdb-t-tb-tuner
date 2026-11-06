@@ -89,10 +89,24 @@ public:
     int get_ifo() const { return ifo_bins_; }
 
 private:
+    static constexpr int IFO_MIN_DELTA = -45;
+    static constexpr int IFO_MAX_DELTA = 45;
+    static constexpr int IFO_FINE_RADIUS = 2;
+
+    struct IfoSearchResult {
+        int delta{0};
+        size_t phase{0};
+        float coherence{-1.0f};
+    };
+
     void init_pilots();
     void init_time_deinterleaver(int I);
     void init_prbs_frame_masks();
     void init_carrier_layouts();
+    IfoSearchResult search_ifo(int base_segment_offset,
+                               int min_delta,
+                               int max_delta,
+                               int delta_step);
     bool process_tmcc(const std::complex<float>* eq_seg_carriers);
     bool check_tmcc_bch_parity() const;
     void decode_tmcc_parameters();
@@ -148,8 +162,13 @@ private:
         std::array<uint16_t, 384> data_indices{};
         uint16_t data_count{0};
     };
+    struct PilotPair {
+        uint16_t first{0};
+        uint16_t second{0};
+    };
     std::array<CarrierLayout, 4> carrier_layouts_{};
     std::array<std::vector<size_t>, 4> sp_indices_per_phase_{};
+    std::array<std::array<PilotPair, 35>, 4> ifo_pilot_pairs_{};
 
     // Buffers de trabalho pré-alocados (zero alocação no loop quente)
     std::array<std::complex<float>, 433> seg_carriers_{};

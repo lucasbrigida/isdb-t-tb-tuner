@@ -106,9 +106,16 @@ bool launch_mpv(uint16_t udp_port) {
     std::string conf_dir = "tools\\mpv";
 
     auto probe_candidates = [&](const std::filesystem::path& base) -> bool {
+        std::error_code ec;
+        auto is_valid_exe = [&](const std::filesystem::path& p) -> bool {
+            return std::filesystem::exists(p, ec) &&
+                   std::filesystem::is_regular_file(p, ec) &&
+                   std::filesystem::file_size(p, ec) > 1024 * 1024;
+        };
+
         if (sizeof(void*) == 8) {
             auto b64 = base / "tools" / "mpv" / "x64" / "mpv.exe";
-            if (std::filesystem::exists(b64)) {
+            if (is_valid_exe(b64)) {
                 mpv_bin = b64.string();
                 conf_dir = (base / "tools" / "mpv" / "x64").string();
                 return true;
@@ -116,14 +123,21 @@ bool launch_mpv(uint16_t udp_port) {
         }
         if (sizeof(void*) == 4) {
             auto b86 = base / "tools" / "mpv" / "x86" / "mpv.exe";
-            if (std::filesystem::exists(b86)) {
+            if (is_valid_exe(b86)) {
                 mpv_bin = b86.string();
                 conf_dir = (base / "tools" / "mpv" / "x86").string();
                 return true;
             }
         }
+        // Fallback: se estiver em x64 mas o mpv x64 nao existir ou for stub LFS, usa o x86
+        auto b86_fb = base / "tools" / "mpv" / "x86" / "mpv.exe";
+        if (is_valid_exe(b86_fb)) {
+            mpv_bin = b86_fb.string();
+            conf_dir = (base / "tools" / "mpv" / "x86").string();
+            return true;
+        }
         auto bdef = base / "tools" / "mpv" / "mpv.exe";
-        if (std::filesystem::exists(bdef)) {
+        if (is_valid_exe(bdef)) {
             mpv_bin = bdef.string();
             conf_dir = (base / "tools" / "mpv").string();
             return true;

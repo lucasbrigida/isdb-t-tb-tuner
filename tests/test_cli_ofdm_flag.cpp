@@ -21,10 +21,18 @@ static std::string find_binary() {
         ".\\isdbtb_rx.exe",
         "build\\isdbtb_rx.exe",
         ".\\build\\isdbtb_rx.exe",
+        "build_x64\\isdbtb_rx.exe",
+        ".\\build_x64\\isdbtb_rx.exe",
+        "build_x86\\isdbtb_rx.exe",
+        ".\\build_x86\\isdbtb_rx.exe",
         "./isdbtb_rx.exe",
         "build/isdbtb_rx.exe",
+        "build_x64/isdbtb_rx.exe",
+        "build_x86/isdbtb_rx.exe",
         "./isdbtb_rx",
-        "build/isdbtb_rx"
+        "build/isdbtb_rx",
+        "build_x64/isdbtb_rx",
+        "build_x86/isdbtb_rx"
     };
     for (const auto& c : candidates) {
         if (fs::exists(c)) {
@@ -49,47 +57,62 @@ int main() {
     std::string bin = find_binary();
 
     // 1. Testa aceitacao de --ofdm 1 e --ofdm 2 no subcomando play (sintaxe separada por espaco)
-    std::cout << "  [1/7] Testando play --help --ofdm 1 e --ofdm 2 (espaco)...\n";
+    std::cout << "  [1/8] Testando play --help --ofdm 1 e --ofdm 2 (espaco)...\n";
     TEST_ASSERT(run_cmd(bin + " play --help --ofdm 1") == 0);
     TEST_ASSERT(run_cmd(bin + " play --help --ofdm 2") == 0);
 
     // 2. Testa aceitacao de --ofdm=1 e --ofdm=2 no subcomando play (sintaxe com sinal de igual)
-    std::cout << "  [2/7] Testando play --help --ofdm=1 e --ofdm=2 (sinal de igual)...\n";
+    std::cout << "  [2/8] Testando play --help --ofdm=1 e --ofdm=2 (sinal de igual)...\n";
     TEST_ASSERT(run_cmd(bin + " play --help --ofdm=1") == 0);
     TEST_ASSERT(run_cmd(bin + " play --help --ofdm=2") == 0);
 
     // 3. Testa rejeicao de valores invalidos com espaco e sinal de igual no play
-    std::cout << "  [3/7] Testando play --ofdm 3 e play --ofdm=3 (valores invalidos)...\n";
+    std::cout << "  [3/8] Testando play --ofdm 3 e play --ofdm=3 (valores invalidos)...\n";
     TEST_ASSERT(run_cmd(bin + " play --ofdm 3") != 0);
     TEST_ASSERT(run_cmd(bin + " play --ofdm=3") != 0);
 
     // 4. Testa que --ofdm eh silenciosamente ignorada no scan (espaco e igual)
-    std::cout << "  [4/7] Testando scan --help --ofdm 2 e --ofdm=2 (deve ignorar)...\n";
+    std::cout << "  [4/8] Testando scan --help --ofdm 2 e --ofdm=2 (deve ignorar)...\n";
     TEST_ASSERT(run_cmd(bin + " scan --help --ofdm 2") == 0);
     TEST_ASSERT(run_cmd(bin + " scan --help --ofdm=2") == 0);
 
     // 5. Testa que --ofdm eh silenciosamente ignorada no probe (espaco e igual)
-    std::cout << "  [5/7] Testando probe --help --ofdm 1 e --ofdm=1 (deve ignorar)...\n";
+    std::cout << "  [5/8] Testando probe --help --ofdm 1 e --ofdm=1 (deve ignorar)...\n";
     TEST_ASSERT(run_cmd(bin + " probe --help --ofdm 1") == 0);
     TEST_ASSERT(run_cmd(bin + " probe --help --ofdm=1") == 0);
 
-    // 6. Testa que --ofdm eh silenciosamente ignorada no comando global --help (espaco e igual)
-    std::cout << "  [6/7] Testando --help --ofdm 2 e --help --ofdm=2 (deve ignorar)...\n";
+    // 6. Testa que --ofdm eh silenciosamente ignorada no epg (espaco e igual)
+    std::cout << "  [6/8] Testando epg --help --ofdm 2 e --ofdm=2 (deve ignorar)...\n";
+    TEST_ASSERT(run_cmd(bin + " epg --help --ofdm 2") == 0);
+    TEST_ASSERT(run_cmd(bin + " epg --help --ofdm=2") == 0);
+    TEST_ASSERT(run_cmd(bin + " epg --view --ofdm 2") == 0);
+    TEST_ASSERT(run_cmd(bin + " epg --view --ofdm=2") == 0);
+
+    // 7. Testa que --ofdm eh silenciosamente ignorada no comando global --help (espaco e igual)
+    std::cout << "  [7/8] Testando --help --ofdm 2 e --help --ofdm=2 (deve ignorar)...\n";
     TEST_ASSERT(run_cmd(bin + " --help --ofdm 2") == 0);
     TEST_ASSERT(run_cmd(bin + " --help --ofdm=2") == 0);
 
-    // 7. Testa bench_sync com --ofdm 2 e --ofdm=2
-    std::cout << "  [7/7] Testando bench_sync --help --ofdm 2...\n";
+    // 8. Testa bench_sync com --ofdm 2 e --ofdm=2
+    std::cout << "  [8/8] Testando bench_sync --help --ofdm 2...\n";
     std::string bench_bin = "bench_sync";
     std::vector<std::string> bench_candidates = {
         "bench_sync.exe",
         ".\\bench_sync.exe",
         "build\\bench_sync.exe",
         ".\\build\\bench_sync.exe",
+        "build_x64\\bench_sync.exe",
+        ".\\build_x64\\bench_sync.exe",
+        "build_x86\\bench_sync.exe",
+        ".\\build_x86\\bench_sync.exe",
         "./bench_sync.exe",
         "build/bench_sync.exe",
+        "build_x64/bench_sync.exe",
+        "build_x86/bench_sync.exe",
         "./bench_sync",
-        "build/bench_sync"
+        "build/bench_sync",
+        "build_x64/bench_sync",
+        "build_x86/bench_sync"
     };
     for (const auto& c : bench_candidates) {
         if (fs::exists(c)) {

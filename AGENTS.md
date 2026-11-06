@@ -76,7 +76,7 @@ Qualquer agente que editar o código-fonte deve respeitar estritamente as seguin
   - `--ofdm 1` (`VanDeBeekSync`): Adaptador puro sobre a implementação existente.
   - `--ofdm 2` (`RobustGRISDBTSync`): Port nativo de `gr-isdbt` (`src/sync/robust_grisdbt_sync.cpp`) com refinamento SP, CFO, SCO e FSM com histerese.
 - **Sintaxe da Flag:** Suporta tanto `--ofdm 1` / `--ofdm 2` (com espaço) quanto `--ofdm=1` / `--ofdm=2` (com sinal de igual).
-- **Regra da Flag:** `--ofdm` é exclusiva do comando `play`. Em qualquer outro comando (`scan`, `probe`), ela DEVE ser silenciosamente ignorada sem gerar erros.
+- **Regra da Flag:** `--ofdm` é exclusiva do comando `play`. Em qualquer outro comando (`scan`, `probe`, `epg`, `list`), ela DEVE ser silenciosamente ignorada sem gerar erros.
 
 ### 11. Compilação Dual-Architecture (`TARGET_ARCH=x64` e `TARGET_ARCH=x86`)
 - O projeto suporta nativamente 64 bits (`-m64`) e 32 bits (`-m32 -msse2 -mfpmath=sse`).
