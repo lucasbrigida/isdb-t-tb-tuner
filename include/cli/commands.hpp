@@ -16,7 +16,7 @@ int cmd_list();
 
 // 4. Subcomando EPG: Exibe a grade de programacao (EPG) de um canal
 int cmd_epg(int channel_number, const std::string& name_query, int dev_idx,
-            int timeout_s = 30, bool output_json = false, int ofdm_mode = 1,
+            int timeout_s = 30, bool output_json = false,
             bool force_refresh = false, bool view_only = false);
 
 // 5. Subcomando PLAY: Sintoniza um canal e transmite via UDP para o player

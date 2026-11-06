@@ -37,7 +37,6 @@ int main(int argc, char** argv) {
     std::string epg_name;
     int epg_timeout = 30;
     bool epg_json = false;
-    int epg_ofdm = 1;
     bool epg_refresh = false;
     bool epg_view = false;
 
@@ -49,7 +48,7 @@ int main(int argc, char** argv) {
     sc_epg->add_flag("--view", epg_view, "Consulta a programacao salva");
     sc_epg->add_flag("--json", epg_json, "Exibe os metadados de programacao em formato JSON");
     sc_epg->add_option("-d,--device", dev_idx, "Indice do dongle RTL-SDR (padrao 0)");
-    sc_epg->add_option("--ofdm", epg_ofdm, "Modo de sincronismo OFDM (1 ou 2, padrao 1)");
+    sc_epg->add_option("--ofdm", global_ignored_ofdm, "")->expected(0, 1)->group("");
 
     // 5. Subcomando PLAY
     int play_ch = 0;
@@ -97,7 +96,7 @@ int main(int argc, char** argv) {
     } else if (sc_list->parsed()) {
         return isdbt::cmd_list();
     } else if (sc_epg->parsed()) {
-        return isdbt::cmd_epg(epg_ch, epg_name, dev_idx, epg_timeout, epg_json, epg_ofdm, epg_refresh, epg_view);
+        return isdbt::cmd_epg(epg_ch, epg_name, dev_idx, epg_timeout, epg_json, epg_refresh, epg_view);
     } else if (sc_play->parsed()) {
         if (ofdm_mode != 1 && ofdm_mode != 2) {
             std::cerr << "[ERRO] Valor invalido para --ofdm: " << ofdm_mode

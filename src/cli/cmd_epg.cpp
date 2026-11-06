@@ -57,7 +57,7 @@ static std::string format_duration(int sec) {
 // MODO 1: EPG GERAL CONSOLIDADO (TODOS OS CANAIS SALVOS EM CHANNELS.JSON)
 // ---------------------------------------------------------------------------
 static int run_epg_all(const std::vector<ChannelInfo>& saved_channels, int dev_idx,
-                       int per_channel_timeout_s, bool output_json, int ofdm_mode, bool force_refresh) {
+                       int per_channel_timeout_s, bool output_json, bool force_refresh) {
     EpgManager epg_mgr("epg.json");
     epg_mgr.load();
     auto now_tp = std::chrono::system_clock::now();
@@ -116,9 +116,7 @@ static int run_epg_all(const std::vector<ChannelInfo>& saved_channels, int dev_i
 
         SyncParams sync_params;
         sync_params.sample_rate = static_cast<float>(sample_rate);
-        auto sync = make_synchronizer(
-            ofdm_mode == 2 ? OFDMAlgorithm::RobustGRISDBT : OFDMAlgorithm::VanDeBeek,
-            sync_params);
+        auto sync = make_synchronizer(OFDMAlgorithm::VanDeBeek, sync_params);
 
         OneSegDemodulator demod(OfdmMode::MODE_1_2K, GuardInterval::GI_1_16);
         constexpr size_t FFT_LEN = 2048;
@@ -372,7 +370,7 @@ static int run_epg_all(const std::vector<ChannelInfo>& saved_channels, int dev_i
 // MODO 2: EPG INDIVIDUAL DETALHADO (CANAL ESPECÍFICO VIA -c OU -n)
 // ---------------------------------------------------------------------------
 static int run_epg_single(int active_channel_num, const std::string& initial_name, uint32_t freq_hz,
-                          int dev_idx, int timeout_s, bool output_json, int ofdm_mode, bool force_refresh) {
+                          int dev_idx, int timeout_s, bool output_json, bool force_refresh) {
     EpgManager epg_mgr("epg.json");
     epg_mgr.load();
     auto now_tp = std::chrono::system_clock::now();
@@ -449,9 +447,7 @@ static int run_epg_single(int active_channel_num, const std::string& initial_nam
 
     SyncParams sync_params;
     sync_params.sample_rate = static_cast<float>(sample_rate);
-    auto sync = make_synchronizer(
-        ofdm_mode == 2 ? OFDMAlgorithm::RobustGRISDBT : OFDMAlgorithm::VanDeBeek,
-        sync_params);
+    auto sync = make_synchronizer(OFDMAlgorithm::VanDeBeek, sync_params);
     if (!sync) {
         std::cerr << "[ERRO] Falha ao instanciar sincronizador OFDM.\n";
         reader_running.store(false, std::memory_order_release);
@@ -848,7 +844,7 @@ static int run_epg_view(int active_channel_num, const std::string& name_query, b
 // PONTO DE ENTRADA DO SUBCOMANDO EPG
 // ---------------------------------------------------------------------------
 int cmd_epg(int channel_number, const std::string& name_query, int dev_idx,
-            int timeout_s, bool output_json, int ofdm_mode, bool force_refresh, bool view_only) {
+            int timeout_s, bool output_json, bool force_refresh, bool view_only) {
     if (!output_json) {
         print_cli_header();
     }
@@ -875,7 +871,7 @@ int cmd_epg(int channel_number, const std::string& name_query, int dev_idx,
             return 0;
         }
 
-        return run_epg_all(saved_channels, dev_idx, timeout_s, output_json, ofdm_mode, force_refresh);
+        return run_epg_all(saved_channels, dev_idx, timeout_s, output_json, force_refresh);
     }
 
     // MODO CANAL INDIVIDUAL FOCADO
@@ -912,7 +908,7 @@ int cmd_epg(int channel_number, const std::string& name_query, int dev_idx,
         }
     }
 
-    return run_epg_single(active_channel_num, channel_name, freq_hz, dev_idx, timeout_s, output_json, ofdm_mode, force_refresh);
+    return run_epg_single(active_channel_num, channel_name, freq_hz, dev_idx, timeout_s, output_json, force_refresh);
 }
 
 } // namespace isdbt
