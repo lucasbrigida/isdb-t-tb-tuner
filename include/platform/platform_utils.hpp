@@ -27,6 +27,9 @@ bool reload_mpv_player(uint16_t udp_port = 1234);
 bool console_kbhit();
 int console_getch();
 
+// Verifica se o processo esta conectado a um console/terminal interativo (TTY)
+bool is_interactive_terminal();
+
 struct TerminalSize {
     int width = 80;
     int height = 24;

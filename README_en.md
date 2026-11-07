@@ -1,4 +1,4 @@
-﻿# 📡 ISDB-T / ISDB-Tb Universal SDR Receiver & Real-Time Player
+# 📡 ISDB-T / ISDB-Tb Universal SDR Receiver & Real-Time Player
 
 <p align="center">
   <img src="https://img.shields.io/badge/License-GPLv3-blue.svg" alt="License: GPLv3" />
@@ -6,7 +6,7 @@
   <img src="https://img.shields.io/badge/Hardware-RTL--SDR%20(RTL2832U)-red.svg" alt="RTL-SDR" />
   <img src="https://img.shields.io/badge/Platform-Windows%20(x64%20%7C%20x86)%20%7C%20Linux-brightgreen.svg" alt="Platforms" />
   <img src="https://img.shields.io/badge/Player-MPV%20Embedded-darkgreen.svg" alt="MPV Embedded" />
-  <img src="https://img.shields.io/badge/Tests-22%2F22%20Passed-success.svg" alt="CTest Passing" />
+  <img src="https://img.shields.io/badge/Tests-24%2F24%20Passed-success.svg" alt="CTest Passing" />
 </p>
 
 Complete digital broadcast TV receiver and demodulator for the **ISDB-T / ISDB-Tb / SBTVD** standard (Brazil, Japan, Philippines, and Latin America) powered by **RTL-SDR** hardware (RTL2832U with R820T/R828D/E4000 tuners). Built in **pure, high-performance native C++ without GNU Radio dependencies**, featuring a **lock-free SPSC ring buffer** with sequence tracking and coordinated resets, **zero heap allocations** in symbol processing, a **dual-engine OFDM synchronization architecture** (Van de Beek baseline and dual-engine OFDM synchronization architecture (standard Van de Beek and robust `gr-isdbt` port with active timing, CFO/SCO, and re-sync hysteresis)), **Regularized MMSE** channel equalization, **128-centered CSI soft scaling** with synchronized bit delay lines in the continuous Viterbi decoder, **$O(1)$ 64 KB direct Galois field table** in Reed-Solomon, smart two-pass spectrum scan with official station name resolution via **SDT**, **dual-target Windows releases (64-bit x64 & 32-bit x86)**, and an **embedded MPV player with real-time super-resolution upscaling and motion interpolation**.
@@ -43,7 +43,7 @@ Explore the receiver across its primary operating modes. Click on any thumbnail 
 - [🛠️ 2. Developer Guide (Build & Tests)](#️-2-developer-guide-build--tests)
   - [2.1 Prerequisites & Recommended Toolchain (w64devkit)](#21-prerequisites--recommended-toolchain-w64devkit)
   - [2.2 Building Natively for 64-bit and 32-bit](#22-building-natively-for-64-bit-and-32-bit)
-  - [2.3 Deterministic Unit Test Suite (CTest - 20/20 Tests Passed)](#23-deterministic-unit-test-suite-ctest---2020-tests-passed)
+  - [2.3 Deterministic Unit Test Suite (CTest - 24/24 Tests Passed)](#23-deterministic-unit-test-suite-ctest---2424-tests-passed)
   - [2.4 Automated Release Packaging (`build_release.ps1`)](#24-automated-release-packaging-build_releaseps1)
   - [2.5 Developer & Diagnostic Utilities (`tools/`, `bench/`, `samples/`)](#25-developer--diagnostic-utilities-tools-bench-samples)
   - [2.6 Codebase Architecture Map](#26-codebase-architecture-map)
@@ -104,6 +104,27 @@ Open PowerShell or the Command Prompt (CMD) in the extracted folder:
 
 # 6. Tune with detailed real-time telemetry and signal status (-v / --verbose):
 .\isdbtb_rx.exe play -c 23 --player -v
+
+# 7. Capture and view Electronic Program Guide (EPG) across all channels:
+.\isdbtb_rx.exe epg
+
+# 8. Capture EPG for a specific channel (e.g., Channel 23) or view cached schedule instantly:
+.\isdbtb_rx.exe epg -c 23
+.\isdbtb_rx.exe epg --view
+.\isdbtb_rx.exe epg -c 23 --view
+```
+
+#### 📅 Electronic Program Guide (`epg`):
+
+The `epg` command captures and displays broadcast program schedules (EIT Present/Following and Schedule tables on PIDs `0x0012` and `0x0026`/`0x0027`), with full support for ARIB STD-B24 / UTF-8 / Latin-1 text decoding, formatted 113-column visual tables, and local cache persistence (`epg.json`):
+
+```text
+Usage: epg [-c <channel>] [-n <name>] [-f <freq_hz>] [-t <timeout_s>] [--view] [--json]
+
+  --view        Instantly display cached schedule without tuning the radio hardware.
+  -c, --channel Tune and capture EPG from a specific physical UHF channel (e.g., -c 23).
+  -t, --timeout Maximum EIT capture listening timeout per channel in seconds (default: 8.0s).
+  --json        Export complete event schedule in structured JSON format.
 ```
 
 #### 📶 Choosing the Synchronization Algorithm (`--ofdm <1|2>`):
@@ -200,7 +221,7 @@ cmake --build build_x86 -j
 - **`-DISDBT_ENABLE_FAST_MATH=ON`** _(Default: OFF)_: Injects `-ffast-math` or `/fp:fast` to enable aggressive AVX2/FMA vectorization across MMSE equalization, NCO phase accumulation, and soft metric calculations.
 - **Interprocedural Optimization (IPO / LTO)**: Automatically checked and enabled for Release configurations (`CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON`), allowing cross-translation-unit inlining of hot-path functions (`ReedSolomon::gf_mul`, `FixedDelayLine::push_and_get`, `SpscCaptureQueue::try_acquire_read`).
 
-### 2.3 Deterministic Unit Test Suite (CTest - 20/20 Tests Passed)
+### 2.3 Deterministic Unit Test Suite (CTest - 24/24 Tests Passed)
 
 All core physical layer, FEC, CLI, and synchronization blocks feature deterministic mathematical test suites that run in fractions of a second without requiring physical radio hardware:
 
@@ -209,7 +230,7 @@ All core physical layer, FEC, CLI, and synchronization blocks feature determinis
 ctest --test-dir build_x64 --output-on-failure -E BenchSync
 ```
 
-The 20 deterministic tests validate:
+The 24 deterministic tests validate:
 
 1. `ReedSolomon`: Corrects up to 8 erroneous bytes per packet and asserts failure detection with >8 errors using Berlekamp-Massey, Chien Search, and $O(1)$ direct $GF(2^8)$ multiplication.
 2. `Descrambler`: Verifies the 15-bit ISDB-T energy dispersal LFSR with frame resets and continuous clocking over sync byte `0x47`.
@@ -224,13 +245,17 @@ The 20 deterministic tests validate:
 11. `SyncStateAndCsi`: Validates the three-state OFDM synchronization engine (`Acquisition` $\to$ `Tracking` $\to$ `LostLock`) and 128-centered CSI soft metric scaling.
 12. `FrequencyPlan`: Frequency synthesis and carrier calculations for all 14–69 UHF channels.
 13. `ChannelManager`: In-memory operations and portable, strictly local JSON persistence (`channels.json`).
-14. `PsiParser`: MPEG-TS PAT, PMT, and SDT parsing with station name extraction and fallback PAT synthesis.
-15. `CliOfdmFlag`: Validates `--ofdm` CLI argument parsing (`--ofdm 1`, `--ofdm 2`, `--ofdm=1`, `--ofdm=2`), strict rejection of invalid values, and silent ignoring outside `play`.
-16. `SyncRegressionScan`: Ensures channel scanner operates strictly under baseline Van de Beek synchronization with zero regression.
-17. `BenchAsciiTable`: Validates ASCII table formatting for benchmark telemetry reports.
-18. `RegressionOfdm1`: Baseline Van de Beek regression test anchored to reference broadcast capture.
-19. `SyncGrisdbtRobust`: Validates the robust `gr-isdbt` synchronization engine (active SP timing, integer/fractional CFO, SCO, and FSM hysteresis).
-20. `RegressionOfdm2`: Robust `gr-isdbt` synchronization regression test anchored to reference broadcast capture.
+14. `PsiParser`: MPEG-TS PAT, PMT, SDT, and EIT parsing with station name extraction, multi-section packing support (ETSI EN 300 468), and fallback PAT synthesis.
+15. `AribB24`: Native ARIB STD-B24 text decoding (JIS X 0208 Kanji, Hiragana, Katakana, Alphanumeric, APR line breaks, Gaiji symbols) with fallback to Latin-1 and UTF-8.
+16. `EpgManager`: Validates `epg.json` persistence, discarding past events, anchoring on Table 0x4E (Present/Following), and timezone evaluation for `--view`.
+17. `UdpStreamer`: Deterministic IPTV 1316-byte UDP datagram packaging (7 TS packets of 188B) avoiding IP fragmentation.
+18. `CliOfdmFlag`: Validates `--ofdm` CLI argument parsing (`--ofdm 1`, `--ofdm 2`, `--ofdm=1`, `--ofdm=2`), strict rejection of invalid values, and silent ignoring outside `play`.
+19. `SyncRegressionScan`: Ensures channel scanner operates strictly under baseline Van de Beek synchronization with zero regression.
+20. `BenchAsciiTable`: Validates 113-column ASCII table formatting with correct visual width handling for UTF-8 symbols.
+21. `RegressionOfdm1`: Baseline Van de Beek regression test anchored to reference broadcast capture.
+22. `SyncGrisdbtRobust`: Validates the robust `gr-isdbt` synchronization engine (active SP timing, integer/fractional CFO, SCO, and FSM hysteresis).
+23. `RegressionOfdm2`: Robust `gr-isdbt` synchronization regression test anchored to reference broadcast capture.
+24. `BenchSync`: Validates comparative DSP throughput and TS packet performance benchmarking.
 
 ### 2.4 Automated Release Packaging (`build_release.ps1`)
 
@@ -314,7 +339,7 @@ isdb_t_isdb_tb_tuner_player/
 │   └── play_mpv.ps1            # PowerShell MPV launcher script
 ├── releases/                   # Ready-to-use standalone release packages (win64.zip / win32.zip)
 ├── docs/                       # Technical architecture decisions (ADR 001 to 025) and specifications
-└── tests/                      # 20 deterministic CTest test cases and regression suites
+└── tests/                      # 24 deterministic CTest test cases and regression suites
 ```
 
 ---

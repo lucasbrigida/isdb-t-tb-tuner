@@ -62,6 +62,15 @@ size_t AsciiTable::utf8_display_width(const std::string& str) {
     size_t width = 0;
     size_t i = 0;
     while (i < str.size()) {
+        if (static_cast<unsigned char>(str[i]) == 0x1B && i + 1 < str.size() && str[i + 1] == '[') {
+            size_t j = i + 2;
+            while (j < str.size() && (str[j] < 0x40 || str[j] > 0x7E)) {
+                j++;
+            }
+            if (j < str.size()) j++;
+            i = j;
+            continue;
+        }
         size_t char_len = 0;
         uint32_t cp = decode_utf8(str, i, char_len);
         width += codepoint_width(cp);
@@ -137,6 +146,23 @@ void AsciiTable::add_row(const std::vector<std::string>& row) {
 void AsciiTable::add_separator() {
     rows_.push_back({});
     is_separator_row_.push_back(true);
+}
+
+void AsciiTable::clear_rows() {
+    rows_.clear();
+    is_separator_row_.clear();
+    selected_row_ = -1;
+    visible_start_ = 0;
+    visible_count_ = 0;
+}
+
+void AsciiTable::set_selected_row(int index) {
+    selected_row_ = index;
+}
+
+void AsciiTable::set_visible_range(size_t start, size_t count) {
+    visible_start_ = start;
+    visible_count_ = count;
 }
 
 std::string AsciiTable::pad(const std::string& str, size_t width, Alignment align) {
@@ -249,18 +275,34 @@ std::string AsciiTable::render(size_t max_total_width) const {
     }
 
     // Data rows
-    for (size_t r = 0; r < rows_.size(); ++r) {
+    size_t start_r = 0;
+    size_t end_r = rows_.size();
+    if (visible_count_ > 0) {
+        start_r = std::min(visible_start_, rows_.size());
+        end_r = std::min(start_r + visible_count_, rows_.size());
+    }
+
+    for (size_t r = start_r; r < end_r; ++r) {
         if (is_separator_row_[r]) {
             ss << border;
             continue;
         }
-        ss << "|";
+        bool is_sel = (selected_row_ >= 0 && static_cast<size_t>(selected_row_) == r);
+        if (is_sel) {
+            ss << "\033[30;47m|";
+        } else {
+            ss << "|";
+        }
         for (size_t c = 0; c < num_cols; ++c) {
             std::string text = (c < rows_[r].size()) ? rows_[r][c] : "";
             Alignment align = (c < alignments_.size()) ? alignments_[c] : Alignment::Left;
             ss << " " << pad(text, col_widths[c], align) << " |";
         }
-        ss << "\n";
+        if (is_sel) {
+            ss << "\033[0m\n";
+        } else {
+            ss << "\n";
+        }
     }
 
     // Bottom border

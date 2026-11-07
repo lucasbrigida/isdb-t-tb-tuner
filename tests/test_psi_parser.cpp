@@ -330,12 +330,128 @@ void test_parse_eit_epg() {
     TEST_ASSERT(pres->end_time_str == "15:45");
 }
 
+void test_packed_sections_same_payload() {
+    std::cout << "[Test] PsiParser::SectionAssembler multiplas secoes empacotadas no mesmo pacote TS..." << std::endl;
+
+    isdbt::PsiParser parser;
+    uint8_t pkt[188];
+    std::memset(pkt, 0xFF, sizeof(pkt));
+
+    pkt[0] = 0x47;
+    pkt[1] = 0x40; // PUSI = 1, PID 0x0012
+    pkt[2] = 0x12;
+    pkt[3] = 0x10; // payload only
+    pkt[4] = 0x00; // pointer field = 0
+
+    // Constrói Seção 1 (Section 0 - Present: "Programa Agora")
+    uint8_t* sec1 = &pkt[5];
+    sec1[0] = 0x4E;
+    sec1[3] = 0x00; // service_id: 1
+    sec1[4] = 0x01;
+    sec1[5] = 0xC1;
+    sec1[6] = 0x00; // section 0 = present
+    sec1[7] = 0x01;
+    sec1[8] = 0x00;
+    sec1[9] = 0x01;
+    sec1[10] = 0x00;
+    sec1[11] = 0x01;
+    sec1[12] = 0x00;
+    sec1[13] = 0x4E;
+
+    uint8_t* evt1 = &sec1[14];
+    evt1[0] = 0x01; // event_id = 0x0100
+    evt1[1] = 0x00;
+    evt1[2] = 0xE6; evt1[3] = 0x78; // MJD
+    evt1[4] = 0x10; evt1[5] = 0x00; evt1[6] = 0x00; // 10:00:00
+    evt1[7] = 0x01; evt1[8] = 0x00; evt1[9] = 0x00; // 1h00m
+    evt1[10] = 0; evt1[11] = 0; // desc_loop_len
+
+    size_t d_idx1 = 12;
+    evt1[d_idx1 + 0] = 0x4D;
+    const std::string title1 = "Programa Agora";
+    uint8_t d_len1 = static_cast<uint8_t>(3 + 1 + title1.size() + 1);
+    evt1[d_idx1 + 1] = d_len1;
+    evt1[d_idx1 + 2] = 'p'; evt1[d_idx1 + 3] = 'o'; evt1[d_idx1 + 4] = 'r';
+    evt1[d_idx1 + 5] = static_cast<uint8_t>(title1.size());
+    std::memcpy(&evt1[d_idx1 + 6], title1.data(), title1.size());
+    evt1[d_idx1 + 6 + title1.size()] = 0;
+    d_idx1 += 2 + d_len1;
+
+    size_t total_desc1 = d_idx1 - 12;
+    evt1[10] = static_cast<uint8_t>((total_desc1 >> 8) & 0x0F);
+    evt1[11] = static_cast<uint8_t>(total_desc1 & 0xFF);
+
+    size_t sec1_body_len = 11 + 12 + total_desc1 + 4; // header + event + descriptors + CRC
+    sec1[1] = static_cast<uint8_t>(0xB0 | ((sec1_body_len >> 8) & 0x0F));
+    sec1[2] = static_cast<uint8_t>(sec1_body_len & 0xFF);
+    size_t total_sec1_bytes = 3 + sec1_body_len;
+
+    // Constrói Seção 2 imediatamente a seguir (Section 1 - Following: "Programa A Seguir")
+    uint8_t* sec2 = sec1 + total_sec1_bytes;
+    sec2[0] = 0x4E;
+    sec2[3] = 0x00; // service_id: 1
+    sec2[4] = 0x01;
+    sec2[5] = 0xC1;
+    sec2[6] = 0x01; // section 1 = following
+    sec2[7] = 0x01;
+    sec2[8] = 0x00;
+    sec2[9] = 0x01;
+    sec2[10] = 0x00;
+    sec2[11] = 0x01;
+    sec2[12] = 0x00;
+    sec2[13] = 0x4E;
+
+    uint8_t* evt2 = &sec2[14];
+    evt2[0] = 0x02; // event_id = 0x0200
+    evt2[1] = 0x00;
+    evt2[2] = 0xE6; evt2[3] = 0x78;
+    evt2[4] = 0x11; evt2[5] = 0x00; evt2[6] = 0x00; // 11:00:00
+    evt2[7] = 0x01; evt2[8] = 0x00; evt2[9] = 0x00; // 1h00m
+    evt2[10] = 0; evt2[11] = 0;
+
+    size_t d_idx2 = 12;
+    evt2[d_idx2 + 0] = 0x4D;
+    const std::string title2 = "Programa A Seguir";
+    uint8_t d_len2 = static_cast<uint8_t>(3 + 1 + title2.size() + 1);
+    evt2[d_idx2 + 1] = d_len2;
+    evt2[d_idx2 + 2] = 'p'; evt2[d_idx2 + 3] = 'o'; evt2[d_idx2 + 4] = 'r';
+    evt2[d_idx2 + 5] = static_cast<uint8_t>(title2.size());
+    std::memcpy(&evt2[d_idx2 + 6], title2.data(), title2.size());
+    evt2[d_idx2 + 6 + title2.size()] = 0;
+    d_idx2 += 2 + d_len2;
+
+    size_t total_desc2 = d_idx2 - 12;
+    evt2[10] = static_cast<uint8_t>((total_desc2 >> 8) & 0x0F);
+    evt2[11] = static_cast<uint8_t>(total_desc2 & 0xFF);
+
+    size_t sec2_body_len = 11 + 12 + total_desc2 + 4;
+    sec2[1] = static_cast<uint8_t>(0xB0 | ((sec2_body_len >> 8) & 0x0F));
+    sec2[2] = static_cast<uint8_t>(sec2_body_len & 0xFF);
+    size_t total_sec2_bytes = 3 + sec2_body_len;
+
+    size_t used = 5 + total_sec1_bytes + total_sec2_bytes;
+    TEST_ASSERT(used <= 188);
+
+    TEST_ASSERT(parser.parse_packet(pkt));
+
+    auto pres = parser.get_present_event(1);
+    TEST_ASSERT(pres.has_value());
+    TEST_ASSERT(pres->title == "Programa Agora");
+    TEST_ASSERT(pres->is_now == true);
+
+    auto foll = parser.get_following_event(1);
+    TEST_ASSERT(foll.has_value());
+    TEST_ASSERT(foll->title == "Programa A Seguir");
+    TEST_ASSERT(foll->is_next == true);
+}
+
 int main() {
     test_build_pat_and_crc();
     test_parse_pat_roundtrip();
     test_pmt_discontinuity_pids();
     test_parse_sdt_service_name();
     test_parse_eit_epg();
+    test_packed_sections_same_payload();
     test_error_handling();
 
     std::cout << "\033[1;32m[PASS] Todos os testes de PsiParser passaram com sucesso!\033[0m\n";

@@ -1,4 +1,4 @@
-﻿# 📡 ISDB-T / ISDB-Tb Universal SDR Receiver & Real-Time Player
+# 📡 ISDB-T / ISDB-Tb Universal SDR Receiver & Real-Time Player
 
 <p align="center">
   <img src="https://img.shields.io/badge/License-GPLv3-blue.svg" alt="License: GPLv3" />
@@ -6,7 +6,7 @@
   <img src="https://img.shields.io/badge/Hardware-RTL--SDR%20(RTL2832U)-red.svg" alt="RTL-SDR" />
   <img src="https://img.shields.io/badge/Platform-Windows%20(x64%20%7C%20x86)%20%7C%20Linux-brightgreen.svg" alt="Platforms" />
   <img src="https://img.shields.io/badge/Player-MPV%20Embedded-darkgreen.svg" alt="MPV Embedded" />
-  <img src="https://img.shields.io/badge/Tests-22%2F22%20Passed-success.svg" alt="CTest Passing" />
+  <img src="https://img.shields.io/badge/Tests-24%2F24%20Passed-success.svg" alt="CTest Passing" />
 </p>
 
 Receptor e decodificador digital completo de televisão aberta no padrão **ISDB-T / ISDB-Tb / SBTVD** (Brasil, Japão, Filipinas e América Latina) para dispositivos **RTL-SDR** (RTL2832U com tuners R820T/R828D/E4000). Desenvolvido em **C++ nativo de alta performance sem dependências do framework GNU Radio**, com fila de captura **SPSC lock-free** com detecção atômica de descontinuidades, **zero alocações no heap** no processamento de símbolos, **arquitetura dual de sincronismo OFDM** (sincronizador de Van de Beek padrão e port robusto do `gr-isdbt` com rastreamento ativo de timing, CFO/SCO e histerese de re-lock), equalização adaptativa **MMSE regularizada**, ponderação **CSI** sincronizada por linhas de retardo no decodificador Viterbi, multiplicação em $GF(2^8)$ em **$O(1)$** via tabela de 64 KB no Reed-Solomon, varredura inteligente de canais com identificação de nomes via **SDT**, **suporte nativo dual-architecture (64 bits x64 e 32 bits x86)** e **reprodutor MPV embutido com super-resolução e interpolação de movimento em tempo real**.
@@ -43,7 +43,7 @@ Confira abaixo o receptor em execução em seus diferentes modos operacionais. C
 - [🛠️ 2. Guia para Desenvolvedores (Compilação & Testes)](#️-2-guia-para-desenvolvedores-compilação--testes)
   - [2.1 Pré-requisitos & Toolchain Recomendado (w64devkit)](#21-pré-requisitos--toolchain-recomendado-w64devkit)
   - [2.2 Como Compilar Nativamente para 64 bits e 32 bits](#22-como-compilar-nativamente-para-64-bits-e-32-bits)
-  - [2.3 Suíte de Testes Determinísticos (CTest - 20/20 Testes Aprovados)](#23-suíte-de-testes-determinísticos-ctest---2020-testes-aprovados)
+  - [2.3 Suíte de Testes Determinísticos (CTest - 24/24 Testes Aprovados)](#23-suíte-de-testes-determinísticos-ctest---2424-testes-aprovados)
   - [2.4 Automação de Releases (`build_release.ps1`)](#24-automação-de-releases-build_releaseps1)
   - [2.5 Ferramentas de Diagnóstico, Benchmark e Amostras (`tools/`, `bench/`, `samples/`)](#25-ferramentas-de-diagnóstico-benchmark-e-amostras-tools-bench-samples)
   - [2.6 Mapa da Arquitetura do Código](#26-mapa-da-arquitetura-do-código)
@@ -104,6 +104,27 @@ Abra o PowerShell ou Prompt de Comando (CMD) na pasta descompactada:
 
 # 6. Sintonizar com exibição do status detalhado de sinal em tempo real (-v / --verbose):
 .\isdbtb_rx.exe play -c 23 --player -v
+
+# 7. Capturar e visualizar o Guia Eletrônico de Programação (EPG) de todos os canais:
+.\isdbtb_rx.exe epg
+
+# 8. Capturar EPG de canal específico (ex: Canal 23) ou apenas visualizar a grade salva em cache:
+.\isdbtb_rx.exe epg -c 23
+.\isdbtb_rx.exe epg --view
+.\isdbtb_rx.exe epg -c 23 --view
+```
+
+#### 📅 Guia Eletrônico de Programação (`epg`):
+
+O comando `epg` captura e exibe a grade de programação transmitida pelas emissoras (tabelas EIT Present/Following e Schedule nos PIDs `0x0012` e `0x0026`/`0x0027`), com suporte completo a decodificação de texto ARIB STD-B24 / UTF-8 / Latin-1, exibição em tabela formatada de 113 colunas e persistência em cache local (`epg.json`):
+
+```text
+Uso: epg [-c <canal>] [-n <nome>] [-f <freq_hz>] [-t <timeout_s>] [--view] [--json]
+
+  --view        Exibe instantaneamente a grade salva em cache local sem sintonizar o rádio.
+  -c, --channel Sintoniza e captura EPG de um canal físico UHF específico (ex: -c 23).
+  -t, --timeout Tempo máximo de escuta EIT por canal em segundos (padrão: 8.0s).
+  --json        Exporta a grade completa de eventos no formato JSON estruturado.
 ```
 
 #### 📶 Escolha do Algoritmo de Sincronismo (`--ofdm <1|2>`):
@@ -201,7 +222,7 @@ cmake --build build_x86 -j
 - **`-DISDBT_ENABLE_FAST_MATH=ON`** _(Padrão: OFF)_: Adiciona `-ffast-math` ou `/fp:fast` para acelerar vetorizações AVX2/FMA no cálculo de métricas e NCO.
 - **Interprocedural Optimization (IPO / LTO)**: Detectado e habilitado automaticamente para builds de Release caso suportado pelo compilador (`CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON`).
 
-### 2.3 Suíte de Testes Determinísticos (CTest - 20/20 Testes Aprovados)
+### 2.3 Suíte de Testes Determinísticos (CTest - 24/24 Testes Aprovados)
 
 O projeto conta com testes unitários matemáticos que rodam em frações de segundo e não dependem de rádio físico conectado:
 
@@ -210,7 +231,7 @@ O projeto conta com testes unitários matemáticos que rodam em frações de seg
 ctest --test-dir build_x64 --output-on-failure -E BenchSync
 ```
 
-Os 20 testes determinísticos cobrem:
+Os 24 testes determinísticos cobrem:
 
 1. `ReedSolomon`: Correção de até 8 erros por pacote, detecção de falha com >8 erros e multiplicação direta em $GF(2^8)$ em $O(1)$.
 2. `Descrambler`: LFSR de dispersão de energia de 15 bits do ISDB-T com avanço contínuo sobre o sync byte `0x47`.
@@ -225,13 +246,17 @@ Os 20 testes determinísticos cobrem:
 11. `SyncStateAndCsi`: Máquina de estados tripartite de sincronismo OFDM (`Acquisition` $\to$ `Tracking` $\to$ `LostLock`) e escala de ponderação CSI centrada em 128.
 12. `FrequencyPlan`: Síntese de frequências e cálculo de portadoras para todos os canais UHF 14 a 69.
 13. `ChannelManager`: Operações em memória e persistência JSON estritamente local e portátil (`channels.json`).
-14. `PsiParser`: Parsers de MPEG-TS PAT, PMT e SDT com resolução de emissoras e síntese de PAT de fallback.
-15. `CliOfdmFlag`: Validação de parsing de linha de comando da flag `--ofdm` (`--ofdm 1`, `--ofdm 2`, `--ofdm=1`, `--ofdm=2`), rejeição estrita de valores inválidos e descarte silencioso fora de `play`.
-16. `SyncRegressionScan`: Garantia de não-regressão do scanner, operando estritamente sob Van de Beek baseline.
-17. `BenchAsciiTable`: Formatador de tabelas ASCII para relatórios de telemetria e benchmark.
-18. `RegressionOfdm1`: Teste de regressão do modo Van de Beek baseline ancorado na amostra de referência de TV aberta.
-19. `SyncGrisdbtRobust`: Validação do sincronizador robusto baseado em CP (timing, estimativa inicial de CFO, SCO e FSM de re-lock).
-20. `RegressionOfdm2`: Teste de regressão do sincronizador robusto ancorado na amostra de referência de TV aberta.
+14. `PsiParser`: Parsers de MPEG-TS PAT, PMT, SDT e EIT com resolução de emissoras, suporte a múltiplas seções empacotadas no mesmo payload TS e síntese de PAT de fallback.
+15. `AribB24`: Decodificação nativa de texto ARIB STD-B24 (Kanji JIS X 0208, Hiragana, Katakana, Alfanumérico, quebras de linha APR, símbolos Gaiji) e fallback para Latin-1 e UTF-8.
+16. `EpgManager`: Persistência em `epg.json`, descarte de eventos passados, ancoragem na Tabela 0x4E (Present/Following) e reavaliação temporal para `--view`.
+17. `UdpStreamer`: Empacotamento determinístico de datagramas UDP de IPTV de 1316 bytes (7 pacotes TS de 188B) sem fragmentação IP.
+18. `CliOfdmFlag`: Validação de parsing de linha de comando da flag `--ofdm` (`--ofdm 1`, `--ofdm 2`, `--ofdm=1`, `--ofdm=2`), rejeição estrita de valores inválidos e descarte silencioso fora de `play`.
+19. `SyncRegressionScan`: Garantia de não-regressão do scanner, operando estritamente sob Van de Beek baseline.
+20. `BenchAsciiTable`: Formatador de tabelas ASCII de 113 colunas com codepoints UTF-8 de largura visual correta.
+21. `RegressionOfdm1`: Teste de regressão do modo Van de Beek baseline ancorado na amostra de referência de TV aberta.
+22. `SyncGrisdbtRobust`: Validação do sincronizador robusto baseado em CP (timing, estimativa inicial de CFO, SCO e FSM de re-lock).
+23. `RegressionOfdm2`: Teste de regressão do sincronizador robusto ancorado na amostra de referência de TV aberta.
+24. `BenchSync`: Benchmark comparativo de throughput DSP e performance de pacotes TS.
 
 ### 2.4 Automação de Releases (`build_release.ps1`)
 
@@ -315,7 +340,7 @@ isdb_t_isdb_tb_tuner_player/
 │   └── play_mpv.ps1            # Script PowerShell de reprodução com MPV
 ├── releases/                   # Pacotes de release prontos para uso (win64.zip / win32.zip)
 ├── docs/                       # Registros de decisões de arquitetura (ADR 001 a 025) e especificações
-└── tests/                      # 20 casos de testes determinísticos CTest e suítes de regressão
+└── tests/                      # 24 casos de testes determinísticos CTest e suítes de regressão
 ```
 
 ---

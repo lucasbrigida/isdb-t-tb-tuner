@@ -267,7 +267,7 @@ Durante a auditoria e desenvolvimento do decodificador contra a implementação 
 
 O sistema conta com três níveis de validação automatizada e empírica:
 
-### Nível 1: Testes Unitários Determinísticos (CTest - 22/22 Testes)
+### Nível 1: Testes Unitários Determinísticos (CTest - 24/24 Testes)
 Executados em qualquer ambiente sem necessidade de hardware SDR conectado (`ctest --test-dir build --output-on-failure -E BenchSync`):
 1. `test_reed_solomon`: Valida correção de até 8 bytes corrompidos e detecção de falha com >8 erros com Berlekamp-Massey, Chien Search e tabela $O(1)$.
 2. `test_descrambler`: Valida o LFSR de 15 bits do ISDB-T com inversão e clocking sobre o sync `0x47`.
@@ -282,13 +282,17 @@ Executados em qualquer ambiente sem necessidade de hardware SDR conectado (`ctes
 11. `test_sync_state_and_csi`: Valida a máquina de estados tripartite de sincronismo (`Acquisition` $\to$ `Tracking` $\to$ `LostLock`) e a escala suave de CSI centrada em 128.
 12. `test_frequency_plan`: Valida cálculo e sintonia de frequências UHF (canais 14 a 69) conforme ABNT NBR 15601.
 13. `test_channel_manager`: Valida operações de persistência e busca no `channels.json`.
-14. `test_psi_parser`: Valida resolução de nomes de emissoras via SDT e geração periódica de PAT de fallback.
-15. `test_cli_ofdm_flag`: Valida parsing da flag `--ofdm` (`--ofdm 1`, `--ofdm 2`, `--ofdm=1`, `--ofdm=2`), rejeição de valores inválidos e tolerância fora de `play`.
-16. `test_sync_regression_scan`: Garante que o scanner não sofra regressão e opere sob o baseline de Van de Beek.
-17. `test_bench_ascii_table`: Valida a formatação de tabelas ASCII para exportação de dados de benchmark.
-18. `test_regression_ofdm1`: Teste de regressão determinístico do baseline Van de Beek sobre captura real de RF.
-19. `test_sync_grisdbt_robust`: Valida o sincronizador robusto do `gr-isdbt` (SP timing, CFO, SCO e FSM de re-lock).
-20. `test_regression_ofdm2`: Teste de regressão determinístico do modo robusto sobre captura real de RF.
+14. `test_psi_parser`: Valida resolução de nomes de emissoras via SDT, geração periódica de PAT de fallback e empacotamento de múltiplas seções consecutivas no mesmo pacote TS (ETSI EN 300 468).
+15. `test_arib_b24`: Valida decodificação nativa de texto ARIB STD-B24 (Kanji JIS X 0208, Hiragana, Katakana, Alfanumérico, quebras de linha APR, símbolos Gaiji) e fallback para Latin-1 e UTF-8.
+16. `test_epg_manager`: Valida persistência em `epg.json`, descarte de eventos passados, ancoragem na Tabela 0x4E (Present/Following) e reavaliação temporal para `--view`.
+17. `test_udp_streamer`: Valida empacotamento determinístico de datagramas UDP de IPTV de 1316 bytes (7 pacotes TS de 188B) sem fragmentação IP.
+18. `test_cli_ofdm_flag`: Valida parsing da flag `--ofdm` (`--ofdm 1`, `--ofdm 2`, `--ofdm=1`, `--ofdm=2`), rejeição de valores inválidos e tolerância fora de `play`.
+19. `test_sync_regression_scan`: Garante que o scanner não sofra regressão e opere sob o baseline de Van de Beek.
+20. `test_bench_ascii_table`: Valida a formatação de tabelas ASCII de 113 colunas com codepoints UTF-8 de largura visual correta.
+21. `test_regression_ofdm1`: Teste de regressão determinístico do baseline Van de Beek sobre captura real de RF.
+22. `test_sync_grisdbt_robust`: Valida o sincronizador robusto do `gr-isdbt` (SP timing, CFO, SCO e FSM de re-lock).
+23. `test_regression_ofdm2`: Teste de regressão determinístico do modo robusto sobre captura real de RF.
+24. `bench_sync`: Benchmark determinístico comparativo de performance DSP e throughput de pacotes TS.
 
 ### Nível 2: Validação Offline de Captura Real de RF (`ch24_10s_iq.cu8`)
 - Captura oficial de 10 segundos na frequência de 533.143 MHz (Canal 24 UHF - TV Cultura) na taxa exata de 2031746 S/s (40.6 MB, sinal realista com SNR ~8 dB).
@@ -341,7 +345,7 @@ cmake --build build_x64 -j
 cmake -S . -B build_x86 -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DTARGET_ARCH=x86 -DISDBT_ENABLE_GRISDBT_SYNC=ON
 cmake --build build_x86 -j
 
-# Rodar a suíte completa de 20 testes unitários:
+# Rodar a suíte completa de 24 testes unitários:
 ctest --test-dir build_x64 --output-on-failure -E BenchSync
 
 # Diagnosticar estabilidade e integridade USB do dongle:

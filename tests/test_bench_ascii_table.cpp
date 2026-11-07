@@ -58,6 +58,7 @@ int main() {
     TEST_ASSERT(isdbt::AsciiTable::utf8_display_width("São Paulo") == 9);
     TEST_ASSERT(isdbt::AsciiTable::utf8_display_width("Você") == 4);
     TEST_ASSERT(isdbt::AsciiTable::utf8_display_width("Graça") == 5);
+    TEST_ASSERT(isdbt::AsciiTable::utf8_display_width("\033[30;47mTexto\033[0m") == 5);
 
     isdbt::AsciiTable epg_single({"Status", "Horario", "Duracao", "Classif.", "Genero", "Programa"});
     epg_single.set_alignments({isdbt::Alignment::Center, isdbt::Alignment::Center, isdbt::Alignment::Center, isdbt::Alignment::Center, isdbt::Alignment::Left, isdbt::Alignment::Left});
@@ -74,6 +75,25 @@ int main() {
         if (line.empty()) continue;
         TEST_ASSERT(isdbt::AsciiTable::utf8_display_width(line) == 113);
     }
+
+    // 5. Testes de Linha Selecionada com Inversao ANSI e Janela Deslizante
+    std::cout << "  Testando selecao de linha com cores invertidas e janela deslizante...\n";
+    epg_single.set_selected_row(1);
+    std::string sel_rendered = epg_single.render();
+    TEST_ASSERT(sel_rendered.find("\033[30;47m|") != std::string::npos);
+    TEST_ASSERT(sel_rendered.find("Bom Dia Brasil") != std::string::npos);
+
+    std::stringstream sel_ss(sel_rendered);
+    while (std::getline(sel_ss, line)) {
+        if (line.empty()) continue;
+        TEST_ASSERT(isdbt::AsciiTable::utf8_display_width(line) == 113);
+    }
+
+    epg_single.set_visible_range(1, 1);
+    std::string win_rendered = epg_single.render();
+    TEST_ASSERT(win_rendered.find("Bom Dia Brasil") != std::string::npos);
+    TEST_ASSERT(win_rendered.find("Bom Dia São Paulo") == std::string::npos);
+    TEST_ASSERT(win_rendered.find("Mais Você") == std::string::npos);
 
     isdbt::AsciiTable epg_all({"Canal", "Emissora", "Horario", "Classif.", "Genero", "Programa Atual (Agora)"});
     epg_all.set_alignments({isdbt::Alignment::Center, isdbt::Alignment::Left, isdbt::Alignment::Center, isdbt::Alignment::Center, isdbt::Alignment::Center, isdbt::Alignment::Left});

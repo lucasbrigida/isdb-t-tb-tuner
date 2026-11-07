@@ -1,4 +1,5 @@
 #include "mpegts/psi_parser.hpp"
+#include "mpegts/arib_b24_decoder.hpp"
 #include <iostream>
 #include <algorithm>
 #include <cstring>
@@ -8,82 +9,8 @@
 
 namespace isdbt {
 
-static bool is_valid_utf8(const uint8_t* data, size_t len) {
-    size_t i = 0;
-    while (i < len) {
-        uint8_t c = data[i];
-        if (c <= 0x7F) {
-            i++;
-        } else if ((c & 0xE0) == 0xC0) {
-            if (i + 1 >= len || (data[i + 1] & 0xC0) != 0x80 || c < 0xC2) return false;
-            i += 2;
-        } else if ((c & 0xF0) == 0xE0) {
-            if (i + 2 >= len || (data[i + 1] & 0xC0) != 0x80 || (data[i + 2] & 0xC0) != 0x80) return false;
-            i += 3;
-        } else if ((c & 0xF8) == 0xF0) {
-            if (i + 3 >= len || (data[i + 1] & 0xC0) != 0x80 || (data[i + 2] & 0xC0) != 0x80 || (data[i + 3] & 0xC0) != 0x80) return false;
-            i += 4;
-        } else {
-            return false;
-        }
-    }
-    return true;
-}
-
 static std::string clean_text_string(const uint8_t* data, size_t len) {
-    if (!data || len == 0) return "";
-    
-    // Check DVB/ABNT encoding prefix
-    size_t start_idx = 0;
-    if (data[0] == 0x15) { // UTF-8 indicator
-        start_idx = 1;
-    } else if (data[0] < 0x20) { // Other DVB table indicator
-        start_idx = 1;
-    }
-
-    const uint8_t* p = data + start_idx;
-    size_t rem = (len > start_idx) ? (len - start_idx) : 0;
-    if (rem == 0) return "";
-
-    std::string s;
-    if (is_valid_utf8(p, rem)) {
-        s.reserve(rem);
-        for (size_t i = 0; i < rem; ++i) {
-            uint8_t c = p[i];
-            if (c >= 0x20 && c != 0x7F) {
-                s.push_back(static_cast<char>(c));
-            }
-        }
-    } else {
-        // Convert ISO-8859-15 / Latin-1 to valid UTF-8
-        s.reserve(rem * 2);
-        for (size_t i = 0; i < rem; ++i) {
-            uint8_t c = p[i];
-            if (c < 0x20 || c == 0x7F) {
-                continue;
-            }
-            if (c < 0x80) {
-                s.push_back(static_cast<char>(c));
-            } else {
-                switch (c) {
-                    case 0xA4: s += "\xE2\x82\xAC"; break; // €
-                    case 0xA6: s += "\xC5\xA0"; break;     // Š
-                    case 0xA8: s += "\xC5\xA1"; break;     // š
-                    case 0xB4: s += "\xC5\xBD"; break;     // Ž
-                    case 0xB8: s += "\xC5\xBE"; break;     // ž
-                    case 0xBC: s += "\xC5\x92"; break;     // Œ
-                    case 0xBD: s += "\xC5\x93"; break;     // œ
-                    case 0xBE: s += "\xC5\xB8"; break;     // Ÿ
-                    default:
-                        // ISO-8859-1 / ISO-8859-15 to UTF-8
-                        s.push_back(static_cast<char>(0xC0 | (c >> 6)));
-                        s.push_back(static_cast<char>(0x80 | (c & 0x3F)));
-                        break;
-                }
-            }
-        }
-    }
-
+    std::string s = AribB24Decoder::decode_to_utf8(data, len);
     size_t first = s.find_first_not_of(" \t\r\n");
     if (first == std::string::npos) return "";
     size_t last = s.find_last_not_of(" \t\r\n");
@@ -222,43 +149,80 @@ void PsiParser::SectionAssembler::push_packet(bool pusi, const uint8_t* payload,
         size_t pointer_field = payload[0];
         if (1 + pointer_field > len) return;
 
-        // Se tinhamos uma secao pendente sendo montada e ha espaco antes do ponteiro
+        // Se tínhamos uma seção pendente sendo montada e há bytes antes do pointer_field
         if (pointer_field > 0 && expected_length > 0 && buffer.size() < expected_length) {
             size_t fill = std::min(pointer_field, expected_length - buffer.size());
             buffer.insert(buffer.end(), payload + 1, payload + 1 + fill);
             if (buffer.size() >= expected_length) {
-                completed.push_back(buffer);
+                completed.push_back(std::move(buffer));
             }
         }
-
         buffer.clear();
-        const uint8_t* sec_start = payload + 1 + pointer_field;
-        size_t sec_avail = len - (1 + pointer_field);
-        if (sec_avail < 3) {
-            expected_length = 0;
-            return;
-        }
+        expected_length = 0;
 
-        size_t s_len = (((static_cast<size_t>(sec_start[1] & 0x0F)) << 8) | sec_start[2]) + 3;
-        expected_length = s_len;
-        size_t to_copy = std::min(sec_avail, expected_length);
-        buffer.insert(buffer.end(), sec_start, sec_start + to_copy);
+        // Itera sobre TODAS as seções consecutivas empacotadas neste payload TS
+        size_t offset = 1 + pointer_field;
+        while (offset < len) {
+            if (payload[offset] == 0xFF) {
+                // Preenchimento (stuffing) até o fim do pacote TS
+                break;
+            }
+            size_t avail = len - offset;
+            if (avail < 3) {
+                // Cabeçalho de seção fragmentado (menos de 3 bytes para ler section_length)
+                buffer.assign(payload + offset, payload + len);
+                expected_length = 3; // aguarda o restante do cabeçalho
+                break;
+            }
 
-        if (buffer.size() >= expected_length) {
-            completed.push_back(buffer);
-            buffer.clear();
-            expected_length = 0;
+            size_t s_len = (((static_cast<size_t>(payload[offset + 1] & 0x0F)) << 8) | payload[offset + 2]) + 3;
+            if (s_len > 4096) {
+                // Tamanho ilegal de seção PSI/SI
+                break;
+            }
+
+            if (avail >= s_len) {
+                // Seção completa cabe inteiramente neste pacote TS
+                completed.emplace_back(payload + offset, payload + offset + s_len);
+                offset += s_len;
+            } else {
+                // Seção inicia aqui e continua no próximo pacote TS
+                buffer.assign(payload + offset, payload + len);
+                expected_length = s_len;
+                break;
+            }
         }
     } else {
-        // Continuacao de secao fragmentada entre pacotes TS consecutivos
-        if (expected_length > 0 && buffer.size() < expected_length) {
-            size_t needed = expected_length - buffer.size();
-            size_t to_copy = std::min(len, needed);
-            buffer.insert(buffer.end(), payload, payload + to_copy);
-            if (buffer.size() >= expected_length) {
-                completed.push_back(buffer);
-                buffer.clear();
-                expected_length = 0;
+        // Continuação de seção fragmentada entre pacotes TS consecutivos (PUSI=0)
+        if (expected_length > 0 && !buffer.empty()) {
+            if (buffer.size() < 3) {
+                size_t needed_hdr = 3 - buffer.size();
+                size_t to_copy_hdr = std::min(len, needed_hdr);
+                buffer.insert(buffer.end(), payload, payload + to_copy_hdr);
+                payload += to_copy_hdr;
+                len -= to_copy_hdr;
+
+                if (buffer.size() >= 3) {
+                    expected_length = (((static_cast<size_t>(buffer[1] & 0x0F)) << 8) | buffer[2]) + 3;
+                    if (expected_length > 4096) {
+                        buffer.clear();
+                        expected_length = 0;
+                        return;
+                    }
+                } else {
+                    return;
+                }
+            }
+
+            if (expected_length > 0 && buffer.size() < expected_length && len > 0) {
+                size_t needed = expected_length - buffer.size();
+                size_t to_copy = std::min(len, needed);
+                buffer.insert(buffer.end(), payload, payload + to_copy);
+                if (buffer.size() >= expected_length) {
+                    completed.push_back(std::move(buffer));
+                    buffer.clear();
+                    expected_length = 0;
+                }
             }
         }
     }

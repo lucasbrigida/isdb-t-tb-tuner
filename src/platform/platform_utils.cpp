@@ -34,12 +34,9 @@ static pid_t g_player_pid = 0;
 
 void print_cli_header() {
     std::cout <<
-"██╗███████╗██████╗ ██████╗    ████████╗ ██╗████████╗██████╗ \n"
-"██║██╔════╝██╔══██╗██╔══██╗   ╚══██╔══╝██╔╝╚══██╔══╝██╔══██╗\n"
-"██║███████╗██║  ██║██████╔╝█████╗██║  ██╔╝    ██║   ██████╔╝\n"
-"██║╚════██║██║  ██║██╔══██╗╚════╝██║ ██╔╝     ██║   ██╔══██╗\n"
-"██║███████║██████╔╝██████╔╝      ██║██╔╝      ██║   ██████╔╝\n"
-"╚═╝╚══════╝╚═════╝ ╚═════╝       ╚═╝╚═╝       ╚═╝   ╚═════╝ \n"
+"▀█▀ ▄▀▀▀ █▀▀▄ █▀▀▄      ▀▀█▀▀    ▄▀ ▀▀█▀▀ █▀▀▄ \n"
+" █   ▀▀▄ █  █ █▀▀▄ ▀▀▀▀   █    ▄▀     █   █▀▀▄ \n"
+"▀▀▀ ▀▀▀  ▀▀▀  ▀▀▀         ▀   ▀       ▀   ▀▀▀  \n"
 "Repositorio: https://github.com/lucasbrigida/isdb_t_isdb_tb_tuner_player\n"
 "Licenca:     GNU General Public License v3.0 (GPL-3.0)\n\n";
 }
@@ -263,6 +260,14 @@ int console_getch() {
     int ch = getchar();
     tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
     return ch;
+#endif
+}
+
+bool is_interactive_terminal() {
+#ifdef _WIN32
+    return (_isatty(_fileno(stdin)) != 0 && _isatty(_fileno(stdout)) != 0);
+#else
+    return (isatty(STDIN_FILENO) != 0 && isatty(STDOUT_FILENO) != 0);
 #endif
 }
 

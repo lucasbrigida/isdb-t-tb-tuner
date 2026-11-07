@@ -185,7 +185,7 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
     }
 
     constexpr int VISIBLE_CHANNELS = 8;
-    constexpr int FIRST_CHANNEL_ROW = 18;
+    constexpr int FIRST_CHANNEL_ROW = 15;
     std::vector<ChannelInfo> channels = saved_channels;
     int visible_count = 1;
     bool has_scroll = false;
@@ -341,10 +341,10 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
         std::string top_border = "+-- Programacao (EPG) " + std::string(std::max(0, width - 23), '-') + "+";
         std::string bot_border = "+" + std::string(std::max(0, width - 1), '-') + "+";
 
-        std::cout << "\033[12;1H\033[2K" << top_border
-                  << "\033[13;1H\033[2K" << format_box_line("▶ AGORA  ", now_str)
-                  << "\033[14;1H\033[2K" << format_box_line("⏭ SEGUIR ", next_str)
-                  << "\033[15;1H\033[2K" << bot_border << std::flush;
+        std::cout << "\033[9;1H\033[2K" << top_border
+                  << "\033[10;1H\033[2K" << format_box_line("▶ AGORA  ", now_str)
+                  << "\033[11;1H\033[2K" << format_box_line("⏭ SEGUIR ", next_str)
+                  << "\033[12;1H\033[2K" << bot_border << std::flush;
 
         last_rendered_epg_now = now_str;
         last_rendered_epg_next = next_str;

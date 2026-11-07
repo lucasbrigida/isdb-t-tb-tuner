@@ -53,6 +53,411 @@ static std::string format_duration(int sec) {
     return ss.str();
 }
 
+struct ChannelSummaryItem {
+    int channel_number = 0;
+    std::string name;
+    std::string time_str = "--";
+    std::string rating_str = "--";
+    std::string genre_str = "--";
+    std::string prog_str = "Sem informacao salva";
+    std::string short_desc;
+    std::string extended_desc;
+};
+
+static int render_epg_interactive_single(int channel_number,
+                                         const std::string& channel_name,
+                                         const std::vector<EpgEvent>& events,
+                                         std::chrono::system_clock::time_point now_tp = {}) {
+    if (events.empty()) {
+        std::cout << "Nenhum evento de programacao (EIT) foi transmitido pela emissora dentro do tempo limite.\n\n";
+        return 0;
+    }
+
+    AsciiTable base_table({"Status", "Horario", "Duracao", "Classif.", "Genero", "Programa"});
+    base_table.set_alignments({Alignment::Center, Alignment::Center, Alignment::Center, Alignment::Center, Alignment::Left, Alignment::Left});
+    base_table.set_column_widths({9, 13, 7, 8, 12, 45});
+
+    int first_now_idx = -1;
+    for (size_t i = 0; i < events.size(); ++i) {
+        const auto& e = events[i];
+        std::string status = "AGENDA";
+        if (e.is_now) {
+            status = "[AGORA]";
+            if (first_now_idx < 0) first_now_idx = static_cast<int>(i);
+        } else if (e.is_next) {
+            status = "[SEGUIR]";
+        }
+
+        std::string time_str = e.start_time_str.empty() ? EpgManager::format_local_time(e.start_tp) : e.start_time_str;
+        if (!e.end_time_str.empty()) {
+            time_str += " - " + e.end_time_str;
+        } else if (e.end_tp != std::chrono::system_clock::time_point{}) {
+            time_str += " - " + EpgManager::format_local_time(e.end_tp);
+        }
+
+        base_table.add_row({status,
+                            time_str,
+                            format_duration(e.duration_sec),
+                            e.rating.empty() ? "--" : e.rating,
+                            e.genre.empty() ? "--" : e.genre,
+                            e.title});
+    }
+
+    int initial_sel = (first_now_idx >= 0) ? first_now_idx : 0;
+
+    if (!is_interactive_terminal()) {
+        std::string banner_line(base_table.total_width(), '=');
+        std::cout << banner_line << "\n"
+                  << " Guia Eletronico de Programacao (EPG) - Canal " << channel_number;
+        if (!channel_name.empty()) {
+            std::cout << " (" << channel_name << ")";
+        }
+        std::cout << "\n";
+        if (now_tp != std::chrono::system_clock::time_point{}) {
+            std::cout << " [Horario Atual da Maquina: " << EpgManager::format_local_time(now_tp) << "]\n";
+        }
+        std::cout << banner_line << "\n";
+        base_table.print(std::cout);
+        std::cout << "\n";
+
+        const auto& syn_evt = events[initial_sel];
+        if (!syn_evt.short_desc.empty() || !syn_evt.extended_desc.empty()) {
+            std::cout << "[Sinopse - " << syn_evt.title << "]\n";
+            if (!syn_evt.short_desc.empty()) {
+                std::cout << "  " << syn_evt.short_desc << "\n";
+            }
+            if (!syn_evt.extended_desc.empty() && syn_evt.extended_desc != syn_evt.short_desc) {
+                std::cout << "  " << syn_evt.extended_desc << "\n";
+            }
+            std::cout << "\n";
+        }
+        return 0;
+    }
+
+    int selected_index = initial_sel;
+    int window_start_prev = 0;
+
+    std::cout << "\033[?25l\033[2J\033[H" << std::flush;
+
+    auto render_frame = [&]() {
+        TerminalSize sz = get_terminal_size();
+        int overhead = 17;
+        int visible_count = std::max(3, sz.height - overhead);
+        visible_count = std::min(visible_count, static_cast<int>(events.size()));
+        bool has_scroll = static_cast<int>(events.size()) > visible_count;
+
+        int window_start = 0;
+        if (has_scroll) {
+            if (selected_index < window_start_prev) {
+                window_start = selected_index;
+            } else if (selected_index >= window_start_prev + visible_count) {
+                window_start = selected_index - visible_count + 1;
+            } else {
+                window_start = window_start_prev;
+            }
+            int max_start = std::max(0, static_cast<int>(events.size()) - visible_count);
+            window_start = std::clamp(window_start, 0, max_start);
+        }
+        window_start_prev = window_start;
+
+        std::cout << "\033[H";
+        std::string banner_line(base_table.total_width(), '=');
+        std::cout << "\033[2K" << banner_line << "\n";
+        std::cout << "\033[2K Guia Eletronico de Programacao (EPG) - Canal " << channel_number;
+        if (!channel_name.empty()) {
+            std::cout << " (" << channel_name << ")";
+        }
+        std::cout << "\n";
+        if (now_tp != std::chrono::system_clock::time_point{}) {
+            std::cout << "\033[2K [Horario Atual da Maquina: " << EpgManager::format_local_time(now_tp) << "]\n";
+        }
+        std::cout << "\033[2K" << banner_line << "\n";
+
+        if (has_scroll && window_start > 0) {
+            std::cout << "\033[2K  ▲ (mais " << window_start << " programas acima)\n";
+        } else {
+            std::cout << "\033[2K\n";
+        }
+
+        base_table.set_visible_range(window_start, visible_count);
+        base_table.set_selected_row(selected_index);
+        std::string tbl_str = base_table.render(base_table.total_width());
+        std::stringstream ss(tbl_str);
+        std::string line;
+        while (std::getline(ss, line)) {
+            std::cout << "\033[2K" << line << "\n";
+        }
+
+        int rem = static_cast<int>(events.size()) - (window_start + visible_count);
+        if (has_scroll && rem > 0) {
+            std::cout << "\033[2K  ▼ (mais " << rem << " programas abaixo)\n";
+        } else {
+            std::cout << "\033[2K\n";
+        }
+
+        const auto& syn_evt = events[selected_index];
+        std::string syn_title = syn_evt.title.empty() ? "Sem Titulo" : syn_evt.title;
+        std::cout << "\033[2K[Sinopse - " << syn_title << "]\n";
+
+        bool has_desc = (!syn_evt.short_desc.empty() || !syn_evt.extended_desc.empty());
+        if (has_desc) {
+            std::string s1 = !syn_evt.short_desc.empty() ? syn_evt.short_desc : syn_evt.extended_desc;
+            size_t max_text_w = static_cast<size_t>(std::max(40, sz.width - 4));
+            if (AsciiTable::utf8_display_width(s1) > max_text_w) {
+                s1 = AsciiTable::utf8_trim_to_width(s1, max_text_w - 3) + "...";
+            }
+            std::cout << "\033[2K  " << s1 << "\n";
+
+            std::string s2 = (!syn_evt.short_desc.empty() && !syn_evt.extended_desc.empty() && syn_evt.extended_desc != syn_evt.short_desc)
+                                 ? syn_evt.extended_desc : "";
+            if (!s2.empty()) {
+                if (AsciiTable::utf8_display_width(s2) > max_text_w) {
+                    s2 = AsciiTable::utf8_trim_to_width(s2, max_text_w - 3) + "...";
+                }
+                std::cout << "\033[2K  " << s2 << "\n";
+            } else {
+                std::cout << "\033[2K\n";
+            }
+        } else {
+            std::cout << "\033[2K  \033[90m[Sinopse indisponivel para este evento]\033[0m\n";
+            std::cout << "\033[2K\n";
+        }
+
+        std::cout << "\033[" << (sz.height - 1) << ";1H\033[2K";
+
+        std::string nav_bar = " Comandos: [▲/▼] Selecionar Programa | [q] Sair";
+        int target_len = std::max(0, sz.width - 1);
+        if (static_cast<int>(nav_bar.length()) > target_len) {
+            nav_bar = nav_bar.substr(0, target_len);
+        } else if (static_cast<int>(nav_bar.length()) < target_len) {
+            nav_bar += std::string(target_len - nav_bar.length(), ' ');
+        }
+        std::cout << "\033[" << sz.height << ";1H\033[2K\033[30;47m" << nav_bar << "\033[0m" << std::flush;
+    };
+
+    render_frame();
+
+    while (g_running) {
+        if (console_kbhit()) {
+            int key = console_getch();
+            if (key == 'q' || key == 'Q') {
+                break;
+            } else if (key == 'k' || key == 'K') {
+                selected_index = (selected_index > 0) ? (selected_index - 1) : static_cast<int>(events.size() - 1);
+                render_frame();
+            } else if (key == 'j' || key == 'J') {
+                selected_index = (selected_index + 1 < static_cast<int>(events.size())) ? (selected_index + 1) : 0;
+                render_frame();
+            } else if (key == 0 || key == 224) {
+                int ext = console_getch();
+                if (ext == 72) { // Up
+                    selected_index = (selected_index > 0) ? (selected_index - 1) : static_cast<int>(events.size() - 1);
+                    render_frame();
+                } else if (ext == 80) { // Down
+                    selected_index = (selected_index + 1 < static_cast<int>(events.size())) ? (selected_index + 1) : 0;
+                    render_frame();
+                }
+            } else if (key == 27) { // ANSI
+                if (console_kbhit()) {
+                    int c2 = console_getch();
+                    if (c2 == '[') {
+                        int c3 = console_getch();
+                        if (c3 == 'A') { // Up
+                            selected_index = (selected_index > 0) ? (selected_index - 1) : static_cast<int>(events.size() - 1);
+                            render_frame();
+                        } else if (c3 == 'B') { // Down
+                            selected_index = (selected_index + 1 < static_cast<int>(events.size())) ? (selected_index + 1) : 0;
+                            render_frame();
+                        }
+                    }
+                }
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    }
+
+    TerminalSize final_sz = get_terminal_size();
+    std::cout << "\033[?25h\033[" << final_sz.height << ";1H\n" << std::flush;
+    return 0;
+}
+
+static int render_epg_interactive_multi(const std::string& title,
+                                        const std::vector<ChannelSummaryItem>& items,
+                                        std::chrono::system_clock::time_point now_tp = {}) {
+    if (items.empty()) {
+        std::cout << "Nenhum canal disponivel para exibicao do guia.\n\n";
+        return 0;
+    }
+
+    AsciiTable base_table({"Canal", "Emissora", "Horario", "Classif.", "Genero", "Programa Atual (Agora)"});
+    base_table.set_alignments({Alignment::Center, Alignment::Left, Alignment::Center, Alignment::Center, Alignment::Center, Alignment::Left});
+    base_table.set_column_widths({5, 18, 15, 8, 12, 36});
+
+    for (const auto& it : items) {
+        base_table.add_row({std::to_string(it.channel_number),
+                            it.name,
+                            it.time_str,
+                            it.rating_str,
+                            it.genre_str,
+                            it.prog_str});
+    }
+
+    if (!is_interactive_terminal()) {
+        std::string banner_line(base_table.total_width(), '=');
+        std::cout << banner_line << "\n"
+                  << " " << title << "\n";
+        if (now_tp != std::chrono::system_clock::time_point{}) {
+            std::cout << " [Horario Atual da Maquina: " << EpgManager::format_local_time(now_tp) << "]\n";
+        }
+        std::cout << banner_line << "\n";
+        base_table.print(std::cout);
+        std::cout << "\n Dica: Para ver a sinopse e grade completa de um canal, use: .\\isdbtb_rx.exe epg -c <numero> --view\n\n";
+        return 0;
+    }
+
+    int selected_index = 0;
+    int window_start_prev = 0;
+
+    std::cout << "\033[?25l\033[2J\033[H" << std::flush;
+
+    auto render_frame = [&]() {
+        TerminalSize sz = get_terminal_size();
+        int overhead = 17;
+        int visible_count = std::max(3, sz.height - overhead);
+        visible_count = std::min(visible_count, static_cast<int>(items.size()));
+        bool has_scroll = static_cast<int>(items.size()) > visible_count;
+
+        int window_start = 0;
+        if (has_scroll) {
+            if (selected_index < window_start_prev) {
+                window_start = selected_index;
+            } else if (selected_index >= window_start_prev + visible_count) {
+                window_start = selected_index - visible_count + 1;
+            } else {
+                window_start = window_start_prev;
+            }
+            int max_start = std::max(0, static_cast<int>(items.size()) - visible_count);
+            window_start = std::clamp(window_start, 0, max_start);
+        }
+        window_start_prev = window_start;
+
+        std::cout << "\033[H";
+        std::string banner_line(base_table.total_width(), '=');
+        std::cout << "\033[2K" << banner_line << "\n";
+        std::cout << "\033[2K " << title << "\n";
+        if (now_tp != std::chrono::system_clock::time_point{}) {
+            std::cout << "\033[2K [Horario Atual da Maquina: " << EpgManager::format_local_time(now_tp) << "]\n";
+        }
+        std::cout << "\033[2K" << banner_line << "\n";
+
+        if (has_scroll && window_start > 0) {
+            std::cout << "\033[2K  ▲ (mais " << window_start << " canais acima)\n";
+        } else {
+            std::cout << "\033[2K\n";
+        }
+
+        base_table.set_visible_range(window_start, visible_count);
+        base_table.set_selected_row(selected_index);
+        std::string tbl_str = base_table.render(base_table.total_width());
+        std::stringstream ss(tbl_str);
+        std::string line;
+        while (std::getline(ss, line)) {
+            std::cout << "\033[2K" << line << "\n";
+        }
+
+        int rem = static_cast<int>(items.size()) - (window_start + visible_count);
+        if (has_scroll && rem > 0) {
+            std::cout << "\033[2K  ▼ (mais " << rem << " canais abaixo)\n";
+        } else {
+            std::cout << "\033[2K\n";
+        }
+
+        const auto& sel_item = items[selected_index];
+        std::cout << "\033[2K[Sinopse - Canal " << sel_item.channel_number << " (" << sel_item.name << "): "
+                  << sel_item.prog_str << "]\n";
+
+        bool has_desc = (!sel_item.short_desc.empty() || !sel_item.extended_desc.empty());
+        if (has_desc) {
+            std::string s1 = !sel_item.short_desc.empty() ? sel_item.short_desc : sel_item.extended_desc;
+            size_t max_text_w = static_cast<size_t>(std::max(40, sz.width - 4));
+            if (AsciiTable::utf8_display_width(s1) > max_text_w) {
+                s1 = AsciiTable::utf8_trim_to_width(s1, max_text_w - 3) + "...";
+            }
+            std::cout << "\033[2K  " << s1 << "\n";
+
+            std::string s2 = (!sel_item.short_desc.empty() && !sel_item.extended_desc.empty() && sel_item.extended_desc != sel_item.short_desc)
+                                 ? sel_item.extended_desc : "";
+            if (!s2.empty()) {
+                if (AsciiTable::utf8_display_width(s2) > max_text_w) {
+                    s2 = AsciiTable::utf8_trim_to_width(s2, max_text_w - 3) + "...";
+                }
+                std::cout << "\033[2K  " << s2 << "\n";
+            } else {
+                std::cout << "\033[2K\n";
+            }
+        } else {
+            std::cout << "\033[2K  \033[90m[Sinopse indisponivel para este evento]\033[0m\n";
+            std::cout << "\033[2K\n";
+        }
+
+        std::cout << "\033[" << (sz.height - 1) << ";1H\033[2K";
+
+        std::string nav_bar = " Comandos: [▲/▼] Selecionar Programa | [q] Sair";
+        int target_len = std::max(0, sz.width - 1);
+        if (static_cast<int>(nav_bar.length()) > target_len) {
+            nav_bar = nav_bar.substr(0, target_len);
+        } else if (static_cast<int>(nav_bar.length()) < target_len) {
+            nav_bar += std::string(target_len - nav_bar.length(), ' ');
+        }
+        std::cout << "\033[" << sz.height << ";1H\033[2K\033[30;47m" << nav_bar << "\033[0m" << std::flush;
+    };
+
+    render_frame();
+
+    while (g_running) {
+        if (console_kbhit()) {
+            int key = console_getch();
+            if (key == 'q' || key == 'Q') {
+                break;
+            } else if (key == 'k' || key == 'K') {
+                selected_index = (selected_index > 0) ? (selected_index - 1) : static_cast<int>(items.size() - 1);
+                render_frame();
+            } else if (key == 'j' || key == 'J') {
+                selected_index = (selected_index + 1 < static_cast<int>(items.size())) ? (selected_index + 1) : 0;
+                render_frame();
+            } else if (key == 0 || key == 224) {
+                int ext = console_getch();
+                if (ext == 72) { // Up
+                    selected_index = (selected_index > 0) ? (selected_index - 1) : static_cast<int>(items.size() - 1);
+                    render_frame();
+                } else if (ext == 80) { // Down
+                    selected_index = (selected_index + 1 < static_cast<int>(items.size())) ? (selected_index + 1) : 0;
+                    render_frame();
+                }
+            } else if (key == 27) { // ANSI
+                if (console_kbhit()) {
+                    int c2 = console_getch();
+                    if (c2 == '[') {
+                        int c3 = console_getch();
+                        if (c3 == 'A') { // Up
+                            selected_index = (selected_index > 0) ? (selected_index - 1) : static_cast<int>(items.size() - 1);
+                            render_frame();
+                        } else if (c3 == 'B') { // Down
+                            selected_index = (selected_index + 1 < static_cast<int>(items.size())) ? (selected_index + 1) : 0;
+                            render_frame();
+                        }
+                    }
+                }
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    }
+
+    TerminalSize final_sz = get_terminal_size();
+    std::cout << "\033[?25h\033[" << final_sz.height << ";1H\n" << std::flush;
+    return 0;
+}
+
 // ---------------------------------------------------------------------------
 // MODO 1: EPG GERAL CONSOLIDADO (TODOS OS CANAIS SALVOS EM CHANNELS.JSON)
 // ---------------------------------------------------------------------------
@@ -326,46 +731,28 @@ static int run_epg_all(const std::vector<ChannelInfo>& saved_channels, int dev_i
         return 0;
     }
 
-    AsciiTable table({"Canal", "Emissora", "Horario", "Classif.", "Genero", "Programa Atual (Agora)"});
-    table.set_alignments({Alignment::Center, Alignment::Left, Alignment::Center, Alignment::Center, Alignment::Center, Alignment::Left});
-    table.set_column_widths({5, 18, 15, 8, 12, 36});
-
-    std::string banner_line(table.total_width(), '=');
-    std::cout << banner_line << "\n"
-              << " Guia Geral de Programacao (EPG) - Todos os Canais Salvos\n"
-              << banner_line << "\n";
-
+    std::vector<ChannelSummaryItem> items;
     for (const auto& ch : results) {
-        std::string time_str = "--";
-        std::string rating_str = "--";
-        std::string genre_str = "--";
-        std::string prog_str = "Sem informacao de EPG";
-
+        ChannelSummaryItem it;
+        it.channel_number = ch.channel_number;
+        it.name = ch.name;
         if (!ch.signal_found) {
-            prog_str = "(Sem sinal RF)";
+            it.prog_str = "(Sem sinal RF)";
         } else if (ch.present.has_value() && !ch.present->title.empty()) {
-            prog_str = ch.present->title;
+            it.prog_str = ch.present->title;
             if (!ch.present->start_time_str.empty()) {
-                time_str = ch.present->start_time_str;
-                if (!ch.present->end_time_str.empty()) time_str += " - " + ch.present->end_time_str;
+                it.time_str = ch.present->start_time_str;
+                if (!ch.present->end_time_str.empty()) it.time_str += " - " + ch.present->end_time_str;
             }
-            if (!ch.present->rating.empty()) rating_str = ch.present->rating;
-            if (!ch.present->genre.empty()) genre_str = ch.present->genre;
+            if (!ch.present->rating.empty()) it.rating_str = ch.present->rating;
+            if (!ch.present->genre.empty()) it.genre_str = ch.present->genre;
+            it.short_desc = ch.present->short_desc;
+            it.extended_desc = ch.present->extended_desc;
         }
-
-        table.add_row({std::to_string(ch.channel_number),
-                       ch.name,
-                       time_str,
-                       rating_str,
-                       genre_str,
-                       prog_str});
+        items.push_back(it);
     }
 
-    table.print(std::cout);
-    std::cout << "\n Dica: Para ver a sinopse e grade futura completa de um canal, use: .\\isdbtb_rx.exe epg -c <numero>\n"
-              << " [Info] Guia de programacao salvo com sucesso em './epg.json'\n\n";
-
-    return 0;
+    return render_epg_interactive_multi("Guia Geral de Programacao (EPG) - Todos os Canais Salvos", items, now_tp);
 }
 
 // ---------------------------------------------------------------------------
@@ -604,66 +991,7 @@ static int run_epg_single(int active_channel_num, const std::string& initial_nam
         return 0;
     }
 
-    AsciiTable table({"Status", "Horario", "Duracao", "Classif.", "Genero", "Programa"});
-    table.set_alignments({Alignment::Center, Alignment::Center, Alignment::Center, Alignment::Center, Alignment::Left, Alignment::Left});
-    table.set_column_widths({9, 13, 7, 8, 12, 45});
-
-    std::string banner_line(table.total_width(), '=');
-    std::cout << banner_line << "\n"
-              << " Guia Eletronico de Programacao (EPG) - Canal " << active_channel_num;
-    if (!channel_name.empty()) {
-        std::cout << " (" << channel_name << ")";
-    }
-    std::cout << "\n" << banner_line << "\n";
-
-    const EpgEvent* first_now = nullptr;
-
-    for (const auto& e : enriched_ch->events) {
-        std::string status = "AGENDA";
-        if (e.is_now) {
-            status = "[AGORA]";
-            if (!first_now) first_now = &e;
-        } else if (e.is_next) {
-            status = "[SEGUIR]";
-        }
-
-        std::string time_str = e.start_time_str.empty() ? EpgManager::format_local_time(e.start_tp) : e.start_time_str;
-        if (!e.end_time_str.empty()) {
-            time_str += " - " + e.end_time_str;
-        } else if (e.end_tp != std::chrono::system_clock::time_point{}) {
-            time_str += " - " + EpgManager::format_local_time(e.end_tp);
-        }
-
-        table.add_row({status,
-                       time_str,
-                       format_duration(e.duration_sec),
-                       e.rating.empty() ? "--" : e.rating,
-                       e.genre.empty() ? "--" : e.genre,
-                       e.title});
-    }
-
-    table.print(std::cout);
-    std::cout << "\n";
-
-    // Exibe sinopse do programa atual ou do primeiro disponivel
-    const EpgEvent* synopsis_evt = first_now;
-    if (!synopsis_evt && !enriched_ch->events.empty()) {
-        synopsis_evt = &enriched_ch->events[0];
-    }
-
-    if (synopsis_evt && (!synopsis_evt->short_desc.empty() || !synopsis_evt->extended_desc.empty())) {
-        std::cout << "[Sinopse - " << synopsis_evt->title << "]\n";
-        if (!synopsis_evt->short_desc.empty()) {
-            std::cout << "  " << synopsis_evt->short_desc << "\n";
-        }
-        if (!synopsis_evt->extended_desc.empty() && synopsis_evt->extended_desc != synopsis_evt->short_desc) {
-            std::cout << "  " << synopsis_evt->extended_desc << "\n";
-        }
-        std::cout << "\n";
-    }
-
-    std::cout << " [Info] Guia de programacao enriquecido e salvo com sucesso em './epg.json'\n\n";
-    return 0;
+    return render_epg_interactive_single(active_channel_num, channel_name, enriched_ch->events, now_tp);
 }
 
 // ---------------------------------------------------------------------------
@@ -726,63 +1054,7 @@ static int run_epg_view(int active_channel_num, const std::string& name_query, b
             return 0;
         }
 
-        AsciiTable table({"Status", "Horario", "Duracao", "Classif.", "Genero", "Programa"});
-        table.set_alignments({Alignment::Center, Alignment::Center, Alignment::Center, Alignment::Center, Alignment::Left, Alignment::Left});
-        table.set_column_widths({9, 13, 7, 8, 12, 45});
-
-        std::string banner_line(table.total_width(), '=');
-        std::cout << banner_line << "\n"
-                  << " Guia de Programacao Salvo (EPG) - Canal " << target_ch;
-        if (!ch_entry->channel_name.empty()) {
-            std::cout << " (" << ch_entry->channel_name << ")";
-        }
-        std::cout << "\n [Horario Atual da Maquina: " << EpgManager::format_local_time(now_tp) << "]\n"
-                  << banner_line << "\n";
-
-        const EpgEvent* first_now = nullptr;
-        for (const auto& e : ch_entry->events) {
-            std::string status = "AGENDA";
-            if (e.is_now) {
-                status = "[AGORA]";
-                if (!first_now) first_now = &e;
-            } else if (e.is_next) {
-                status = "[SEGUIR]";
-            }
-
-            std::string time_str = e.start_time_str.empty() ? EpgManager::format_local_time(e.start_tp) : e.start_time_str;
-            if (!e.end_time_str.empty()) {
-                time_str += " - " + e.end_time_str;
-            } else if (e.end_tp != std::chrono::system_clock::time_point{}) {
-                time_str += " - " + EpgManager::format_local_time(e.end_tp);
-            }
-
-            table.add_row({status,
-                           time_str,
-                           format_duration(e.duration_sec),
-                           e.rating.empty() ? "--" : e.rating,
-                           e.genre.empty() ? "--" : e.genre,
-                           e.title});
-        }
-
-        table.print(std::cout);
-        std::cout << "\n";
-
-        const EpgEvent* synopsis_evt = first_now;
-        if (!synopsis_evt && !ch_entry->events.empty()) {
-            synopsis_evt = &ch_entry->events[0];
-        }
-
-        if (synopsis_evt && (!synopsis_evt->short_desc.empty() || !synopsis_evt->extended_desc.empty())) {
-            std::cout << "[Sinopse - " << synopsis_evt->title << "]\n";
-            if (!synopsis_evt->short_desc.empty()) {
-                std::cout << "  " << synopsis_evt->short_desc << "\n";
-            }
-            if (!synopsis_evt->extended_desc.empty() && synopsis_evt->extended_desc != synopsis_evt->short_desc) {
-                std::cout << "  " << synopsis_evt->extended_desc << "\n";
-            }
-            std::cout << "\n";
-        }
-        return 0;
+        return render_epg_interactive_single(target_ch, ch_entry->channel_name, ch_entry->events, now_tp);
     }
 
     // 2. Todos os Canais (Visao Consolidada)
@@ -790,16 +1062,6 @@ static int run_epg_view(int active_channel_num, const std::string& name_query, b
         std::cout << epg_mgr.to_json_string() << "\n";
         return 0;
     }
-
-    AsciiTable table({"Canal", "Emissora", "Horario", "Classif.", "Genero", "Programa Atual (Agora)"});
-    table.set_alignments({Alignment::Center, Alignment::Left, Alignment::Center, Alignment::Center, Alignment::Center, Alignment::Left});
-    table.set_column_widths({5, 18, 15, 8, 12, 36});
-
-    std::string banner_line(table.total_width(), '=');
-    std::cout << banner_line << "\n"
-              << " Guia Geral de Programacao Salvo (EPG) - Consulta Local\n"
-              << " [Horario Atual da Maquina: " << EpgManager::format_local_time(now_tp) << "]\n"
-              << banner_line << "\n";
 
     std::map<int, std::string> channel_names;
     for (const auto& ch : saved_channels) {
@@ -811,41 +1073,35 @@ static int run_epg_view(int active_channel_num, const std::string& name_query, b
         }
     }
 
+    std::vector<ChannelSummaryItem> items;
     for (const auto& [num, name] : channel_names) {
-        std::string time_str = "--";
-        std::string rating_str = "--";
-        std::string genre_str = "--";
-        std::string prog_str = "Sem informacao salva";
+        ChannelSummaryItem it;
+        it.channel_number = num;
+        it.name = name;
 
         EpgEvent now_evt, next_evt;
         if (epg_mgr.has_valid_now(num, now_tp, &now_evt, &next_evt)) {
-            prog_str = now_evt.title;
+            it.prog_str = now_evt.title;
             if (!now_evt.start_time_str.empty()) {
-                time_str = now_evt.start_time_str;
-                if (!now_evt.end_time_str.empty()) time_str += " - " + now_evt.end_time_str;
+                it.time_str = now_evt.start_time_str;
+                if (!now_evt.end_time_str.empty()) it.time_str += " - " + now_evt.end_time_str;
             }
-            if (!now_evt.rating.empty()) rating_str = now_evt.rating;
-            if (!now_evt.genre.empty()) genre_str = now_evt.genre;
+            if (!now_evt.rating.empty()) it.rating_str = now_evt.rating;
+            if (!now_evt.genre.empty()) it.genre_str = now_evt.genre;
+            it.short_desc = now_evt.short_desc;
+            it.extended_desc = now_evt.extended_desc;
         } else {
             const auto* ch_ptr = epg_mgr.get_channel(num);
             if (ch_ptr && !ch_ptr->events.empty()) {
-                prog_str = "(Sem programa no horario atual)";
+                it.prog_str = "(Sem programa no horario atual)";
+                it.short_desc = ch_ptr->events[0].short_desc;
+                it.extended_desc = ch_ptr->events[0].extended_desc;
             }
         }
-
-        table.add_row({std::to_string(num),
-                       name,
-                       time_str,
-                       rating_str,
-                       genre_str,
-                       prog_str});
+        items.push_back(it);
     }
 
-    table.print(std::cout);
-    std::cout << "\n Dica: Para ver a grade completa de um canal salvo, use: .\\isdbtb_rx.exe epg -c <numero> --view\n"
-              << "       Para atualizar o guia capturando dados recentes do ar, use: .\\isdbtb_rx.exe epg\n\n";
-
-    return 0;
+    return render_epg_interactive_multi("Guia Geral de Programacao Salvo (EPG) - Consulta Local", items, now_tp);
 }
 
 // ---------------------------------------------------------------------------

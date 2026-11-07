@@ -134,6 +134,7 @@ set(SOURCES
     src/dsp/oneseg_demodulator.cpp
     src/streaming/udp_streamer.cpp
     src/mpegts/psi_parser.cpp
+    src/mpegts/arib_b24_decoder.cpp
     src/mpegts/ts_generator.cpp
     src/sync/van_de_beek_sync.cpp
     src/sync/sync_factory.cpp
@@ -246,12 +247,19 @@ add_executable(test_channel_manager
 add_executable(test_psi_parser
     tests/test_psi_parser.cpp
     src/mpegts/psi_parser.cpp
+    src/mpegts/arib_b24_decoder.cpp
 )
 
 add_executable(test_epg_manager
     tests/test_epg_manager.cpp
     src/cli/epg_manager.cpp
     src/mpegts/psi_parser.cpp
+    src/mpegts/arib_b24_decoder.cpp
+)
+
+add_executable(test_arib_b24
+    tests/test_arib_b24.cpp
+    src/mpegts/arib_b24_decoder.cpp
 )
 
 add_executable(freeze_baseline_ofdm1
@@ -262,6 +270,7 @@ add_executable(freeze_baseline_ofdm1
     src/dsp/ofdm_sync.cpp
     src/dsp/oneseg_demodulator.cpp
     src/mpegts/psi_parser.cpp
+    src/mpegts/arib_b24_decoder.cpp
 )
 target_link_libraries(freeze_baseline_ofdm1 PRIVATE ${DSP_EXTERNAL_LIBS} ${HASH_LIBS})
 
@@ -289,6 +298,7 @@ add_executable(test_regression_ofdm1
     src/dsp/reed_solomon.cpp
     src/dsp/descrambler.cpp
     src/mpegts/psi_parser.cpp
+    src/mpegts/arib_b24_decoder.cpp
 )
 target_link_libraries(test_regression_ofdm1 PRIVATE ${DSP_EXTERNAL_LIBS} ${HASH_LIBS})
 
@@ -308,6 +318,7 @@ add_executable(test_regression_ofdm2
     src/dsp/reed_solomon.cpp
     src/dsp/descrambler.cpp
     src/mpegts/psi_parser.cpp
+    src/mpegts/arib_b24_decoder.cpp
 )
 target_link_libraries(test_regression_ofdm2 PRIVATE ${DSP_EXTERNAL_LIBS} ${HASH_LIBS})
 
@@ -326,6 +337,7 @@ add_executable(bench_sync
     src/dsp/reed_solomon.cpp
     src/dsp/descrambler.cpp
     src/mpegts/psi_parser.cpp
+    src/mpegts/arib_b24_decoder.cpp
 )
 target_link_libraries(bench_sync PRIVATE ${DSP_EXTERNAL_LIBS})
 target_compile_definitions(bench_sync PRIVATE ISDBT_ENABLE_GRISDBT_SYNC=1)
@@ -350,6 +362,7 @@ add_test(NAME SyncStateAndCsi COMMAND test_sync_state_and_csi)
 add_test(NAME FrequencyPlan COMMAND test_frequency_plan)
 add_test(NAME ChannelManager COMMAND test_channel_manager)
 add_test(NAME PsiParser COMMAND test_psi_parser)
+add_test(NAME AribB24 COMMAND test_arib_b24)
 add_test(NAME EpgManager COMMAND test_epg_manager)
 add_test(NAME UdpStreamer COMMAND test_udp_streamer)
 add_test(NAME CliOfdmFlag COMMAND test_cli_ofdm_flag)

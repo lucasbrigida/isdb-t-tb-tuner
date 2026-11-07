@@ -88,6 +88,25 @@ Sintoniza o canal e abre **automaticamente** a janela do player MPV embutido com
 
 > 💡 **Fechamento Automático:** O processo do MPV está vinculado a um *Job Object* do Windows. Ao fechar a CLI (pressionando `Ctrl+C` ou fechando a janela do console), o player MPV fecha instantaneamente sem deixar processos órfãos em segundo plano.
 
+### 5. Guia Eletrônico de Programação (`epg`)
+Captura e exibe a grade de programação transmitida pelas emissoras (tabelas EIT Present/Following e Schedule) com suporte nativo a ARIB STD-B24 / UTF-8 / Latin-1 e persistência local (`epg.json`):
+```powershell
+# Varrer e capturar a programação de todos os canais salvos:
+.\isdbtb_rx.exe epg
+
+# Capturar programação de um canal específico (ex: Canal 23):
+.\isdbtb_rx.exe epg -c 23
+
+# Visualizar instantaneamente a grade salva em cache sem sintonizar o rádio:
+.\isdbtb_rx.exe epg --view
+
+# Visualizar a grade salva de um canal específico:
+.\isdbtb_rx.exe epg -c 23 --view
+
+# Exportar a programação completa no formato JSON estruturado:
+.\isdbtb_rx.exe epg --view --json
+```
+
 ---
 
 ## 🎬 Recursos e Teclas do Player MPV Integrado
