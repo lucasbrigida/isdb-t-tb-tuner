@@ -859,7 +859,7 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
                     update_window();
                     need_redraw = true;
                 }
-            } else if (key == 0 || key == 224) {
+            } else if ((key == 0 || key == 224) && console_kbhit()) {
                 int ext = console_getch();
                 if (ext == 72) { // Seta para Cima
                     if (!channels.empty()) {
@@ -877,7 +877,7 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
             } else if (key == 27) { // ANSI escape sequence no Linux (\033[A ou \033[B)
                 if (console_kbhit()) {
                     int c2 = console_getch();
-                    if (c2 == '[') {
+                    if (c2 == '[' && console_kbhit()) {
                         int c3 = console_getch();
                         if (c3 == 'A') { // Up
                             if (!channels.empty()) {
