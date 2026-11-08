@@ -41,9 +41,13 @@ struct PlaybackStatusSnapshot {
     float snr_db = 0.0f;
     float evm = 0.0f;
     uint64_t air_packets = 0;
-    uint32_t rs_corrected = 0;
-    uint32_t rs_dropped = 0;
+    uint64_t rs_corrected = 0;
+    uint64_t rs_dropped = 0;
+    uint64_t viterbi_drops = 0;
     uint64_t drop_blocks = 0;
+    uint64_t decoder_resets = 0;
+    uint64_t sequence_gaps = 0;
+    float ts_packet_rate = 0.0f;
     std::string service_name;
     std::string epg_now;
     std::string epg_next;
@@ -61,7 +65,14 @@ static void reset_play_reception_stream(
     IOFDMSynchronizer& sync,
     OneSegDemodulator& demod,
     bool& ofdm_locked,
-    DspMetrics* metrics = nullptr) {
+    DspMetrics* metrics = nullptr,
+    uint64_t* acc_rs_corrected = nullptr,
+    uint64_t* acc_rs_dropped = nullptr,
+    uint64_t* acc_viterbi_drops = nullptr) {
+
+    if (acc_rs_corrected) *acc_rs_corrected += demod.corrected_rs_packets();
+    if (acc_rs_dropped) *acc_rs_dropped += demod.uncorrectable_rs_packets();
+    if (acc_viterbi_drops) *acc_viterbi_drops += demod.viterbi_sync_drops();
 
     ofdm_locked = false;
     sync.reset();
@@ -403,6 +414,8 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
             }
         }
 
+        std::vector<uint8_t> discard_buf(chunk_bytes);
+
         while (reader_running.load(std::memory_order_relaxed) && g_running) {
             uint32_t req_freq = retune_target_freq_hz.load(std::memory_order_acquire);
             if (req_freq != 0) {
@@ -414,13 +427,19 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
 
             SpscCaptureQueue<64>::WriteView view;
             if (!raw_queue->try_acquire_write(view)) {
-                if (input_file.empty()) raw_queue->record_drop();
                 if (input_file.empty()) {
+                    // Modo ao vivo com fila SPSC cheia: le e descarta 1 bloco completo do RTL-SDR
+                    // para manter o fluxo USB drenado sem estourar o buffer do kernel ou emitir erros de I/O.
+                    int n_discard = 0;
+                    rtlsdr_read_sync(dev, discard_buf.data(), static_cast<int>(chunk_bytes), &n_discard);
+                    raw_queue->record_drop();
                     ++sequence;
                     pending_discontinuity = true;
+                    continue;
+                } else {
+                    std::this_thread::sleep_for(std::chrono::microseconds(200));
+                    continue;
                 }
-                std::this_thread::sleep_for(std::chrono::microseconds(200));
-                continue;
             }
 
             auto* block = view.block;
@@ -476,11 +495,18 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
         bool ofdm_locked = false;
         float last_peak_corr = 0.0f;
         int unlock_counter = 0;
+        int tmcc_unlock_counter = 0;
         bool reception_started = false;
         bool channel_transition_pending = !test_pattern;
         int transition_wait_blocks = 0;
         uint64_t total_air_packets = 0;
         uint64_t total_standby_packets = 0;
+        uint64_t session_rs_corrected = 0;
+        uint64_t session_rs_dropped = 0;
+        uint64_t session_viterbi_drops = 0;
+        uint64_t last_rate_pkts = 0;
+        float current_ts_rate = 0.0f;
+        auto last_rate_calc_time = std::chrono::steady_clock::now();
 
         std::uint64_t expected_sequence = 0;
         bool have_expected_sequence = false;
@@ -509,6 +535,12 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
                 transition_wait_blocks = 0;
                 reset_play_reception_stream(*sync, demod, ofdm_locked, &dsp_metrics);
                 total_air_packets = 0;
+                session_rs_corrected = 0;
+                session_rs_dropped = 0;
+                session_viterbi_drops = 0;
+                tmcc_unlock_counter = 0;
+                current_ts_rate = 0.0f;
+                last_rate_pkts = 0;
                 have_expected_sequence = false;
                 reception_started = false;
                 unlock_counter = 0;
@@ -547,9 +579,11 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
             dsp_metrics.input_blocks++;
 
             if (discontinuity) {
-                reset_play_reception_stream(*sync, demod, ofdm_locked, &dsp_metrics);
+                reset_play_reception_stream(*sync, demod, ofdm_locked, &dsp_metrics,
+                                            &session_rs_corrected, &session_rs_dropped, &session_viterbi_drops);
                 reception_started = false;
                 unlock_counter = 0;
+                tmcc_unlock_counter = 0;
             }
 
             if (block.size == chunk_bytes) {
@@ -570,29 +604,43 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
                 std::vector<std::vector<uint8_t>> decoded_pkts;
 
                 if (synchronizer_locked || has_synchronized_symbols) {
-                    ofdm_locked = true;
+                    ofdm_locked = synchronizer_locked;
                     reception_started = true;
                     unlock_counter = 0;
                 } else {
+                    ofdm_locked = false;
                     if (reception_started) {
-                        ofdm_locked = true;
                         if (++unlock_counter > 200) {
-                            reset_play_reception_stream(*sync, demod, ofdm_locked, &dsp_metrics);
+                            reset_play_reception_stream(*sync, demod, ofdm_locked, &dsp_metrics,
+                                                        &session_rs_corrected, &session_rs_dropped, &session_viterbi_drops);
                             reception_started = false;
                             unlock_counter = 0;
+                            tmcc_unlock_counter = 0;
                         }
-                    } else {
-                        ofdm_locked = false;
                     }
                 }
 
-                if (ofdm_locked) {
+                if (!useful_symbols.empty()) {
                     for (size_t s = 0; s + FFT_LEN <= useful_symbols.size(); s += FFT_LEN) {
                         demod.process_symbol(&useful_symbols[s], decoded_pkts);
                         dsp_metrics.processed_symbols++;
                     }
-                    if (!useful_symbols.empty() && demod.is_tmcc_locked()) {
+                    if (demod.is_tmcc_locked()) {
                         sync->notify_frame_sync((demod.sp_phase() + 1) & 3, demod.integer_freq_offset_bins());
+                        tmcc_unlock_counter = 0;
+                    } else {
+                        sync->notify_frame_lost();
+                        if (reception_started) {
+                            // Watchdog: ~180 blocos (~3 segundos a 62 blocos/s) sem TMCC lock
+                            // apos ter iniciado recepcao indica perda severa de sinal ou desancoragem.
+                            if (++tmcc_unlock_counter > 180) {
+                                reset_play_reception_stream(*sync, demod, ofdm_locked, &dsp_metrics,
+                                                            &session_rs_corrected, &session_rs_dropped, &session_viterbi_drops);
+                                reception_started = false;
+                                tmcc_unlock_counter = 0;
+                                unlock_counter = 0;
+                            }
+                        }
                     }
 
                     for (const auto& pkt : decoded_pkts) {
@@ -701,6 +749,13 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
 
                 auto now = std::chrono::steady_clock::now();
                 if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_status_update).count() >= 200) {
+                    double dt_rate = std::chrono::duration<double>(now - last_rate_calc_time).count();
+                    if (dt_rate >= 0.5) {
+                        current_ts_rate = static_cast<float>((total_air_packets - last_rate_pkts) / dt_rate);
+                        last_rate_pkts = total_air_packets;
+                        last_rate_calc_time = now;
+                    }
+
                     std::string s_name = psi.get_primary_service_name();
                     {
                         std::lock_guard<std::mutex> lock(shared_status.mtx);
@@ -714,9 +769,13 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
                         shared_status.snap.tmcc_locked = demod.is_tmcc_locked();
                         shared_status.snap.snr_db = demod.average_snr_db();
                         shared_status.snap.air_packets = total_air_packets;
-                        shared_status.snap.rs_corrected = demod.corrected_rs_packets();
-                        shared_status.snap.rs_dropped = demod.uncorrectable_rs_packets();
+                        shared_status.snap.rs_corrected = session_rs_corrected + demod.corrected_rs_packets();
+                        shared_status.snap.rs_dropped = session_rs_dropped + demod.uncorrectable_rs_packets();
+                        shared_status.snap.viterbi_drops = session_viterbi_drops + demod.viterbi_sync_drops();
                         shared_status.snap.drop_blocks = raw_queue->dropped_blocks();
+                        shared_status.snap.decoder_resets = dsp_metrics.decoder_resets;
+                        shared_status.snap.sequence_gaps = dsp_metrics.sequence_gaps;
+                        shared_status.snap.ts_packet_rate = current_ts_rate;
                         if (!s_name.empty()) {
                             shared_status.snap.service_name = s_name;
                         }
@@ -760,8 +819,8 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
         if (!metrics_csv_file.empty()) {
             csv_out.open(metrics_csv_file);
             if (csv_out.is_open()) {
-                csv_out << "timestamp_s,rssi_dbfs,peak_corr,ofdm_locked,tmcc_locked,snr_db,evm,"
-                        << "valid_ts_packets,rs_corrected,rs_dropped,spsc_drops,cfo_hz,sco_ppm,sync_state\n";
+                csv_out << "timestamp_s,elapsed_s,rssi_dbfs,peak_corr,ofdm_locked,tmcc_locked,snr_db,evm,"
+                        << "valid_ts_packets,ts_rate,rs_corrected,rs_dropped,viterbi_drops,spsc_drops,seq_gaps,resets,cfo_hz,sco_ppm,sync_state\n";
             }
         }
 
@@ -799,16 +858,21 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
 
                 if (csv_out.is_open()) {
                     csv_out << second_counter << ","
-                            << std::fixed << std::setprecision(2) << snap.rssi_dbfs << ","
+                            << std::fixed << std::setprecision(2) << elapsed_s << ","
+                            << snap.rssi_dbfs << ","
                             << snap.peak_corr << ","
                             << (snap.ofdm_locked ? 1 : 0) << ","
                             << (snap.tmcc_locked ? 1 : 0) << ","
                             << snap.snr_db << ","
                             << snap.evm << ","
                             << snap.air_packets << ","
+                            << std::fixed << std::setprecision(1) << snap.ts_packet_rate << ","
                             << snap.rs_corrected << ","
                             << snap.rs_dropped << ","
+                            << snap.viterbi_drops << ","
                             << snap.drop_blocks << ","
+                            << snap.sequence_gaps << ","
+                            << snap.decoder_resets << ","
                             << snap.cfo_hz << ","
                             << snap.sco_ppm << ","
                             << snap.sync_state << "\n";
@@ -822,7 +886,9 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
                               << "OFDM: " << (snap.ofdm_locked ? "LOCK" : "SYNC") << " (" << std::setprecision(2) << snap.peak_corr << ") | "
                               << "TMCC: " << (snap.tmcc_locked ? "LOCK" : "SYNC") << " | "
                               << "SNR: " << std::fixed << std::setprecision(1) << snap.snr_db << " dB | "
-                              << "TS: " << snap.air_packets << " pkts (RS: " << snap.rs_corrected << " corr / " << snap.rs_dropped << " drop) | "
+                              << "TS: " << snap.air_packets << " pkts (" << std::fixed << std::setprecision(0) << snap.ts_packet_rate << " p/s) | "
+                              << "RS: " << snap.rs_corrected << " corr / " << snap.rs_dropped << " drop | "
+                              << "Resets: " << snap.decoder_resets << " | "
                               << "Drop: " << snap.drop_blocks << " | State: " << snap.sync_state << "\n" << std::flush;
                 }
             }
@@ -972,8 +1038,10 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
                           << "OFDM: " << (snap.ofdm_locked ? "LOCK" : "SYNC") << " (" << std::setprecision(2) << snap.peak_corr << ") | "
                           << "TMCC: " << (snap.tmcc_locked ? "LOCK" : "SYNC") << " | "
                           << "SNR: " << std::fixed << std::setprecision(1) << snap.snr_db << " dB | "
-                          << "TS: " << snap.air_packets << " pkts (RS: " << snap.rs_corrected << " corr / " << snap.rs_dropped << " drop)"
-                          << " | Drop: " << snap.drop_blocks;
+                          << "TS: " << snap.air_packets << " pkts (" << std::fixed << std::setprecision(0) << snap.ts_packet_rate << " p/s) | "
+                          << "RS: " << snap.rs_corrected << " corr / " << snap.rs_dropped << " drop | "
+                          << "Resets: " << snap.decoder_resets << " | "
+                          << "Drop: " << snap.drop_blocks;
 
                 std::string display_name = !snap.service_name.empty() ? snap.service_name : ch_name;
                 if (!display_name.empty()) {

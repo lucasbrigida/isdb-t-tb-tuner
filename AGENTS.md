@@ -300,6 +300,19 @@ Durante a auditoria e desenvolvimento do decodificador contra a implementação 
   ```
   Isso puxa desvios de sintonia de até $\sim 120\text{ Hz}$ entregando os 2 pacotes TS válidos, e assim que o erro converge para a zona morta ($|ffo\_res| < 0.5\text{ Hz}$), o NCO é congelado em regime permanente, impedindo qualquer deriva cumulativa em transmissões urbanas sob multipercurso severo.
 
+### Erro 29: Lock Fantasma por Forçamento de `ofdm_locked`, Ausência de Watchdog de TMCC e Represamento USB na Fila Cheia
+- ❌ **O que estava errado:**
+  1. No `cmd_play.cpp`, a flag `ofdm_locked` era forçada a `true` sempre que `reception_started` fosse verdadeiro, mascarando desancoragens e perdas de sinal. Como a correlação do prefixo cíclico (CP) em ruído ou sinal degradado atinge ~0.98, o sincronizador permanecia em `Tracking [CP]`, o `unlock_counter` era zerado compulsoriamente e o receptor ficava travado em silêncio por minutos sem emitir pacotes TS e sem sinalizar perda para o usuário.
+  2. O demodulador não notificava o sincronizador quando o TMCC perdia paridade BCH (faltava `notify_frame_lost()`), mantendo `sp_tmcc_anchored_` eternamente ativo no sincronizador com offsets desatualizados de subportadoras (`ifo_bins_`).
+  3. No `reader_thread`, quando a fila SPSC enchia, o código dormia 200 µs sem ler do RTL-SDR e chamava `raw_queue->record_drop()`, gerando dezenas de drops falsos em poucos milissegundos e represando amostras no buffer de kernel, culminando em `LIBUSB_ERROR_IO -1` no encerramento.
+  4. Resets de recuperação transientes zeravam os contadores de Reed-Solomon e Viterbi, apagando o histórico de integridade da transmissão.
+- ✅ **Como é o correto (`cmd_play.cpp` / `sp_cir_sync.cpp` / `iofdm_synchronizer.h`):**
+  1. `ofdm_locked` reflete estritamente se o sincronizador está em `SyncState::Tracking`. A UI e o CSV expõem a taxa instantânea `ts_rate` em `(X p/s)`, resets do pipeline (`Resets: N`) e perdas de sincronismo de Viterbi.
+  2. Invocação de `sync->notify_frame_lost()` pelo demodulador assim que `!is_tmcc_locked()`, desancorando a fase e o IFO obsoletos.
+  3. Watchdog de TMCC/TS: se a recepção já iniciou e o receptor permanecer ~3 segundos contínuos sem nenhum TMCC lock válido, um reset coordenado é disparado para re-aquisição imediata da portadora.
+  4. Drenagem contínua USB para buffer de descarte dedicado (`discard_buf`) quando a fila SPSC estiver cheia, mantendo o fluxo USB contínuo a 2031746 S/s e contando 1 drop real por bloco descartado.
+  5. Acumulação no nível de sessão dos contadores de Reed-Solomon corrigidos/descartados e quedas do Viterbi.
+
 ---
 
 ## 🧪 4. Suíte de Testes e Validações Realizadas
@@ -372,6 +385,7 @@ Qualquer modelo de IA que receber tarefas neste projeto deve seguir rigorosament
 18. **NUNCA altere documentação para justificar simplificações indevidas em algoritmos:** A especificação e implementação de `SpCirSynchronizer` (port do `gr-isdbt`) com pilotos dispersos (SP) devem ser estritamente preservadas.
 19. **NUNCA crie testes de CTest dependentes de sockets de rede reais com bind local:** Validações de streaming devem testar a formação de datagramas e pacotes TS de forma determinística e em memória.
 20. **NUNCA deixe os badges de teste em README.md e README_en.md desatualizados em relação ao CTest:** Toda vez que um teste for criado, alterado, excluído ou executado, o agente de IA DEVE verificar a contagem de testes via ctest -N e o resultado da execução, e atualizar IMEDIATAMENTE os badges nos arquivos README.md e README_en.md (Tests-<passed>%2F<total>%20Passed-success.svg em caso de sucesso total ou critical em caso de falha).
+21. **NUNCA force `ofdm_locked = true` artificialmente, nunca pause o `reader_thread` sem drenar amostras USB em fila cheia e nunca omita o watchdog de TMCC/TS:** `ofdm_locked` deve refletir estritamente o estado `SyncState::Tracking`. Quando a fila SPSC enche, o leitor USB deve ler e descartar amostras no hardware para manter a taxa de 2031746 S/s sem represamento no kernel, e a ausência prolongada (>3s) de TMCC lock após o início da recepção deve acionar re-aquisição automática imediata.
 
 ---
 

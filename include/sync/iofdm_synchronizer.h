@@ -65,6 +65,11 @@ public:
     }
 
     /**
+     * @brief Notifica a perda de sincronismo de quadro TMCC pelo demodulador.
+     */
+    virtual void notify_frame_lost() noexcept {}
+
+    /**
      * @brief Informa se a fase dos pilotos dispersos esta ancorada no superframe TMCC.
      */
     virtual bool is_tmcc_anchored() const noexcept { return false; }
