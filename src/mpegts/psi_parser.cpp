@@ -17,7 +17,9 @@ static std::string clean_text_string(const uint8_t* data, size_t len) {
     return s.substr(first, (last - first + 1));
 }
 
-static std::chrono::system_clock::time_point parse_mjd_utc(uint16_t mjd, uint8_t bcd_h, uint8_t bcd_m, uint8_t bcd_s) {
+// ABNT NBR 15603-2 / ARIB STD-B10: o campo MJD+BCD do EIT carrega a hora LOCAL da emissora
+// (nao UTC), por isso a conversao usa mktime() em vez de timegm().
+static std::chrono::system_clock::time_point parse_mjd_local_time(uint16_t mjd, uint8_t bcd_h, uint8_t bcd_m, uint8_t bcd_s) {
     if (mjd == 0xFFFF || mjd == 0x0000) return {};
     int y_prime = static_cast<int>((static_cast<double>(mjd) - 15078.2) / 365.25);
     int m_prime = static_cast<int>((static_cast<double>(mjd) - 14956.1 - static_cast<int>(y_prime * 365.25)) / 30.6001);
@@ -485,7 +487,7 @@ void PsiParser::parse_eit(const uint8_t* payload, size_t len) {
         evt.duration_sec = duration_sec;
 
         if (mjd != 0xFFFF && mjd != 0x0000) {
-            evt.start_tp = parse_mjd_utc(mjd, bcd_h, bcd_m, bcd_s);
+            evt.start_tp = parse_mjd_local_time(mjd, bcd_h, bcd_m, bcd_s);
             if (evt.start_tp != std::chrono::system_clock::time_point{}) {
                 evt.end_tp = evt.start_tp + std::chrono::seconds(duration_sec);
                 evt.start_time_str = format_time_local(evt.start_tp, table_id >= 0x50);
