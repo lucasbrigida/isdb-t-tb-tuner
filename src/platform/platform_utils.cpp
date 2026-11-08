@@ -3,6 +3,7 @@
 #include <vector>
 #include <string>
 #include <filesystem>
+#include <volk/volk_cpu.h>
 #include <csignal>
 #include <thread>
 #include <chrono>
@@ -38,7 +39,8 @@ void print_cli_header() {
 " █   ▀▀▄ █  █ █▀▀▄ ▀▀▀▀   █    ▄▀     █   █▀▀▄ \n"
 "▀▀▀ ▀▀▀  ▀▀▀  ▀▀▀         ▀   ▀       ▀   ▀▀▀  \n"
 "Repositorio: https://github.com/lucasbrigida/isdb_t_isdb_tb_tuner_player\n"
-"Licenca:     GNU General Public License v3.0 (GPL-3.0)\n\n";
+"Licenca:     GNU General Public License v3.0 (GPL-3.0)\n"
+"Aceleracao:  SIMD " << volk_cpu.active_kernel_name() << " | FFTW3\n\n";
 }
 
 void stop_player() {
@@ -77,6 +79,7 @@ static BOOL WINAPI console_ctrl_handler(DWORD sig) {
 #endif
 
 void setup_platform() {
+    volk_cpu_init();
 #ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);

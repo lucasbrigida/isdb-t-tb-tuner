@@ -9,6 +9,7 @@
 #include "dsp/ofdm_sync.hpp"
 #include "dsp/oneseg_demodulator.hpp"
 #include "mpegts/psi_parser.hpp"
+#include "third_party/volk/volk_cpu.h"
 
 #include <iostream>
 #include <iomanip>
@@ -95,7 +96,8 @@ int cmd_scan(int start_ch, int end_ch, int dev_idx, int sdt_timeout_s) {
     std::cout << "========================================================\n";
     std::cout << "  VARREDURA PROFUNDA DE FREQUENCIAS ISDB-T / ISDB-Tb    \n";
     std::cout << "========================================================\n";
-    std::cout << "Faixa: Canais UHF " << start_ch << " a " << end_ch << " | Fs = " << sample_rate << " S/s\n\n";
+    std::cout << "Faixa: Canais UHF " << start_ch << " a " << end_ch << " | Fs = " << sample_rate << " S/s\n";
+    std::cout << "DSP/SIMD: " << volk_cpu.active_kernel_name() << "\n\n";
 
     rtlsdr_dev_t* dev = nullptr;
     if (rtlsdr_open(&dev, static_cast<uint32_t>(dev_idx)) != 0) {

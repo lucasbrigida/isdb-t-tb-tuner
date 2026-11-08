@@ -62,6 +62,8 @@ int main(int argc, char** argv) {
     std::string input_file;
     std::string output_ts_file;
     bool headless = false;
+    int duration_s = 0;
+    std::string metrics_csv_file;
 
     auto sc_play = app.add_subcommand("play", "Sintoniza um canal e transmite via UDP para o player");
     sc_play->add_option("-c,--channel", play_ch, "Numero do canal (ex: 14, 28, 30)");
@@ -84,6 +86,8 @@ int main(int argc, char** argv) {
     sc_play->add_option("-i,--input", input_file, "Arquivo de amostras IQ para reproducao offline (.cu8)");
     sc_play->add_option("--output-ts", output_ts_file, "Arquivo de destino para gravar o fluxo MPEG-TS (.ts)");
     sc_play->add_flag("--headless", headless, "Executa sem interface interativa para testes e benchmarks");
+    sc_play->add_option("--duration", duration_s, "Duracao maxima de execucao em segundos (padrao: 0 = continuo)");
+    sc_play->add_option("--metrics-csv", metrics_csv_file, "Caminho do arquivo CSV para telemetria segundo a segundo");
 
     app.require_subcommand(1); // Exige ao menos um subcomando
 
@@ -105,7 +109,8 @@ int main(int argc, char** argv) {
         }
         return isdbt::cmd_play(play_ch, play_name, udp_port, dev_idx, test_pattern,
                               tuner_gain, auto_player, verbose, ofdm_mode,
-                              input_file, output_ts_file, headless);
+                              input_file, output_ts_file, headless,
+                              duration_s, metrics_csv_file);
     }
 
     return 0;

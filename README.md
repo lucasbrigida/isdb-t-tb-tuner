@@ -6,7 +6,7 @@
   <img src="https://img.shields.io/badge/Hardware-RTL--SDR%20(RTL2832U)-red.svg" alt="RTL-SDR" />
   <img src="https://img.shields.io/badge/Platform-Windows%20(x64%20%7C%20x86)%20%7C%20Linux-brightgreen.svg" alt="Platforms" />
   <img src="https://img.shields.io/badge/Player-MPV%20Embedded-darkgreen.svg" alt="MPV Embedded" />
-  <img src="https://img.shields.io/badge/Tests-24%2F24%20Passed-success.svg" alt="CTest Passing" />
+  <img src="https://img.shields.io/badge/Tests-27%2F27%20Passed-success.svg" alt="CTest Passing" />
 </p>
 
 Receptor e decodificador digital completo de televisão aberta no padrão **ISDB-T / ISDB-Tb / SBTVD** (Brasil, Japão, Filipinas e América Latina) para dispositivos **RTL-SDR** (RTL2832U com tuners R820T/R828D/E4000). Desenvolvido em **C++ nativo de alta performance sem dependências do framework GNU Radio**, com fila de captura **SPSC lock-free** com detecção atômica de descontinuidades, **zero alocações no heap** no processamento de símbolos, **arquitetura dual de sincronismo OFDM** (sincronizador de Van de Beek padrão e port robusto do `gr-isdbt` com rastreamento ativo de timing, CFO/SCO e histerese de re-lock), equalização adaptativa **MMSE regularizada**, ponderação **CSI** sincronizada por linhas de retardo no decodificador Viterbi, multiplicação em $GF(2^8)$ em **$O(1)$** via tabela de 64 KB no Reed-Solomon, varredura inteligente de canais com identificação de nomes via **SDT**, **suporte nativo dual-architecture (64 bits x64 e 32 bits x86)** e **reprodutor MPV embutido com super-resolução e interpolação de movimento em tempo real**.
@@ -43,7 +43,7 @@ Confira abaixo o receptor em execução em seus diferentes modos operacionais. C
 - [🛠️ 2. Guia para Desenvolvedores (Compilação & Testes)](#️-2-guia-para-desenvolvedores-compilação--testes)
   - [2.1 Pré-requisitos & Toolchain Recomendado (w64devkit)](#21-pré-requisitos--toolchain-recomendado-w64devkit)
   - [2.2 Como Compilar Nativamente para 64 bits e 32 bits](#22-como-compilar-nativamente-para-64-bits-e-32-bits)
-  - [2.3 Suíte de Testes Determinísticos (CTest - 24/24 Testes Aprovados)](#23-suíte-de-testes-determinísticos-ctest---2424-testes-aprovados)
+  - [2.3 Suíte de Testes Determinísticos (CTest - 27/27 Testes Aprovados)](#23-suíte-de-testes-determinísticos-ctest---2727-testes-aprovados)
   - [2.4 Automação de Releases (`build_release.ps1`)](#24-automação-de-releases-build_releaseps1)
   - [2.5 Ferramentas de Diagnóstico, Benchmark e Amostras (`tools/`, `bench/`, `samples/`)](#25-ferramentas-de-diagnóstico-benchmark-e-amostras-tools-bench-samples)
   - [2.6 Mapa da Arquitetura do Código](#26-mapa-da-arquitetura-do-código)
@@ -198,7 +198,7 @@ No terminal do Windows com ambiente MinGW-w64 (ex: `w64devkit`):
 
 ```powershell
 # 1. Configurar o projeto com CMake para 64 bits e sincronizador robusto habilitado:
-cmake -S . -B build_x64 -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DTARGET_ARCH=x64 -DISDBT_ENABLE_GRISDBT_SYNC=ON
+cmake -S . -B build_x64 -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DTARGET_ARCH=x64 -DISDBT_ENABLE_SP_CIR_SYNC=ON
 
 # 2. Compilar executáveis e suíte de testes:
 cmake --build build_x64 -j
@@ -208,7 +208,7 @@ cmake --build build_x64 -j
 
 ```powershell
 # 1. Configurar o projeto com CMake para 32 bits com aceleração SSE2:
-cmake -S . -B build_x86 -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DTARGET_ARCH=x86 -DISDBT_ENABLE_GRISDBT_SYNC=ON
+cmake -S . -B build_x86 -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DTARGET_ARCH=x86 -DISDBT_ENABLE_SP_CIR_SYNC=ON
 
 # 2. Compilar executáveis e suíte de testes:
 cmake --build build_x86 -j
@@ -217,12 +217,12 @@ cmake --build build_x86 -j
 #### Opções de Compilação no CMake
 
 - **`-DTARGET_ARCH=x64` / `-DTARGET_ARCH=x86`** _(Padrão: `auto`)_: Define a arquitetura do binário; GCC/Clang recebem `-m64` ou `-m32 -msse2 -mfpmath=sse`, enquanto MSVC deve ser configurado com `-A x64` ou `-A Win32`.
-- **`-DISDBT_ENABLE_GRISDBT_SYNC=ON`** _(Padrão: OFF)_: Habilita o algoritmo de sincronização robusto do `gr-isdbt` (`--ofdm 2` ou `--ofdm=2`).
+- **`-DISDBT_ENABLE_SP_CIR_SYNC=ON`** _(Padrão: OFF)_: Habilita o algoritmo de sincronização robusto SP-CIR de 2 estágios (`--ofdm 2` ou `--ofdm=2`), fundamentado em Speth & Meyr (1999/2001) e `gr-isdbt` (Larroca et al., 2014). Compatível também com a flag legada `-DISDBT_ENABLE_GRISDBT_SYNC=ON`.
 - **`-DCMAKE_BUILD_TYPE=Release`**: Ativa otimização `-O3 -DNDEBUG` (GCC/Clang) ou `/O2 /DNDEBUG` (MSVC), desativando assertions em runtime.
 - **`-DISDBT_ENABLE_FAST_MATH=ON`** _(Padrão: OFF)_: Adiciona `-ffast-math` ou `/fp:fast` para acelerar vetorizações AVX2/FMA no cálculo de métricas e NCO.
 - **Interprocedural Optimization (IPO / LTO)**: Detectado e habilitado automaticamente para builds de Release caso suportado pelo compilador (`CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON`).
 
-### 2.3 Suíte de Testes Determinísticos (CTest - 24/24 Testes Aprovados)
+### 2.3 Suíte de Testes Determinísticos (CTest - 27/27 Testes Aprovados)
 
 O projeto conta com testes unitários matemáticos que rodam em frações de segundo e não dependem de rádio físico conectado:
 
@@ -231,7 +231,7 @@ O projeto conta com testes unitários matemáticos que rodam em frações de seg
 ctest --test-dir build_x64 --output-on-failure -E BenchSync
 ```
 
-Os 24 testes determinísticos cobrem:
+Os 27 testes determinísticos cobrem:
 
 1. `ReedSolomon`: Correção de até 8 erros por pacote, detecção de falha com >8 erros e multiplicação direta em $GF(2^8)$ em $O(1)$.
 2. `Descrambler`: LFSR de dispersão de energia de 15 bits do ISDB-T com avanço contínuo sobre o sync byte `0x47`.
@@ -244,19 +244,23 @@ Os 24 testes determinísticos cobrem:
 9. `DelayLine`: Linhas de atraso estáticas `FixedDelayLine` e dinâmicas contíguas `DynamicDelayLine` com zero alocações no heap.
 10. `ResetRecovery`: Recuperação determinística do pipeline DSP e estabilização de NCO após gaps de sequência e resets coordenados.
 11. `SyncStateAndCsi`: Máquina de estados tripartite de sincronismo OFDM (`Acquisition` $\to$ `Tracking` $\to$ `LostLock`) e escala de ponderação CSI centrada em 128.
-12. `FrequencyPlan`: Síntese de frequências e cálculo de portadoras para todos os canais UHF 14 a 69.
-13. `ChannelManager`: Operações em memória e persistência JSON estritamente local e portátil (`channels.json`).
-14. `PsiParser`: Parsers de MPEG-TS PAT, PMT, SDT e EIT com resolução de emissoras, suporte a múltiplas seções empacotadas no mesmo payload TS e síntese de PAT de fallback.
-15. `AribB24`: Decodificação nativa de texto ARIB STD-B24 (Kanji JIS X 0208, Hiragana, Katakana, Alfanumérico, quebras de linha APR, símbolos Gaiji) e fallback para Latin-1 e UTF-8.
-16. `EpgManager`: Persistência em `epg.json`, descarte de eventos passados, ancoragem na Tabela 0x4E (Present/Following) e reavaliação temporal para `--view`.
-17. `UdpStreamer`: Empacotamento determinístico de datagramas UDP de IPTV de 1316 bytes (7 pacotes TS de 188B) sem fragmentação IP.
-18. `CliOfdmFlag`: Validação de parsing de linha de comando da flag `--ofdm` (`--ofdm 1`, `--ofdm 2`, `--ofdm=1`, `--ofdm=2`), rejeição estrita de valores inválidos e descarte silencioso fora de `play`.
-19. `SyncRegressionScan`: Garantia de não-regressão do scanner, operando estritamente sob Van de Beek baseline.
-20. `BenchAsciiTable`: Formatador de tabelas ASCII de 113 colunas com codepoints UTF-8 de largura visual correta.
-21. `RegressionOfdm1`: Teste de regressão do modo Van de Beek baseline ancorado na amostra de referência de TV aberta.
-22. `SyncGrisdbtRobust`: Validação do sincronizador robusto baseado em CP (timing, estimativa inicial de CFO, SCO e FSM de re-lock).
-23. `RegressionOfdm2`: Teste de regressão do sincronizador robusto ancorado na amostra de referência de TV aberta.
-24. `BenchSync`: Benchmark comparativo de throughput DSP e performance de pacotes TS.
+12. `BitDeinterleaverQam16`: Desentrelaçador de bits para modulação 16QAM com delays Forney $0, 40, 80, 120$ símbolos e CSI soft-bits.
+13. `VolkCpuFeatures`: Detecção dinâmica de extensões SIMD da CPU (AVX2, AVX, SSE2).
+14. `CliSimdIntegration`: Despacho e vetorização SIMD VOLK no cálculo contínuo de desrotação e correlação.
+15. `FrequencyPlan`: Síntese de frequências e cálculo de portadoras para todos os canais UHF 14 a 69.
+16. `ChannelManager`: Operações em memória e persistência JSON estritamente local e portátil (`channels.json`).
+17. `PsiParser`: Parsers de MPEG-TS PAT, PMT, SDT e EIT com resolução de emissoras, suporte a múltiplas seções empacotadas no mesmo payload TS e síntese de PAT de fallback.
+18. `AribB24`: Decodificação nativa de texto ARIB STD-B24 (Kanji JIS X 0208, Hiragana, Katakana, Alfanumérico, quebras de linha APR, símbolos Gaiji) e fallback para Latin-1 e UTF-8.
+19. `EpgManager`: Persistência em `epg.json`, descarte de eventos passados, ancoragem na Tabela 0x4E (Present/Following) e reavaliação temporal para `--view`.
+20. `UdpStreamer`: Empacotamento determinístico de datagramas UDP de IPTV de 1316 bytes (7 pacotes TS de 188B) sem fragmentação IP.
+21. `CliOfdmFlag`: Validação de parsing de linha de comando da flag `--ofdm` (`--ofdm 1`, `--ofdm 2`, `--ofdm=1`, `--ofdm=2`), rejeição estrita de valores inválidos e descarte silencioso fora de `play`.
+22. `SyncRegressionScan`: Garantia de não-regressão do scanner, operando estritamente sob Van de Beek baseline.
+23. `BenchAsciiTable`: Formatador de tabelas ASCII de 113 colunas com codepoints UTF-8 de largura visual correta.
+24. `RegressionOfdm1`: Teste de regressão do modo Van de Beek baseline ancorado na amostra de referência de TV aberta.
+25. `SyncSpCir`: Validação matemática e funcional do sincronizador canônico SP-CIR (timing fino por IDFT de 64 pontos com PAPR $\ge 12$, First Arrival Path, FFO com zona morta $\pm 0.5\text{ Hz}$ e SCO).
+26. `SyncGrisdbtRobust`: Validação do alias de compatibilidade `RobustGRISDBTSync` sobre o sincronizador SP-CIR.
+27. `RegressionOfdm2`: Teste de regressão determinístico do modo SP-CIR sobre captura real de RF (`ch24_10s_iq.cu8`), assegurando 2 pacotes válidos.
+(Além do benchmark comparativo de performance DSP `bench_sync`).
 
 ### 2.4 Automação de Releases (`build_release.ps1`)
 
@@ -307,7 +311,7 @@ isdb_t_isdb_tb_tuner_player/
 ├── AGENTS.md                   # Invariantes arquiteturais estritas para agentes de IA e desenvolvedores
 ├── PROJECT.md                  # Especificações técnicas e mapa de roadmap
 ├── include/
-│   ├── sync/                   # Interface IOFDMSynchronizer, VanDeBeekSync, RobustGRISDBTSync, SyncFactory
+│   ├── sync/                   # Interface IOFDMSynchronizer, VanDeBeekSync, SpCirSynchronizer, SyncFactory
 │   ├── dsp/                    # DSP de Camada Física (OfdmSync, OneSegDemod, Viterbi, RS, etc.)
 │   │   ├── constants.hpp       # Constantes fundamentais do ISDB-T (Fs = 2031746 S/s, neutro soft 128)
 │   │   ├── delay_line.hpp      # FixedDelayLine e DynamicDelayLine (zero alocações no heap)
@@ -319,7 +323,7 @@ isdb_t_isdb_tb_tuner_player/
 │   └── third_party/            # CLI11, nlohmann/json
 ├── src/
 │   ├── main.cpp                # Ponto de entrada CLI, leitor USB SPSC lock-free, Job Object do MPV
-│   ├── sync/                   # Implementações de sincronizadores (VanDeBeekSync, RobustGRISDBTSync)
+│   ├── sync/                   # Implementações de sincronizadores (VanDeBeekSync, SpCirSynchronizer)
 │   └── ...                     # Implementações C++ de DSP, MPEG-TS e streaming
 ├── bench/                      # Ferramenta de benchmark bench_sync e gerador de relatórios
 ├── samples/                    # Amostras de RF de referência (Canal 18, 2031746 S/s, Git LFS)
@@ -352,7 +356,7 @@ isdb_t_isdb_tb_tuner_player/
 - **Taxa de Amostragem Fundamental Exata ($2031746\text{ S/s}$):** Submúltiplo exato de $1/4$ da taxa de chip do ISDB-T $F_{\text{base}} = 512/63\text{ MHz} \approx 8.126984\text{ MHz}$, garantindo $>90\%$ de correlação no prefixo cíclico e caixas de FFT perfeitamente alinhadas sem filtros de reamostragem racional.
 - **Arquitetura Dual de Sincronismo OFDM:**
   - _Modo 1 (`VanDeBeekSync`, Baseline):_ Autocorrelação por prefixo cíclico com estimação de desvio fracionário de frequência (FFO) e máquina de estados tripartite (`Acquisition`, `Tracking` $\pm 4$, `LostLock`).
-  - _Modo 2 (`RobustGRISDBTSync`, gr-isdbt port):_ Coarse CP acquisition, active Scattered Pilot (SP) timing refinement, integer CFO estimation via TMCC, fractional CFO via SP, sampling clock offset (SCO) phase accumulation, and 3-symbol lock hysteresis.
+  - _Modo 2 (`SpCirSynchronizer`, Speth & Meyr / gr-isdbt):_ Sincronizador de 2 estágios (aquisição inicial por CP e rastreamento fino por SP-CIR com IDFT de 64 pontos, First Arrival Path, CFO estável sem deriva sob multipercurso urbano e FSM com histerese).
 - **Fila de Captura USB SPSC Lock-Free (`SpscCaptureQueue`):** Ring buffer estático de 64 slots com semântica de memória acquire-release, contadores atômicos de drops e sinalização explícita de descontinuidades de sequência com resets coordenados de NCO.
 - **Zero Alocações Dinâmicas no Caminho Crítico:** Eliminação completa de `std::deque` e `std::vector::erase` nos desentrelaçadores Forney, de bits e de tempo, substituídos por `FixedDelayLine`, `DynamicDelayLine` e avanço por ponteiro deslizante (`viterbi_stream_offset_`).
 - **Equalização Adaptativa MMSE Regularizada:** Substitui o Zero-Forcing tradicional por MMSE adaptativo ($\sigma^2 = \max(10^{-5}, 0.05 \cdot P_{\text{avg}})$), evitando amplificação de ruído em vales profundos de desvanecimento.

@@ -79,12 +79,17 @@ public:
     uint64_t rs_errors_corrected() const { return rs_corrected_; }
     uint64_t corrected_rs_packets() const { return rs_corrected_packets_; }
     uint64_t uncorrectable_rs_packets() const { return rs_uncorrectable_packets_; }
+    uint64_t viterbi_sync_drops() const noexcept { return viterbi_sync_drops_; }
     double average_evm() const { return average_evm_; }
     double average_snr_db() const { return average_snr_db_; }
     double latest_evm() const { return latest_evm_; }
     double latest_snr_db() const { return latest_snr_db_; }
     bool tmcc_locked() const { return tmcc_locked_; }
     bool is_tmcc_locked() const { return tmcc_locked_; }
+    bool is_tmcc_frame_begin() const noexcept { return frame_begin_pending_; }
+    int tmcc_symbol_idx_in_frame() const noexcept { return since_last_tmcc_; }
+    int sp_phase() const noexcept { return static_cast<int>(sym_mod4_ & 3); }
+    bool is_sp_phase_locked() const noexcept { return sym_phase_locked_ && ifo_locked_; }
     int integer_freq_offset_bins() const { return ifo_bins_; }
     int get_ifo() const { return ifo_bins_; }
 
@@ -103,6 +108,7 @@ private:
     void init_time_deinterleaver(int I);
     void init_prbs_frame_masks();
     void init_carrier_layouts();
+    void configure_bit_deinterleaver(CarrierModulation mod);
     IfoSearchResult search_ifo(int base_segment_offset,
                                int min_delta,
                                int max_delta,
@@ -119,6 +125,7 @@ private:
     uint64_t rs_corrected_{0};
     uint64_t rs_corrected_packets_{0};
     uint64_t rs_uncorrectable_packets_{0};
+    uint64_t viterbi_sync_drops_{0};
     double latest_evm_{0.0};
     double average_evm_{0.0};
     double latest_snr_db_{0.0};
@@ -171,7 +178,7 @@ private:
     std::array<std::array<PilotPair, 35>, 4> ifo_pilot_pairs_{};
 
     // Buffers de trabalho pré-alocados (zero alocação no loop quente)
-    std::array<std::complex<float>, 433> seg_carriers_{};
+    std::array<std::complex<float>, constants::ACTIVE_CARRIERS> seg_carriers_{};
     std::array<std::complex<float>, 432> channel_h_{};
     std::array<std::complex<float>, 432> equalized_{};
     std::array<float, 432> csi_weight_{};

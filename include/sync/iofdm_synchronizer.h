@@ -35,6 +35,38 @@ public:
      * @brief Reinicia o estado interno, NCO e filtros de sincronismo.
      */
     virtual void reset() noexcept = 0;
+
+    /**
+     * @brief Estimativa de Carrier Frequency Offset (CFO) em Hz (DIP).
+     */
+    virtual float estimated_cfo_hz() const noexcept { return 0.0f; }
+
+    /**
+     * @brief Estimativa de Sampling Clock Offset (SCO) em ppm (DIP).
+     */
+    virtual float estimated_sco_ppm() const noexcept { return 0.0f; }
+
+    /**
+     * @brief Representacao textual detalhada do estado da FSM interna.
+     */
+    virtual const char* detailed_state_str() const noexcept {
+        return (state() == SyncState::Tracking) ? "Tracking" : "Acquisition";
+    }
+
+    /**
+     * @brief Notifica a deteccao confirmada de sincronismo de quadro TMCC (DIP).
+     * @param symbol_idx_in_frame Indice exato do simbolo dentro do quadro de 204 simbolos (0..203).
+     * @param ifo_bins Desvio de frequencia inteiro (IFO) em subportadoras detectado pelo demodulador.
+     */
+    virtual void notify_frame_sync(int symbol_idx_in_frame, int ifo_bins = 0) noexcept {
+        (void)symbol_idx_in_frame;
+        (void)ifo_bins;
+    }
+
+    /**
+     * @brief Informa se a fase dos pilotos dispersos esta ancorada no superframe TMCC.
+     */
+    virtual bool is_tmcc_anchored() const noexcept { return false; }
 };
 
 } // namespace isdbt

@@ -23,6 +23,7 @@ int cmd_epg(int channel_number, const std::string& name_query, int dev_idx,
 int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_port,
              int dev_idx, bool test_pattern = false, double gain_db = 28.0, bool auto_player = false,
              bool verbose = false, int ofdm_mode = 1, const std::string& input_file = "",
-             const std::string& output_ts_file = "", bool headless = false);
+             const std::string& output_ts_file = "", bool headless = false,
+             int duration_s = 0, const std::string& metrics_csv_file = "");
 
 } // namespace isdbt

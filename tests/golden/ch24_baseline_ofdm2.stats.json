@@ -1,9 +1,9 @@
 {
-  "average_evm": 0.5843766923098054,
-  "average_snr_db": 4.670223391889043,
-  "corrected_rs_packets": 1,
-  "elapsed_seconds": 3.857641,
-  "locked_symbols": 8816,
+  "average_evm": 0.573224029336071,
+  "average_snr_db": 4.838455789882474,
+  "corrected_rs_packets": 2,
+  "elapsed_seconds": 4.359397,
+  "locked_symbols": 8817,
   "locked_time_ratio": 1.0,
   "ofdm_mode": 2,
   "resync_count": 0,
@@ -12,8 +12,9 @@
   "state_transitions": 1,
   "sync_loss_count": 0,
   "total_blocks": 620,
-  "total_symbols": 8816,
-  "ts_sha256": "91efb155702e39ff7036f3f8931432f36905a2b7ac8ac4cbdadd5f3069fb1db2",
-  "uncorrectable_rs_packets": 1910,
-  "valid_ts_packets": 1
+  "total_symbols": 8817,
+  "ts_sha256": "bb5f8990202b6687bad0671495b058a1a8f7bf2e340c75b485769e8fabbd306a",
+  "uncorrectable_rs_packets": 2333,
+  "valid_ts_packets": 2,
+  "viterbi_sync_drops": 192
 }

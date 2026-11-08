@@ -1,4 +1,4 @@
-﻿#include <iostream>
+#include <iostream>
 #include <fstream>
 #include <vector>
 #include <complex>
@@ -10,7 +10,7 @@
 #include <filesystem>
 #include "dsp/constants.hpp"
 #include "sync/sync_factory.h"
-#include "sync/robust_grisdbt_sync.h"
+#include "sync/sp_cir_sync.h"
 #include "dsp/oneseg_demodulator.hpp"
 #include "mpegts/psi_parser.hpp"
 #include "third_party/json.hpp"
@@ -198,6 +198,9 @@ int main(int argc, char** argv) {
             total_symbols++;
             if (locked) locked_symbols++;
         }
+        if (!useful_symbols.empty() && demod.is_tmcc_locked()) {
+            robust_sync.notify_frame_sync((demod.sp_phase() + 1) & 3, demod.integer_freq_offset_bins());
+        }
 
         for (const auto& pkt : decoded_pkts) {
             psi.parse_packet(pkt.data());
@@ -231,6 +234,7 @@ int main(int argc, char** argv) {
     stats_json["valid_ts_packets"] = valid_pkts;
     stats_json["corrected_rs_packets"] = demod.corrected_rs_packets();
     stats_json["uncorrectable_rs_packets"] = demod.uncorrectable_rs_packets();
+    stats_json["viterbi_sync_drops"] = demod.viterbi_sync_drops();
     stats_json["average_evm"] = demod.average_evm();
     stats_json["average_snr_db"] = demod.average_snr_db();
     stats_json["elapsed_seconds"] = elapsed_s;
@@ -263,7 +267,8 @@ int main(int argc, char** argv) {
              "locked_time_ratio",
              "sync_loss_count", "resync_count", "resync_recovered",
              "resync_fallback", "state_transitions", "valid_ts_packets",
-             "corrected_rs_packets", "uncorrectable_rs_packets"}) {
+             "corrected_rs_packets", "uncorrectable_rs_packets",
+             "viterbi_sync_drops"}) {
         if (!expected_stats.contains(key) || !stats_json.contains(key) ||
             expected_stats[key] != stats_json[key]) {
             std::cerr << "[FALHA] Estatistica golden divergente: " << key << "\n";

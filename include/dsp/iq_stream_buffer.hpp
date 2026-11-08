@@ -48,6 +48,10 @@ public:
         return buf_[offset_ + index];
     }
 
+    std::complex<float>& operator[](std::size_t index) noexcept {
+        return buf_[offset_ + index];
+    }
+
     const std::complex<float>* data_at(std::size_t index) const noexcept {
         return buf_.data() + offset_ + index;
     }

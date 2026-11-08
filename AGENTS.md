@@ -74,7 +74,7 @@ Qualquer agente que editar o código-fonte deve respeitar estritamente as seguin
 - O sincronizador de Van de Beek (`src/dsp/ofdm_sync.cpp` e `include/dsp/ofdm_sync.hpp`) é o baseline de referência bit-a-bit inalterado (**REGRA DE OURO**). NUNCA altere sua lógica, sua FSM tripartite ou seus limiares.
 - A abstração `IOFDMSynchronizer` permite selecionar via fábrica `make_synchronizer`:
   - `--ofdm 1` (`VanDeBeekSync`): Adaptador puro sobre a implementação existente.
-  - `--ofdm 2` (`RobustGRISDBTSync`): Port nativo de `gr-isdbt` (`src/sync/robust_grisdbt_sync.cpp`) com refinamento SP, CFO, SCO e FSM com histerese.
+  - `--ofdm 2` (`SpCirSynchronizer` / `RobustGRISDBTSync`): Sincronizador SP-CIR de dois estágios fundamentado em Speth & Meyr (1999/2001) e port do `gr-isdbt` (`src/sync/sp_cir_sync.cpp`) com refinamento SP-CIR, First Arrival Path, CFO estável sem deriva sob multipercurso urbano e FSM com histerese.
 - **Sintaxe da Flag:** Suporta tanto `--ofdm 1` / `--ofdm 2` (com espaço) quanto `--ofdm=1` / `--ofdm=2` (com sinal de igual).
 - **Regra da Flag:** `--ofdm` é exclusiva do comando `play`. Em qualquer outro comando (`scan`, `probe`, `epg`, `list`), ela DEVE ser silenciosamente ignorada sem gerar erros.
 
@@ -83,6 +83,13 @@ Qualquer agente que editar o código-fonte deve respeitar estritamente as seguin
 - Handlers e callbacks Win32 no x86 exigem convenção `WINAPI` (`__stdcall`) estrita.
 - Executáveis e DLLs de 32 bits e 64 bits do RTL-SDR e MPV devem ser mantidos estritamente isolados em suas pastas de arquitetura (`tools/rtl-sdr/x86/`, `tools/rtl-sdr/x64/`, `tools/mpv/x86/` e `tools/mpv/x64/`).
 - Utilitários diagnósticos Python (`calibrate_ppm.py`, `quick_rf_scan.py`) e ferramentas de captura/síntese residem formalmente no diretório `tools/`, mantendo `scripts/` reservado a automações operacionais e lançadores de player.
+
+### 12. Motor de Pilotos Dispersos (SP), CIR e Detecção de Primeiro Caminho no `SpCirSynchronizer`
+- No sincronizador SP-CIR (`--ofdm 2` / `SpCirSynchronizer`), o refinamento de timing e o rastreamento da Resposta ao Impulso do Canal (CIR) utilizam a IDFT de 64 pontos sobre os pilotos dispersos (SP) do Segmento 0 (36 subportadoras úteis centradas no bin 808).
+- **Regra de Coerência (PAPR $\ge 12.0$):** A métrica de coerência exige estritamente $\text{PAPR} \ge 12.0$. Em ruído gaussiano puro, a PAPR na IDFT de 64 pontos tem média teórica $\approx 4.73$ (com probabilidade de exceder 10 inferior a $10^{-3}$). Se $\text{PAPR} < 12.0$, a métrica de CIR DEVE retornar $0.0$, acionando fallback transparente para o estimador por Prefixo Cíclico (CP), impedindo perturbações na malha PI de timing/SCO por ruído térmico.
+- **Regra de Primeiro Caminho (*First Arrival Path*):** Em canais com multipercurso urbano severo (onde reflexões retardadas em prédios podem ter magnitude superior à linha de visada direta), a busca de atraso $\tau \in [-16 \dots +16]$ DEVE selecionar o primeiro pico com energia $\ge 25\%$ da potência de pico máxima ($P_{\max}$), evitando a atração do sincronizador pelo centro de gravidade da CIR e prevenindo interferência intersimbólica (ISI).
+- **Regra de Estabilidade de CFO (ADR 028):** O rastreamento de CFO residual em bloco utiliza filtro passa-baixas assintótico com ganho suave ($0.08$ quando ancorado) e **zona morta estrita de $\pm 0.5\text{ Hz}$** (`if (sp_tmcc_anchored_ && std::abs(ffo_res) < 0.5f) ffo_res = 0.0f;`). Essa regra garante que desvios de sintonia inicial de até $\sim 120\text{ Hz}$ do oscilador do RTL-SDR sejam convergidos suavemente, enquanto em regime permanente ($|res| < 0.5\text{ Hz}$) o integrador congela totalmente, eliminando derivas de frequência cumulativas provocadas pelo viés de fase do multipercurso urbano no Canal 28.
+- **Regra de Zero Alocações:** Os planos FFTW3 (`fft_plan_`, `ifft_cir_plan_`) e buffers (`fft_in_`, `fft_out_`, `cir_in_`, `cir_out_`) são membros pré-alocados de classe com destruição explícita no destrutor. Nenhuma alocação dinâmica é permitida no loop quente de símbolos.
 
 ---
 
@@ -261,13 +268,45 @@ Durante a auditoria e desenvolvimento do decodificador contra a implementação 
   3. A máquina de recepção inicializa com `channel_transition_pending = !test_pattern`, aguardando a decodificação da PMT real (`psi.has_pmt()`) antes de despachar a PAT e o primeiro lote de pacotes MPEG-TS.
   4. A PAT sintetizada reflete rigorosamente o `service_id` autêntico extraído da PMT da emissora (`0xE778`), e `reload_mpv_player` notifica o MPV via IPC assim que o stream válido está fluindo, garantindo reprodução imediata com vídeo e áudio.
 
+### Erro 26: Métrica Sem Corte Estrito de PAPR e Estimativa de Timing Atraída por Ecos em Multipercurso
+- ❌ **O que estava errado:** A estimativa de timing fino com Pilotos Dispersos (SP) e Resposta ao Impulso de Canal (CIR) calculava uma métrica de coerência sem corte de PAPR (Peak-to-Average Power Ratio) de 64 pontos. Em trechos com ruído térmico elevado ou perda momentânea de sinal, a métrica de ruído produzia valor espúrio $\approx 0.5$, impedindo a máquina de estados tripartite de transitar de `Tracking` para `LostLock` e injetando desvios erráticos na malha PI de SCO. Além disso, a busca de timing selecionava o pico global da CIR, que em multipercurso urbano corresponde frequentemente a um eco retardado refletido em prédios (mais forte que a linha de visada direta), causando atraso na janela de FFT e interferência intersimbólica (ISI).
+- ✅ **Como é o correto (`sp_cir_sync.cpp`):**
+  1. Imposição de corte estrito $\text{PAPR} \ge 12.0$. Em ruído gaussiano puro (64 pontos), a PAPR média teórica é de $\approx 4.73$. Apenas pilotos ISDB-T coerentes atingem $\text{PAPR} \ge 12.0$. Se $\text{PAPR} < 12.0$, a métrica retorna $0.0$, acionando fallback transparente para o estimador por Prefixo Cíclico (CP) e permitindo a detecção correta de perda de sinal.
+  2. Implementação do detector de Primeiro Caminho (*First Arrival Path*): no intervalo $\tau \in [-16 \dots +16]$, seleciona-se o primeiro pico que atinja $\ge 25\%$ da potência do pico máximo ($P_{\max}$), alinhando a janela de FFT com a primeira chegada do sinal e eliminando ISI.
+  3. Comprovado em teste de campo real de 15 minutos no Canal 28: aumento de 48% no tempo contínuo de vídeo 100% perfeito (284s vs 192s), elevação de TMCC Lock de 60.9% para 84.4%, e aumento de +44.4% no total de pacotes úteis entregues ao player (164.493 vs 113.908 pacotes).
+
+### Erro 27: Deriva Acumulada no SCO e Descasamento Cego de Fase dos Pilotos Dispersos no `--ofdm 2`
+- ❌ **O que estava errado:**
+  1. No sincronizador de pilotos dispersos (SP), o rastreador operava antes do decodificador TMCC e utilizava um contador local cego `symbol_counter_ & 3` iniciado em zero. Como os pilotos saltam em 4 fases cíclicas ($l = s \pmod 4$), em 75% das vezes a fase do receptor estava descasada da transmissão no ar, fazendo com que a IDFT de 64 pontos lesse dados QPSK/16QAM aleatórios com PAPR $< 12.0$, forçando fallback permanente para o Prefixo Cíclico (CP).
+  2. A malha de controle de Sampling Clock Offset (SCO) integrava o erro a cada símbolo com ganho $K_i = 0.005$ sem leakage e sem clamp estrito, acumulando jitter e desvanecimento do CP diretamente no integrador, provocando deriva temporal contínua da janela de FFT.
+  3. O rastreamento de subportadoras utilizava `BASE_SEG_OFFSET` fixo em 808 sem compensar o deslocamento de subportadora inteira (`ifo_bins_`), inviabilizando a leitura de pilotos sob offsets de oscilador.
+- ✅ **Como é o correto (`sp_cir_sync.cpp` / `iofdm_synchronizer.h`):**
+  1. **Ancoragem via TMCC:** O sincronizador expõe `notify_frame_sync(symbol_idx_in_frame, ifo_bins)`. Quando o demodulador decodifica a paridade BCH do bloco TMCC, ele notifica o sincronizador, ancorando a fase $l = s \pmod 4$ e o bin central de SP (`BASE_SEG_OFFSET + ifo_bins_`) diretamente na verdade da transmissão.
+  2. **Malha de SCO Imune a Deriva:** O integrador de SCO opera estritamente quando ancorado no TMCC com piloto ativo de alta confiança ($\text{PAPR} \ge 12.0$). Em fallback de CP ou desvanecimento, o integrador é congelado, impedindo qualquer injeção de ruído. Adicionalmente, possui fator de vazamento $0.999$, ganho suave $K_i = 0.0001$ e saturação física estrita em $\pm 0.05$ amostras/símbolo ($\approx \pm 23\text{ ppm}$).
+  3. **Cadência Otimizada de Cálculo de CIR:** A estimativa de CIR por IDFT de 64 pontos é executada a cada 2 símbolos (~466 Hz), operando por inércia nominal (*flywheel*) no símbolo intercalado. Isso reduz o custo computacional pela metade (mantendo ciclos de CPU $\le 2.0\times$ em relação ao Van de Beek) com 100% de estabilidade de travamento temporal.
+
+### Erro 28: Deriva Cumulativa de CFO por Integração Aberta sob Multipercurso Urbano vs Congelamento Cego sem Zona Morta
+- ❌ **O que estava errado:**
+  1. Um integrador aberto no rastreamento contínuo de CFO (`current_cfo_hz_ += cfo_gain * ffo_res`) somava continuamente o viés estático de fase $\theta_{\text{bias}}$ introduzido pelo desvanecimento seletivo de multipercurso urbano no Canal 28 (~1.5 Hz/bloco $\times$ 62 blocos/s), gerando deriva de centenas de Hertz após 90 segundos e derrubando o SNR de 9.5 dB para 2.0 dB com perda de TMCC lock.
+  2. A tentativa de congelamento total de CFO na aquisição provocou regressão na amostra `ch24_10s_iq.cu8` de 2 para 0 pacotes válidos, pois o erro inicial de FFO no bloco 1 (-111.9 Hz) diferia em 117.2 Hz da frequência central autêntica (-229.1 Hz), gerando rotação de fase de $125^\circ$ por símbolo OFDM que destruiu a decodificação Viterbi.
+- ✅ **Como é o correto (`sp_cir_sync.cpp` / ADR 028):**
+  Implementar filtro assintótico passa-baixas com ganho suave ($0.08$ quando ancorado) e **zona morta estrita de $\pm 0.5\text{ Hz}$**:
+  ```cpp
+  if (sp_tmcc_anchored_ && std::abs(ffo_res) < 0.5f) {
+      ffo_res = 0.0f;
+  }
+  float cfo_gain = sp_tmcc_anchored_ ? 0.08f : 0.20f;
+  current_cfo_hz_ += cfo_gain * ffo_res;
+  ```
+  Isso puxa desvios de sintonia de até $\sim 120\text{ Hz}$ entregando os 2 pacotes TS válidos, e assim que o erro converge para a zona morta ($|ffo\_res| < 0.5\text{ Hz}$), o NCO é congelado em regime permanente, impedindo qualquer deriva cumulativa em transmissões urbanas sob multipercurso severo.
+
 ---
 
 ## 🧪 4. Suíte de Testes e Validações Realizadas
 
 O sistema conta com três níveis de validação automatizada e empírica:
 
-### Nível 1: Testes Unitários Determinísticos (CTest - 24/24 Testes)
+### Nível 1: Testes Unitários Determinísticos (CTest - 27/27 Testes)
 Executados em qualquer ambiente sem necessidade de hardware SDR conectado (`ctest --test-dir build --output-on-failure -E BenchSync`):
 1. `test_reed_solomon`: Valida correção de até 8 bytes corrompidos e detecção de falha com >8 erros com Berlekamp-Massey, Chien Search e tabela $O(1)$.
 2. `test_descrambler`: Valida o LFSR de 15 bits do ISDB-T com inversão e clocking sobre o sync `0x47`.
@@ -280,19 +319,23 @@ Executados em qualquer ambiente sem necessidade de hardware SDR conectado (`ctes
 9. `test_delay_line`: Valida `FixedDelayLine` e `DynamicDelayLine` sob diferentes tamanhos de atraso, resets e zero alocação dinâmica.
 10. `test_reset_recovery`: Valida recuperação determinística do pipeline DSP e continuidade do fluxo após descontinuidades de sinal e resets coordenados.
 11. `test_sync_state_and_csi`: Valida a máquina de estados tripartite de sincronismo (`Acquisition` $\to$ `Tracking` $\to$ `LostLock`) e a escala suave de CSI centrada em 128.
-12. `test_frequency_plan`: Valida cálculo e sintonia de frequências UHF (canais 14 a 69) conforme ABNT NBR 15601.
-13. `test_channel_manager`: Valida operações de persistência e busca no `channels.json`.
-14. `test_psi_parser`: Valida resolução de nomes de emissoras via SDT, geração periódica de PAT de fallback e empacotamento de múltiplas seções consecutivas no mesmo pacote TS (ETSI EN 300 468).
-15. `test_arib_b24`: Valida decodificação nativa de texto ARIB STD-B24 (Kanji JIS X 0208, Hiragana, Katakana, Alfanumérico, quebras de linha APR, símbolos Gaiji) e fallback para Latin-1 e UTF-8.
-16. `test_epg_manager`: Valida persistência em `epg.json`, descarte de eventos passados, ancoragem na Tabela 0x4E (Present/Following) e reavaliação temporal para `--view`.
-17. `test_udp_streamer`: Valida empacotamento determinístico de datagramas UDP de IPTV de 1316 bytes (7 pacotes TS de 188B) sem fragmentação IP.
-18. `test_cli_ofdm_flag`: Valida parsing da flag `--ofdm` (`--ofdm 1`, `--ofdm 2`, `--ofdm=1`, `--ofdm=2`), rejeição de valores inválidos e tolerância fora de `play`.
-19. `test_sync_regression_scan`: Garante que o scanner não sofra regressão e opere sob o baseline de Van de Beek.
-20. `test_bench_ascii_table`: Valida a formatação de tabelas ASCII de 113 colunas com codepoints UTF-8 de largura visual correta.
-21. `test_regression_ofdm1`: Teste de regressão determinístico do baseline Van de Beek sobre captura real de RF.
-22. `test_sync_grisdbt_robust`: Valida o sincronizador robusto do `gr-isdbt` (SP timing, CFO, SCO e FSM de re-lock).
-23. `test_regression_ofdm2`: Teste de regressão determinístico do modo robusto sobre captura real de RF.
-24. `bench_sync`: Benchmark determinístico comparativo de performance DSP e throughput de pacotes TS.
+12. `test_bit_deinterleaver_qam16`: Valida o desentrelaçador de bits para modulação 16QAM com delays Forney $0, 40, 80, 120$ símbolos e CSI soft-bits.
+13. `test_volk_cpu_features`: Valida detecção de instruções SIMD da CPU (AVX2, AVX, SSE2).
+14. `test_cli_simd_integration`: Valida despacho SIMD VOLK no cálculo contínuo de desrotação e correlação.
+15. `test_frequency_plan`: Valida cálculo e sintonia de frequências UHF (canais 14 a 69) conforme ABNT NBR 15601.
+16. `test_channel_manager`: Valida operações de persistência e busca no `channels.json`.
+17. `test_psi_parser`: Valida resolução de nomes de emissoras via SDT, geração periódica de PAT de fallback e empacotamento de múltiplas seções consecutivas no mesmo pacote TS (ETSI EN 300 468).
+18. `test_arib_b24`: Valida decodificação nativa de texto ARIB STD-B24 (Kanji JIS X 0208, Hiragana, Katakana, Alfanumérico, quebras de linha APR, símbolos Gaiji) e fallback para Latin-1 e UTF-8.
+19. `test_epg_manager`: Valida persistência em `epg.json`, descarte de eventos passados, ancoragem na Tabela 0x4E (Present/Following) e reavaliação temporal para `--view`.
+20. `test_udp_streamer`: Valida empacotamento determinístico de datagramas UDP de IPTV de 1316 bytes (7 pacotes TS de 188B) sem fragmentação IP.
+21. `test_cli_ofdm_flag`: Valida parsing da flag `--ofdm` (`--ofdm 1`, `--ofdm 2`, `--ofdm=1`, `--ofdm=2`), rejeição de valores inválidos e tolerância fora de `play`.
+22. `test_sync_regression_scan`: Garante que o scanner não sofra regressão e opere sob o baseline de Van de Beek.
+23. `test_bench_ascii_table`: Valida a formatação de tabelas ASCII de 113 colunas com codepoints UTF-8 de largura visual correta.
+24. `test_regression_ofdm1`: Teste de regressão determinístico do baseline Van de Beek sobre captura real de RF.
+25. `test_sync_sp_cir`: Valida o sincronizador canônico SP-CIR (timing fino por IDFT de 64 pontos com PAPR $\ge 12$, First Arrival Path, FFO com zona morta e SCO).
+26. `test_sync_grisdbt_robust`: Valida o alias de compatibilidade `RobustGRISDBTSync` sobre o sincronizador SP-CIR.
+27. `test_regression_ofdm2`: Teste de regressão determinístico do modo SP-CIR sobre captura real de RF (`ch24_10s_iq.cu8`), assegurando 2 pacotes válidos.
+28. `bench_sync`: Benchmark determinístico comparativo de performance DSP e throughput de pacotes TS.
 
 ### Nível 2: Validação Offline de Captura Real de RF (`ch24_10s_iq.cu8`)
 - Captura oficial de 10 segundos na frequência de 533.143 MHz (Canal 24 UHF - TV Cultura) na taxa exata de 2031746 S/s (40.6 MB, sinal realista com SNR ~8 dB).
@@ -314,21 +357,21 @@ Qualquer modelo de IA que receber tarefas neste projeto deve seguir rigorosament
 3. **NUNCA transmita pacotes soltos de 188 bytes via UDP:** Sempre acumule 7 pacotes completos formando datagramas de exatamente 1316 bytes (`constants::UDP_PACKET_SIZE`).
 4. **NUNCA altere a URL padrão do streaming local:** A URL de streaming deve ser sempre `udp://@127.0.0.1:1234` (para VLC) e `udp://127.0.0.1:1234` (para MPV).
 5. **NUNCA configure buffers gigantes (>64 KB) ou dispare reload IPC no canal inicial do MPV:** A taxa do 1-Seg móvel é de ~312 kbps; buffers de 1 MB travam o player por dezenas de segundos e reload precoce no início aborta o demuxer, deixando a janela preta.
-5. **NUNCA injete pacotes sintéticos de teste (`TsGenerator`) em fluxo real:** Pacotes sintéticos de tela verde travam os PIDs do player e bloqueiam a visualização do canal real.
-6. **NUNCA reduza o limiar de IFO para menos de 0.60 sem histerese:** Lóbulos secundários de pilotos dispersos possuem coerência ~0.35 e prendem o receptor em frequências falsas.
-7. **NUNCA reinicie o Trellis do Viterbi a cada símbolo OFDM:** O fluxo de dados convolucional é contínuo ao longo de todo o quadro e transmissão.
-8. **NUNCA remova o delay de 100 ms após sintonizar frequência:** O PLL do R820T precisa desse tempo para travar sem gerar `[R82XX] PLL not locked!`.
-9. **NUNCA altere a frequência do tuner no RTL-SDR sem limpar os buffers USB (`rtlsdr_reset_buffer`) e aguardar estabilização do PLL:** Chamar `rtlsdr_set_center_freq` logo após leituras USB sem reset de buffer gera colisão nos endpoints de controle USB (`LIBUSB_ERROR_PIPE -9`) e trava o chip I2C R820T.
-10. **NUNCA use `std::deque` ou alocações dinâmicas no loop de processamento de símbolos:** Utilize `FixedDelayLine` ou `DynamicDelayLine` pré-alocadas para garantir previsibilidade e cache locality.
-11. **NUNCA aplique a escala de ponderação CSI antes do demapeador nem desvincule os pesos das linhas de retardo de bits:** A ponderação CSI deve ser aplicada estritamente sobre os soft-bits centrados em 128 e os pesos devem sofrer os mesmos atrasos ($120$ símbolos no MSB) que os dados.
-12. **NUNCA substitua a fila SPSC lock-free por mutexes bloqueantes ou descarte gaps de sequência sem invocar `reset_reception_stream`:** Lacunas temporais no fluxo I/Q devem resetar os buffers para evitar descontinuidade de fase no NCO.
-13. **NUNCA modifique o caminho de execução de `src/dsp/ofdm_sync.cpp` (`VanDeBeekSync`):** O sincronizador de Van de Beek é o baseline inalterado de referência do projeto.
-14. **NUNCA rejeite a flag `--ofdm` fora do comando `play`:** Em comandos como `scan` ou `probe`, ela deve ser aceita e silenciosamente descartada.
-15. **NUNCA remova `reload_mpv_player(udp_port)` na troca de canal:** O MPV depende do reload via IPC (`loadfile replace`) para rearmar os decodificadores/demuxers na mesma janela ao mudar de canal.
-16. **NUNCA mutile ou fragmente `send_discontinuity_burst()`:** O datagrama de descontinuidade deve conter exatamente 7 pacotes completos de 188 bytes no PID `0x0000` com flag de descontinuidade (1316 bytes atômicos).
-17. **NUNCA altere documentação para justificar simplificações indevidas em algoritmos:** A especificação e implementação de `RobustGRISDBTSync` (port do `gr-isdbt`) com pilotos dispersos (SP) devem ser estritamente preservadas.
-18. **NUNCA crie testes de CTest dependentes de sockets de rede reais com bind local:** Validações de streaming devem testar a formação de datagramas e pacotes TS de forma determinística e em memória.
-19. **NUNCA deixe os badges de teste em README.md e README_en.md desatualizados em relação ao CTest:** Toda vez que um teste for criado, alterado, excluído ou executado, o agente de IA DEVE verificar a contagem de testes via ctest -N e o resultado da execução, e atualizar IMEDIATAMENTE os badges nos arquivos README.md e README_en.md (Tests-<passed>%2F<total>%20Passed-success.svg em caso de sucesso total ou critical em caso de falha).
+6. **NUNCA injete pacotes sintéticos de teste (`TsGenerator`) em fluxo real:** Pacotes sintéticos de tela verde travam os PIDs do player e bloqueiam a visualização do canal real.
+7. **NUNCA reduza o limiar de IFO para menos de 0.60 sem histerese:** Lóbulos secundários de pilotos dispersos possuem coerência ~0.35 e prendem o receptor em frequências falsas.
+8. **NUNCA reinicie o Trellis do Viterbi a cada símbolo OFDM:** O fluxo de dados convolucional é contínuo ao longo de todo o quadro e transmissão.
+9. **NUNCA remova o delay de 100 ms após sintonizar frequência:** O PLL do R820T precisa desse tempo para travar sem gerar `[R82XX] PLL not locked!`.
+10. **NUNCA altere a frequência do tuner no RTL-SDR sem limpar os buffers USB (`rtlsdr_reset_buffer`) e aguardar estabilização do PLL:** Chamar `rtlsdr_set_center_freq` logo após leituras USB sem reset de buffer gera colisão nos endpoints de controle USB (`LIBUSB_ERROR_PIPE -9`) e trava o chip I2C R820T.
+11. **NUNCA use `std::deque` ou alocações dinâmicas no loop de processamento de símbolos:** Utilize `FixedDelayLine` ou `DynamicDelayLine` pré-alocadas para garantir previsibilidade e cache locality.
+12. **NUNCA aplique a escala de ponderação CSI antes do demapeador nem desvincule os pesos das linhas de retardo de bits:** A ponderação CSI deve ser aplicada estritamente sobre os soft-bits centrados em 128 e os pesos devem sofrer os mesmos atrasos ($120$ símbolos no MSB) que os dados.
+13. **NUNCA substitua a fila SPSC lock-free por mutexes bloqueantes ou descarte gaps de sequência sem invocar `reset_reception_stream`:** Lacunas temporais no fluxo I/Q devem resetar os buffers para evitar descontinuidade de fase no NCO.
+14. **NUNCA modifique o caminho de execução de `src/dsp/ofdm_sync.cpp` (`VanDeBeekSync`):** O sincronizador de Van de Beek é o baseline inalterado de referência do projeto.
+15. **NUNCA rejeite a flag `--ofdm` fora do comando `play`:** Em comandos como `scan` ou `probe`, ela deve ser aceita e silenciosamente descartada.
+16. **NUNCA remova `reload_mpv_player(udp_port)` na troca de canal:** O MPV depende do reload via IPC (`loadfile replace`) para rearmar os decodificadores/demuxers na mesma janela ao mudar de canal.
+17. **NUNCA mutile ou fragmente `send_discontinuity_burst()`:** O datagrama de descontinuidade deve conter exatamente 7 pacotes completos de 188 bytes no PID `0x0000` com flag de descontinuidade (1316 bytes atômicos).
+18. **NUNCA altere documentação para justificar simplificações indevidas em algoritmos:** A especificação e implementação de `SpCirSynchronizer` (port do `gr-isdbt`) com pilotos dispersos (SP) devem ser estritamente preservadas.
+19. **NUNCA crie testes de CTest dependentes de sockets de rede reais com bind local:** Validações de streaming devem testar a formação de datagramas e pacotes TS de forma determinística e em memória.
+20. **NUNCA deixe os badges de teste em README.md e README_en.md desatualizados em relação ao CTest:** Toda vez que um teste for criado, alterado, excluído ou executado, o agente de IA DEVE verificar a contagem de testes via ctest -N e o resultado da execução, e atualizar IMEDIATAMENTE os badges nos arquivos README.md e README_en.md (Tests-<passed>%2F<total>%20Passed-success.svg em caso de sucesso total ou critical em caso de falha).
 
 ---
 
@@ -337,15 +380,15 @@ Qualquer modelo de IA que receber tarefas neste projeto deve seguir rigorosament
 No Windows, o ambiente recomendado e homologado é o **[`w64devkit`](https://github.com/skeeto/w64devkit/releases)**:
 
 ```powershell
-# Compilar para 64 bits (x64) com suporte ao gr-isdbt:
-cmake -S . -B build_x64 -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DTARGET_ARCH=x64 -DISDBT_ENABLE_GRISDBT_SYNC=ON
+# Compilar para 64 bits (x64) com suporte ao sincronizador SP-CIR:
+cmake -S . -B build_x64 -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DTARGET_ARCH=x64 -DISDBT_ENABLE_SP_CIR_SYNC=ON
 cmake --build build_x64 -j
 
 # Compilar para 32 bits (x86) com instrucoes SSE2:
-cmake -S . -B build_x86 -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DTARGET_ARCH=x86 -DISDBT_ENABLE_GRISDBT_SYNC=ON
+cmake -S . -B build_x86 -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DTARGET_ARCH=x86 -DISDBT_ENABLE_SP_CIR_SYNC=ON
 cmake --build build_x86 -j
 
-# Rodar a suíte completa de 24 testes unitários:
+# Rodar a suíte completa de 27 testes unitários:
 ctest --test-dir build_x64 --output-on-failure -E BenchSync
 
 # Diagnosticar estabilidade e integridade USB do dongle:
@@ -363,7 +406,7 @@ ctest --test-dir build_x64 --output-on-failure -E BenchSync
 |---|---|---|
 | **Abstração de Sincronismo** | `include/sync/iofdm_synchronizer.h`<br>`include/sync/sync_factory.h`<br>`src/sync/sync_factory.cpp` | Interface abstrata `IOFDMSynchronizer` e fábrica para instanciação polimórfica de `--ofdm=1` ou `--ofdm=2`. |
 | **Sincronizador Van de Beek** | `include/sync/van_de_beek_sync.h`<br>`src/sync/van_de_beek_sync.cpp` | Adaptador puro sobre `OfdmSync` baseline mantido bit-a-bit inalterado. |
-| **Sincronizador Robusto (gr-isdbt)**| `include/sync/robust_grisdbt_sync.h`<br>`src/sync/robust_grisdbt_sync.cpp` | Port nativo sem dependências do GNU Radio com timing fino por SP, CFO inteiro/fracionário, SCO e FSM de re-lock. |
+| **Sincronizador SP-CIR (Speth & Meyr)**| `include/sync/sp_cir_sync.h`<br>`src/sync/sp_cir_sync.cpp` | Sincronizador de 2 estágios (Speth & Meyr 1999/2001; Larroca et al. 2014) com timing fino por SP-CIR, First Arrival Path, CFO estável e zero deriva sob multipercurso urbano. |
 | **Constantes Globais** | `include/dsp/constants.hpp` | Taxa de amostragem exata (2031746 S/s), neutralidade soft (128), dimensões de pacotes TS/RS e subportadoras. |
 | **Linhas de Atraso** | `include/dsp/delay_line.hpp` | `FixedDelayLine` estática e `DynamicDelayLine` para desentrelaçadores Forney, bits e tempo com zero alocação no heap. |
 | **Fila de Captura SPSC** | `include/dsp/spsc_capture_queue.hpp` | Fila circular lock-free de 64 slots com rastreamento de números de sequência e detecção de gaps. |

@@ -1,6 +1,6 @@
 #include "bench_metrics.h"
 #include "sync/sync_factory.h"
-#include "sync/robust_grisdbt_sync.h"
+#include "sync/sp_cir_sync.h"
 #include "sync/van_de_beek_sync.h"
 #include "dsp/oneseg_demodulator.hpp"
 #include "mpegts/psi_parser.hpp"
@@ -217,6 +217,9 @@ BenchRunResult run_benchmark(int ofdm_mode, const std::string& iq_path,
             demod.process_symbol(&useful_symbols[s], decoded_pkts);
             res.symbols_processed++;
             if (is_locked) res.symbols_locked++;
+        }
+        if (!useful_symbols.empty() && demod.is_tmcc_locked()) {
+            synchronizer->notify_frame_sync((demod.sp_phase() + 1) & 3, demod.integer_freq_offset_bins());
         }
         track_hot_allocations.store(false, std::memory_order_relaxed);
 
