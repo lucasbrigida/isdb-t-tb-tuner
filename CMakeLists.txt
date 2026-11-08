@@ -340,9 +340,14 @@ add_executable(test_sync_sp_cir
 )
 
 add_executable(test_sync_grisdbt_robust
-    tests/test_sync_sp_cir.cpp
+    tests/test_sync_grisdbt_robust.cpp
     src/sync/sp_cir_sync.cpp
+    src/sync/van_de_beek_sync.cpp
+    src/sync/sync_factory.cpp
+    src/dsp/ofdm_sync.cpp
 )
+target_link_libraries(test_sync_grisdbt_robust PRIVATE ${DSP_EXTERNAL_LIBS})
+target_compile_definitions(test_sync_grisdbt_robust PRIVATE ISDBT_ENABLE_SP_CIR_SYNC=1)
 
 add_executable(test_regression_ofdm2
     tests/test_regression_ofdm2.cpp
@@ -410,7 +415,7 @@ add_test(NAME SyncRegressionScan COMMAND test_sync_regression_scan)
 add_test(NAME BenchAsciiTable COMMAND test_bench_ascii_table)
 add_test(NAME RegressionOfdm1 COMMAND test_regression_ofdm1)
 add_test(NAME SyncSpCir COMMAND test_sync_sp_cir)
-add_test(NAME SyncGrisdbtRobust COMMAND test_sync_sp_cir)
+add_test(NAME SyncGrisdbtRobust COMMAND test_sync_grisdbt_robust)
 add_test(NAME RegressionOfdm2 COMMAND test_regression_ofdm2
     "${CMAKE_CURRENT_SOURCE_DIR}/samples/ch24_10s_iq.cu8"
     "${CMAKE_CURRENT_SOURCE_DIR}")
