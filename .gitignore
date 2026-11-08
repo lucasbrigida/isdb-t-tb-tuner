@@ -41,3 +41,7 @@ bench/results/*.json
 !tools/*.dll
 !tools/**/*.exe
 !tools/**/*.dll
+
+# Python bytecode (must come after the tools/ un-ignore rules)
+__pycache__/
+*.pyc
