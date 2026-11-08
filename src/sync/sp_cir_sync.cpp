@@ -154,6 +154,12 @@ void SpCirSynchronizer::notify_frame_sync(int sp_phase, int ifo_bins) noexcept {
     sp_tmcc_anchored_ = true;
 }
 
+void SpCirSynchronizer::notify_frame_lost() noexcept {
+    sp_phase_locked_ = false;
+    sp_tmcc_anchored_ = false;
+    is_sp_active_ = false;
+}
+
 void SpCirSynchronizer::set_sp_cir_state(SpCirSyncState new_state) {
     if (sp_cir_state_ != new_state) {
         state_transitions_++;

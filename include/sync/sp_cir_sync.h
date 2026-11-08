@@ -85,6 +85,7 @@ public:
 
     const char* detailed_state_str() const noexcept override;
     void notify_frame_sync(int sp_phase, int ifo_bins = 0) noexcept override;
+    void notify_frame_lost() noexcept override;
     bool is_tmcc_anchored() const noexcept override { return sp_tmcc_anchored_; }
     bool is_sp_locked() const noexcept { return sp_phase_locked_; }
     bool is_sp_active() const noexcept { return is_sp_active_; }
