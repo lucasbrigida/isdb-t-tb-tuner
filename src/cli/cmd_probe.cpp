@@ -40,8 +40,10 @@ int cmd_probe() {
 
     volk_cpu_init();
     std::cout << "\n[SIMD/DSP] VOLK Versao " << VOLK_VERSION_MAJOR << "." << VOLK_VERSION_MINOR << "." << VOLK_VERSION_MAINT << "\n";
-    std::cout << "  - Aceleracao AVX2: " << (volk_cpu.has_avx2() ? "ATIVADA" : "NAO") << "\n";
-    std::cout << "  - Aceleracao FMA: " << (volk_cpu.has_fma() ? "ATIVADA" : "NAO") << "\n";
+    std::cout << "  - Hardware CPUID: AVX2: " << (volk_cpu.has_avx2() ? "SIM" : "NAO")
+              << " | FMA: " << (volk_cpu.has_fma() ? "SIM" : "NAO")
+              << " | SSE2: " << (volk_cpu.has_sse2() ? "SIM" : "NAO") << "\n";
+    std::cout << "  - Kernel Ativo NCO: " << volk_cpu.active_kernel_name() << "\n";
     std::cout << "  - FFTW3: 2048/4096/8192 pontos inicializados\n\n";
 
     return 0;

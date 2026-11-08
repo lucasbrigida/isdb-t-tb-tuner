@@ -9,6 +9,7 @@
 #include "dsp/ofdm_sync.hpp"
 #include "dsp/oneseg_demodulator.hpp"
 #include "mpegts/psi_parser.hpp"
+#include "third_party/volk/volk_cpu.h"
 
 #include <iostream>
 #include <iomanip>
@@ -88,14 +89,15 @@ static void update_scan_progress(int done, int total, int ch, uint32_t freq_hz, 
     std::cout << "\r" << line << std::flush;
 }
 
-int cmd_scan(int start_ch, int end_ch, int dev_idx) {
+int cmd_scan(int start_ch, int end_ch, int dev_idx, int sdt_timeout_s) {
     print_cli_header();
     constexpr uint32_t sample_rate = constants::SAMPLE_RATE;
 
     std::cout << "========================================================\n";
     std::cout << "  VARREDURA PROFUNDA DE FREQUENCIAS ISDB-T / ISDB-Tb    \n";
     std::cout << "========================================================\n";
-    std::cout << "Faixa: Canais UHF " << start_ch << " a " << end_ch << " | Fs = " << sample_rate << " S/s\n\n";
+    std::cout << "Faixa: Canais UHF " << start_ch << " a " << end_ch << " | Fs = " << sample_rate << " S/s\n";
+    std::cout << "DSP/SIMD: " << volk_cpu.active_kernel_name() << "\n\n";
 
     rtlsdr_dev_t* dev = nullptr;
     if (rtlsdr_open(&dev, static_cast<uint32_t>(dev_idx)) != 0) {
@@ -150,7 +152,8 @@ int cmd_scan(int start_ch, int end_ch, int dev_idx) {
         bool is_locked = (rssi_dbfs >= -26.0f) && (sync_res.peak_correlation >= 0.35f);
 
         if (is_locked) {
-            update_scan_progress(scanned_count, total_channels, ch, freq_hz, "Sinal detectado! Lendo SDT (max 6.0s)...");
+            update_scan_progress(scanned_count, total_channels, ch, freq_hz,
+                                 "Sinal detectado! Lendo SDT (max " + std::to_string(sdt_timeout_s) + ".0s)...");
 
             CandidateChannel cand;
             cand.ch = ch;
@@ -231,7 +234,7 @@ int cmd_scan(int start_ch, int end_ch, int dev_idx) {
             while (g_running) {
                 auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::steady_clock::now() - start_time).count();
-                if (elapsed_ms >= 6000) break; // Timeout de 6.0s
+                if (elapsed_ms >= static_cast<int64_t>(sdt_timeout_s) * 1000) break; // Timeout configuravel (padrao 30s)
 
                 SpscCaptureQueue<64>::ReadView view;
                 if (!raw_queue->try_acquire_read(view)) {

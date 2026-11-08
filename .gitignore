@@ -6,10 +6,14 @@ releases/**/*.zip
 !releases/**/.gitkeep
 deps/
 .agents/
+.work/
+.manus/
+outputs/
 
 # Local runtime generated files
 channels.json
 channels.m3u
+epg.json
 
 # Logs temporarios e de investigacao
 *.log
@@ -37,3 +41,7 @@ bench/results/*.json
 !tools/*.dll
 !tools/**/*.exe
 !tools/**/*.dll
+
+# Python bytecode (must come after the tools/ un-ignore rules)
+__pycache__/
+*.pyc

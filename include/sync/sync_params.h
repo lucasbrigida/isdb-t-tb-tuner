@@ -8,7 +8,8 @@ namespace isdbt {
 
 enum class OFDMAlgorithm : int {
     VanDeBeek = 1,     ///< Algoritmo baseline de Van de Beek (padrao)
-    RobustGRISDBT = 2  ///< Port robusto do algoritmo do gr-isdbt
+    SpCir = 2,         ///< Sincronizador SP-CIR de 2 estagios (Speth & Meyr / Larroca et al.)
+    RobustGRISDBT = 2  ///< Alias de compatibilidade retroativa com a denominacao legada
 };
 
 struct SyncParams {
@@ -21,4 +22,3 @@ struct SyncParams {
 };
 
 } // namespace isdbt
-

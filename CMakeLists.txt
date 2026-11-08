@@ -11,7 +11,8 @@ endif()
 
 # Opcoes de otimizacao para builds de Release
 option(ISDBT_ENABLE_FAST_MATH "Habilitar otimizacao de ponto flutuante rapido (-ffast-math / /fp:fast)" OFF)
-option(ISDBT_ENABLE_GRISDBT_SYNC "Habilitar algoritmo de sincronizacao robusto do gr-isdbt (--ofdm=2)" OFF)
+option(ISDBT_ENABLE_SP_CIR_SYNC "Habilitar algoritmo de sincronizacao robusto SP-CIR (--ofdm=2)" OFF)
+option(ISDBT_ENABLE_GRISDBT_SYNC "Alias legado para ISDBT_ENABLE_SP_CIR_SYNC" OFF)
 set(TARGET_ARCH "auto" CACHE STRING "Arquitetura alvo: auto, x64 ou x86")
 
 if(TARGET_ARCH STREQUAL "x86" OR TARGET_ARCH STREQUAL "32")
@@ -56,11 +57,14 @@ if(NOT WIN32)
     set(HASH_LIBS OpenSSL::Crypto)
 endif()
 
-if(ISDBT_ENABLE_GRISDBT_SYNC)
+if(ISDBT_ENABLE_SP_CIR_SYNC OR ISDBT_ENABLE_GRISDBT_SYNC)
+    add_compile_definitions(ISDBT_ENABLE_SP_CIR_SYNC=1)
     add_compile_definitions(ISDBT_ENABLE_GRISDBT_SYNC=1)
-    message(STATUS "Modo sincronizador robusto gr-isdbt (--ofdm=2) HABILITADO")
-    set(GRISDBT_SYNC_SOURCES src/sync/robust_grisdbt_sync.cpp)
+    message(STATUS "Modo sincronizador robusto SP-CIR (--ofdm=2) HABILITADO")
+    set(SP_CIR_SYNC_SOURCES src/sync/sp_cir_sync.cpp)
+    set(GRISDBT_SYNC_SOURCES src/sync/sp_cir_sync.cpp)
 else()
+    set(SP_CIR_SYNC_SOURCES "")
     set(GRISDBT_SYNC_SOURCES "")
 endif()
 
@@ -124,6 +128,8 @@ set(SOURCES
     src/cli/cmd_scan.cpp
     src/cli/cmd_list.cpp
     src/cli/cmd_play.cpp
+    src/cli/cmd_epg.cpp
+    src/cli/epg_manager.cpp
     src/cli/channel_manager.cpp
     src/dsp/reed_solomon.cpp
     src/dsp/descrambler.cpp
@@ -132,6 +138,7 @@ set(SOURCES
     src/dsp/oneseg_demodulator.cpp
     src/streaming/udp_streamer.cpp
     src/mpegts/psi_parser.cpp
+    src/mpegts/arib_b24_decoder.cpp
     src/mpegts/ts_generator.cpp
     src/sync/van_de_beek_sync.cpp
     src/sync/sync_factory.cpp
@@ -231,6 +238,34 @@ add_executable(test_sync_state_and_csi
 )
 target_link_libraries(test_sync_state_and_csi PRIVATE ${DSP_EXTERNAL_LIBS})
 
+add_executable(test_bit_deinterleaver_qam16
+    tests/test_bit_deinterleaver_qam16.cpp
+    src/dsp/oneseg_demodulator.cpp
+    src/dsp/ofdm_sync.cpp
+    src/dsp/viterbi_decoder.cpp
+    src/dsp/reed_solomon.cpp
+    src/dsp/descrambler.cpp
+)
+target_link_libraries(test_bit_deinterleaver_qam16 PRIVATE ${DSP_EXTERNAL_LIBS})
+
+add_executable(test_volk_cpu_features
+    tests/test_volk_cpu_features.cpp
+)
+target_link_libraries(test_volk_cpu_features PRIVATE ${DSP_EXTERNAL_LIBS})
+
+add_executable(test_cli_simd_integration
+    tests/test_cli_simd_integration.cpp
+    src/platform/platform_utils.cpp
+    src/sync/sp_cir_sync.cpp
+    src/sync/van_de_beek_sync.cpp
+    src/sync/sync_factory.cpp
+    src/dsp/ofdm_sync.cpp
+)
+target_link_libraries(test_cli_simd_integration PRIVATE ${DSP_EXTERNAL_LIBS})
+if(WIN32)
+    target_link_libraries(test_cli_simd_integration PRIVATE ws2_32 shell32)
+endif()
+
 add_executable(test_frequency_plan
     tests/test_frequency_plan.cpp
     src/radio/frequency_plan.cpp
@@ -244,6 +279,19 @@ add_executable(test_channel_manager
 add_executable(test_psi_parser
     tests/test_psi_parser.cpp
     src/mpegts/psi_parser.cpp
+    src/mpegts/arib_b24_decoder.cpp
+)
+
+add_executable(test_epg_manager
+    tests/test_epg_manager.cpp
+    src/cli/epg_manager.cpp
+    src/mpegts/psi_parser.cpp
+    src/mpegts/arib_b24_decoder.cpp
+)
+
+add_executable(test_arib_b24
+    tests/test_arib_b24.cpp
+    src/mpegts/arib_b24_decoder.cpp
 )
 
 add_executable(freeze_baseline_ofdm1
@@ -254,6 +302,7 @@ add_executable(freeze_baseline_ofdm1
     src/dsp/ofdm_sync.cpp
     src/dsp/oneseg_demodulator.cpp
     src/mpegts/psi_parser.cpp
+    src/mpegts/arib_b24_decoder.cpp
 )
 target_link_libraries(freeze_baseline_ofdm1 PRIVATE ${DSP_EXTERNAL_LIBS} ${HASH_LIBS})
 
@@ -281,17 +330,28 @@ add_executable(test_regression_ofdm1
     src/dsp/reed_solomon.cpp
     src/dsp/descrambler.cpp
     src/mpegts/psi_parser.cpp
+    src/mpegts/arib_b24_decoder.cpp
 )
 target_link_libraries(test_regression_ofdm1 PRIVATE ${DSP_EXTERNAL_LIBS} ${HASH_LIBS})
 
+add_executable(test_sync_sp_cir
+    tests/test_sync_sp_cir.cpp
+    src/sync/sp_cir_sync.cpp
+)
+
 add_executable(test_sync_grisdbt_robust
     tests/test_sync_grisdbt_robust.cpp
-    src/sync/robust_grisdbt_sync.cpp
+    src/sync/sp_cir_sync.cpp
+    src/sync/van_de_beek_sync.cpp
+    src/sync/sync_factory.cpp
+    src/dsp/ofdm_sync.cpp
 )
+target_link_libraries(test_sync_grisdbt_robust PRIVATE ${DSP_EXTERNAL_LIBS})
+target_compile_definitions(test_sync_grisdbt_robust PRIVATE ISDBT_ENABLE_SP_CIR_SYNC=1)
 
 add_executable(test_regression_ofdm2
     tests/test_regression_ofdm2.cpp
-    src/sync/robust_grisdbt_sync.cpp
+    src/sync/sp_cir_sync.cpp
     src/sync/van_de_beek_sync.cpp
     src/sync/sync_factory.cpp
     src/dsp/ofdm_sync.cpp
@@ -300,6 +360,7 @@ add_executable(test_regression_ofdm2
     src/dsp/reed_solomon.cpp
     src/dsp/descrambler.cpp
     src/mpegts/psi_parser.cpp
+    src/mpegts/arib_b24_decoder.cpp
 )
 target_link_libraries(test_regression_ofdm2 PRIVATE ${DSP_EXTERNAL_LIBS} ${HASH_LIBS})
 
@@ -310,7 +371,7 @@ add_executable(bench_sync
     bench/bench_report.cpp
     src/utils/ascii_table.cpp
     src/sync/van_de_beek_sync.cpp
-    src/sync/robust_grisdbt_sync.cpp
+    src/sync/sp_cir_sync.cpp
     src/sync/sync_factory.cpp
     src/dsp/ofdm_sync.cpp
     src/dsp/oneseg_demodulator.cpp
@@ -318,9 +379,10 @@ add_executable(bench_sync
     src/dsp/reed_solomon.cpp
     src/dsp/descrambler.cpp
     src/mpegts/psi_parser.cpp
+    src/mpegts/arib_b24_decoder.cpp
 )
 target_link_libraries(bench_sync PRIVATE ${DSP_EXTERNAL_LIBS})
-target_compile_definitions(bench_sync PRIVATE ISDBT_ENABLE_GRISDBT_SYNC=1)
+target_compile_definitions(bench_sync PRIVATE ISDBT_ENABLE_SP_CIR_SYNC=1 ISDBT_ENABLE_GRISDBT_SYNC=1)
 if(WIN32)
     target_link_libraries(bench_sync PRIVATE psapi)
 endif()
@@ -339,14 +401,20 @@ add_test(NAME SpscQueue COMMAND test_spsc_queue)
 add_test(NAME DelayLine COMMAND test_delay_line)
 add_test(NAME ResetRecovery COMMAND test_reset_recovery)
 add_test(NAME SyncStateAndCsi COMMAND test_sync_state_and_csi)
+add_test(NAME BitDeinterleaverQam16 COMMAND test_bit_deinterleaver_qam16)
+add_test(NAME VolkCpuFeatures COMMAND test_volk_cpu_features)
+add_test(NAME CliSimdIntegration COMMAND test_cli_simd_integration)
 add_test(NAME FrequencyPlan COMMAND test_frequency_plan)
 add_test(NAME ChannelManager COMMAND test_channel_manager)
 add_test(NAME PsiParser COMMAND test_psi_parser)
+add_test(NAME AribB24 COMMAND test_arib_b24)
+add_test(NAME EpgManager COMMAND test_epg_manager)
 add_test(NAME UdpStreamer COMMAND test_udp_streamer)
 add_test(NAME CliOfdmFlag COMMAND test_cli_ofdm_flag)
 add_test(NAME SyncRegressionScan COMMAND test_sync_regression_scan)
 add_test(NAME BenchAsciiTable COMMAND test_bench_ascii_table)
 add_test(NAME RegressionOfdm1 COMMAND test_regression_ofdm1)
+add_test(NAME SyncSpCir COMMAND test_sync_sp_cir)
 add_test(NAME SyncGrisdbtRobust COMMAND test_sync_grisdbt_robust)
 add_test(NAME RegressionOfdm2 COMMAND test_regression_ofdm2
     "${CMAKE_CURRENT_SOURCE_DIR}/samples/ch24_10s_iq.cu8"

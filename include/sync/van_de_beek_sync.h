@@ -21,6 +21,7 @@ public:
 
     const SyncState& state() const noexcept override;
     float peak_correlation() const noexcept override { return peak_correlation_; }
+    float estimated_cfo_hz() const noexcept override { return tracked_ffo_hz_; }
     void reset() noexcept override;
 
     // Acesso direto ao sincronizador interno para interoperabilidade

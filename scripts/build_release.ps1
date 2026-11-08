@@ -172,7 +172,7 @@ function Build-And-Package-Release([string]$targetArch) {
     if (-not $SkipBuild) {
         if (-not (Test-Path $buildDir)) {
             Write-Host "🔨 Configurando CMake ($targetArch, Release)..." -ForegroundColor Cyan
-            cmake -S . -B $buildDir -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release "-DTARGET_ARCH=$targetArch" -DISDBT_ENABLE_GRISDBT_SYNC=ON
+            cmake -S . -B $buildDir -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release "-DTARGET_ARCH=$targetArch" -DISDBT_ENABLE_SP_CIR_SYNC=ON -DISDBT_ENABLE_GRISDBT_SYNC=ON
             if ($LASTEXITCODE -ne 0) { throw "Falha na configuração do CMake para $targetArch." }
         }
         Write-Host "🔨 Compilando isdbtb_rx ($targetArch)..." -ForegroundColor Cyan

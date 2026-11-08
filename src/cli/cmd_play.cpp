@@ -1,4 +1,5 @@
 #include "sync/sync_factory.h"
+#include "sync/sp_cir_sync.h"
 #include <fstream>
 #include "cli/channel_manager.hpp"
 #include "radio/frequency_plan.hpp"
@@ -12,6 +13,7 @@
 #include "streaming/udp_streamer.hpp"
 #include "mpegts/psi_parser.hpp"
 #include "mpegts/ts_generator.hpp"
+#include "third_party/volk/volk_cpu.h"
 
 #include <iostream>
 #include <iomanip>
@@ -37,11 +39,17 @@ struct PlaybackStatusSnapshot {
     bool ofdm_locked = false;
     bool tmcc_locked = false;
     float snr_db = 0.0f;
+    float evm = 0.0f;
     uint64_t air_packets = 0;
     uint32_t rs_corrected = 0;
     uint32_t rs_dropped = 0;
     uint64_t drop_blocks = 0;
     std::string service_name;
+    std::string epg_now;
+    std::string epg_next;
+    float cfo_hz = 0.0f;
+    float sco_ppm = 0.0f;
+    std::string sync_state = "Acquisition";
 };
 
 struct SharedPlaybackStatus {
@@ -65,25 +73,7 @@ static void reset_play_reception_stream(
 }
 
 static void print_players_box(const std::string& vlc_url) {
-    const int inner_width = 84;
-    std::string h_border = "+" + std::string(inner_width + 2, '-') + "+";
-
-    auto print_line = [inner_width](const std::string& text) {
-        std::cout << "| " << text;
-        if (static_cast<int>(text.length()) < inner_width) {
-            std::cout << std::string(inner_width - text.length(), ' ');
-        }
-        std::cout << " |\n";
-    };
-
-    std::cout << h_border << "\n";
-    print_line("Reprodutores de Video Disponiveis:");
-    print_line("  1. MPV Player com Interpolacao em Tempo Real (Recomendado):");
-    print_line("     Execute: .\\scripts\\play_mpv.bat (ou .\\scripts\\play_mpv.ps1)");
-    print_line("  2. VLC Media Player:");
-    std::string vlc_line = "     URL: " + vlc_url + " | Cache: --network-caching=2000 --clock-jitter=1000";
-    print_line(vlc_line);
-    std::cout << h_border << "\n\n";
+    std::cout << " [Stream UDP] URL: " << vlc_url << "\n\n";
 }
 
 static std::string format_channel_line(const ChannelInfo& ch, bool is_selected, bool is_active) {
@@ -100,7 +90,8 @@ static std::string format_channel_line(const ChannelInfo& ch, bool is_selected, 
 
 int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_port,
              int dev_idx, bool test_pattern, double gain_db, bool auto_player, bool verbose,
-             int ofdm_mode, const std::string& input_file, const std::string& output_ts_file, bool headless) {
+             int ofdm_mode, const std::string& input_file, const std::string& output_ts_file, bool headless,
+             int duration_s, const std::string& metrics_csv_file) {
 #ifdef _WIN32
     SetPriorityClass(GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS);
 #endif
@@ -131,7 +122,7 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
     SyncParams sync_params;
     sync_params.sample_rate = static_cast<float>(sample_rate);
     auto sync = make_synchronizer(
-        ofdm_mode == 2 ? OFDMAlgorithm::RobustGRISDBT : OFDMAlgorithm::VanDeBeek,
+        ofdm_mode == 2 ? OFDMAlgorithm::SpCir : OFDMAlgorithm::VanDeBeek,
         sync_params);
     if (!sync) {
         return 1;
@@ -201,7 +192,7 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
     }
 
     constexpr int VISIBLE_CHANNELS = 8;
-    constexpr int FIRST_CHANNEL_ROW = 18;
+    constexpr int FIRST_CHANNEL_ROW = 15;
     std::vector<ChannelInfo> channels = saved_channels;
     int visible_count = 1;
     bool has_scroll = false;
@@ -329,7 +320,51 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
         std::cout << std::flush;
     };
 
+    SharedPlaybackStatus shared_status;
+    std::string last_rendered_epg_now;
+    std::string last_rendered_epg_next;
+
+    auto render_epg_panel = [&](const std::string& now_text, const std::string& next_text) {
+        if (headless) return;
+        TerminalSize sz = get_terminal_size();
+        int width = std::max(60, std::min(88, sz.width - 2));
+
+        std::string now_str = now_text.empty() ? "Aguardando guia de programacao..." : now_text;
+        std::string next_str = next_text.empty() ? "Aguardando guia de programacao..." : next_text;
+
+        auto format_box_line = [&](const std::string& prefix, const std::string& content) {
+            std::string line = "| " + prefix + " " + content;
+            int inner_width = width - 1;
+            if (static_cast<int>(line.length()) > inner_width) {
+                line = (inner_width > 4) ? line.substr(0, inner_width - 3) + "..." : line.substr(0, inner_width);
+            }
+            if (static_cast<int>(line.length()) < inner_width) {
+                line += std::string(inner_width - line.length(), ' ');
+            }
+            line += "|";
+            return line;
+        };
+
+        std::string top_border = "+-- Programacao (EPG) " + std::string(std::max(0, width - 23), '-') + "+";
+        std::string bot_border = "+" + std::string(std::max(0, width - 1), '-') + "+";
+
+        std::cout << "\033[9;1H\033[2K" << top_border
+                  << "\033[10;1H\033[2K" << format_box_line("▶ AGORA  ", now_str)
+                  << "\033[11;1H\033[2K" << format_box_line("⏭ SEGUIR ", next_str)
+                  << "\033[12;1H\033[2K" << bot_border << std::flush;
+
+        last_rendered_epg_now = now_str;
+        last_rendered_epg_next = next_str;
+    };
+
     auto render_dynamic_ui = [&]() {
+        std::string cur_now, cur_next;
+        {
+            std::lock_guard<std::mutex> lock(shared_status.mtx);
+            cur_now = shared_status.snap.epg_now;
+            cur_next = shared_status.snap.epg_next;
+        }
+        render_epg_panel(cur_now, cur_next);
         render_channels();
         render_bottom_bars();
     };
@@ -349,8 +384,6 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
     std::atomic<bool> retune_in_progress{false};
     std::atomic<bool> dsp_reset_requested{false};
     std::atomic<bool> dsp_reset_done{false};
-
-    SharedPlaybackStatus shared_status;
 
     // THREAD 1: Captura continua (USB ou Arquivo IQ)
     std::thread reader_thread([&]() {
@@ -466,6 +499,12 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
                 }
 
                 psi.reset();
+                {
+                    std::lock_guard<std::mutex> lock(shared_status.mtx);
+                    shared_status.snap.service_name.clear();
+                    shared_status.snap.epg_now.clear();
+                    shared_status.snap.epg_next.clear();
+                }
                 channel_transition_pending = true;
                 transition_wait_blocks = 0;
                 reset_play_reception_stream(*sync, demod, ofdm_locked, &dsp_metrics);
@@ -551,6 +590,9 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
                     for (size_t s = 0; s + FFT_LEN <= useful_symbols.size(); s += FFT_LEN) {
                         demod.process_symbol(&useful_symbols[s], decoded_pkts);
                         dsp_metrics.processed_symbols++;
+                    }
+                    if (!useful_symbols.empty() && demod.is_tmcc_locked()) {
+                        sync->notify_frame_sync((demod.sp_phase() + 1) & 3, demod.integer_freq_offset_bins());
                     }
 
                     for (const auto& pkt : decoded_pkts) {
@@ -662,6 +704,10 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
                     std::string s_name = psi.get_primary_service_name();
                     {
                         std::lock_guard<std::mutex> lock(shared_status.mtx);
+                        shared_status.snap.evm = demod.average_evm();
+                        shared_status.snap.cfo_hz = sync->estimated_cfo_hz();
+                        shared_status.snap.sco_ppm = sync->estimated_sco_ppm();
+                        shared_status.snap.sync_state = sync->detailed_state_str();
                         shared_status.snap.rssi_dbfs = rssi_dbfs;
                         shared_status.snap.peak_corr = last_peak_corr;
                         shared_status.snap.ofdm_locked = ofdm_locked;
@@ -674,6 +720,32 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
                         if (!s_name.empty()) {
                             shared_status.snap.service_name = s_name;
                         }
+                        auto pres = psi.get_present_event();
+                        auto foll = psi.get_following_event();
+                        std::string now_str;
+                        if (pres && !pres->title.empty()) {
+                            if (!pres->start_time_str.empty()) {
+                                now_str += "[" + pres->start_time_str;
+                                if (!pres->end_time_str.empty()) now_str += " - " + pres->end_time_str;
+                                now_str += "] ";
+                            }
+                            now_str += pres->title;
+                            if (!pres->rating.empty()) now_str += " (" + pres->rating + ")";
+                            if (!pres->genre.empty()) now_str += " [" + pres->genre + "]";
+                        }
+                        std::string next_str;
+                        if (foll && !foll->title.empty()) {
+                            if (!foll->start_time_str.empty()) {
+                                next_str += "[" + foll->start_time_str;
+                                if (!foll->end_time_str.empty()) next_str += " - " + foll->end_time_str;
+                                next_str += "] ";
+                            }
+                            next_str += foll->title;
+                            if (!foll->rating.empty()) next_str += " (" + foll->rating + ")";
+                            if (!foll->genre.empty()) next_str += " [" + foll->genre + "]";
+                        }
+                        shared_status.snap.epg_now = now_str;
+                        shared_status.snap.epg_next = next_str;
                     }
                     last_status_update = now;
                 }
@@ -684,11 +756,80 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
     });
 
     if (headless) {
-        if (reader_thread.joinable()) {
-            reader_thread.join();
+        std::ofstream csv_out;
+        if (!metrics_csv_file.empty()) {
+            csv_out.open(metrics_csv_file);
+            if (csv_out.is_open()) {
+                csv_out << "timestamp_s,rssi_dbfs,peak_corr,ofdm_locked,tmcc_locked,snr_db,evm,"
+                        << "valid_ts_packets,rs_corrected,rs_dropped,spsc_drops,cfo_hz,sco_ppm,sync_state\n";
+            }
         }
-        if (dsp_worker_thread.joinable()) {
-            dsp_worker_thread.join();
+
+        auto start_time = std::chrono::steady_clock::now();
+        auto last_report_time = start_time;
+        int second_counter = 0;
+
+        if (verbose) {
+            std::cout << "[Headless] Iniciando monitoramento "
+                      << (duration_s > 0 ? ("por " + std::to_string(duration_s) + " segundos") : "continuo")
+                      << "...\n" << std::flush;
+        }
+
+        while (g_running && reader_running.load(std::memory_order_relaxed)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            auto now = std::chrono::steady_clock::now();
+            double elapsed_s = std::chrono::duration<double>(now - start_time).count();
+
+            if (duration_s > 0 && elapsed_s >= duration_s) {
+                if (verbose) {
+                    std::cout << "\n[Duracao] Limite de " << duration_s << "s atingido. Encerrando graciosamente...\n" << std::flush;
+                }
+                g_running = false;
+                break;
+            }
+
+            if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_report_time).count() >= 1000) {
+                last_report_time = now;
+                second_counter++;
+                PlaybackStatusSnapshot snap;
+                {
+                    std::lock_guard<std::mutex> lock(shared_status.mtx);
+                    snap = shared_status.snap;
+                }
+
+                if (csv_out.is_open()) {
+                    csv_out << second_counter << ","
+                            << std::fixed << std::setprecision(2) << snap.rssi_dbfs << ","
+                            << snap.peak_corr << ","
+                            << (snap.ofdm_locked ? 1 : 0) << ","
+                            << (snap.tmcc_locked ? 1 : 0) << ","
+                            << snap.snr_db << ","
+                            << snap.evm << ","
+                            << snap.air_packets << ","
+                            << snap.rs_corrected << ","
+                            << snap.rs_dropped << ","
+                            << snap.drop_blocks << ","
+                            << snap.cfo_hz << ","
+                            << snap.sco_ppm << ","
+                            << snap.sync_state << "\n";
+                    csv_out.flush();
+                }
+
+                if (verbose) {
+                    std::cout << "[" << std::setw(3) << second_counter << "s"
+                              << (duration_s > 0 ? ("/" + std::to_string(duration_s) + "s") : "")
+                              << "] RSSI: " << std::fixed << std::setprecision(1) << snap.rssi_dbfs << " dBFS | "
+                              << "OFDM: " << (snap.ofdm_locked ? "LOCK" : "SYNC") << " (" << std::setprecision(2) << snap.peak_corr << ") | "
+                              << "TMCC: " << (snap.tmcc_locked ? "LOCK" : "SYNC") << " | "
+                              << "SNR: " << std::fixed << std::setprecision(1) << snap.snr_db << " dB | "
+                              << "TS: " << snap.air_packets << " pkts (RS: " << snap.rs_corrected << " corr / " << snap.rs_dropped << " drop) | "
+                              << "Drop: " << snap.drop_blocks << " | State: " << snap.sync_state << "\n" << std::flush;
+                }
+            }
+        }
+
+        if (csv_out.is_open()) {
+            csv_out.close();
         }
     } else {
         // THREAD 3 (Main): Gerenciamento de CLI, menu e teclado interativo
@@ -718,7 +859,7 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
                     update_window();
                     need_redraw = true;
                 }
-            } else if (key == 0 || key == 224) {
+            } else if ((key == 0 || key == 224) && console_kbhit()) {
                 int ext = console_getch();
                 if (ext == 72) { // Seta para Cima
                     if (!channels.empty()) {
@@ -736,7 +877,7 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
             } else if (key == 27) { // ANSI escape sequence no Linux (\033[A ou \033[B)
                 if (console_kbhit()) {
                     int c2 = console_getch();
-                    if (c2 == '[') {
+                    if (c2 == '[' && console_kbhit()) {
                         int c3 = console_getch();
                         if (c3 == 'A') { // Up
                             if (!channels.empty()) {
@@ -804,6 +945,10 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
                 snap = shared_status.snap;
             }
 
+            if (snap.epg_now != last_rendered_epg_now || snap.epg_next != last_rendered_epg_next) {
+                render_epg_panel(snap.epg_now, snap.epg_next);
+            }
+
             if (!channel_name_learned && !snap.service_name.empty() && active_channel_num > 0) {
                 ChannelInfo updated_info;
                 updated_info.channel_number = active_channel_num;
@@ -823,7 +968,7 @@ int cmd_play(int channel_number, const std::string& name_query, uint16_t udp_por
                 render_dynamic_ui();
             } else if (verbose) {
                 std::stringstream status_ss;
-                status_ss << "[Status] Ch " << active_channel_num << " | RSSI: " << std::fixed << std::setprecision(1) << snap.rssi_dbfs << " dBFS | "
+                status_ss << "[Status] Ch " << active_channel_num << " | SIMD: " << volk_cpu.active_kernel_name() << " | RSSI: " << std::fixed << std::setprecision(1) << snap.rssi_dbfs << " dBFS | "
                           << "OFDM: " << (snap.ofdm_locked ? "LOCK" : "SYNC") << " (" << std::setprecision(2) << snap.peak_corr << ") | "
                           << "TMCC: " << (snap.tmcc_locked ? "LOCK" : "SYNC") << " | "
                           << "SNR: " << std::fixed << std::setprecision(1) << snap.snr_db << " dB | "
