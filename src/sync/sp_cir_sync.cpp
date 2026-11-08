@@ -18,6 +18,7 @@
 #include <iostream>
 #include <cmath>
 #include <algorithm>
+#include <stdexcept>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -32,6 +33,10 @@ SpCirSynchronizer::SpCirSynchronizer(const SyncParams& params)
       symbol_len_(params.fft_size + params.gi_size),
       stream_buf_(65536 * 4) {
 
+    if (fft_size_ != kSpFftSize) {
+        throw std::invalid_argument("SpCirSynchronizer: fft_size deve ser 2048 (Modo 3 / 1-Seg)");
+    }
+
     // Mensagem de inicializacao para o usuario final
     if (!announced_) {
         std::cerr << "[info] Modo reforcado ativado (SP-CIR Synchronizer).\n";
@@ -43,14 +48,14 @@ SpCirSynchronizer::SpCirSynchronizer(const SyncParams& params)
 
     // Planos FFTW3 pre-alocados para estimativa SP e CIR (Zero alocacoes no loop quente)
     fft_plan_ = fftwf_plan_dft_1d(
-        2048,
+        static_cast<int>(kSpFftSize),
         reinterpret_cast<fftwf_complex*>(fft_in_.data()),
         reinterpret_cast<fftwf_complex*>(fft_out_.data()),
         FFTW_FORWARD,
         FFTW_ESTIMATE
     );
     ifft_cir_plan_ = fftwf_plan_dft_1d(
-        64,
+        static_cast<int>(kCirSize),
         reinterpret_cast<fftwf_complex*>(cir_in_.data()),
         reinterpret_cast<fftwf_complex*>(cir_out_.data()),
         FFTW_BACKWARD,
@@ -117,7 +122,6 @@ void SpCirSynchronizer::reset() noexcept {
     sp_tmcc_anchored_ = false;
     is_sp_active_ = false;
     sp_phase_offset_ = 0;
-    sp_consecutive_drops_ = 0;
     ifo_bins_ = 0;
     pdp_avg_.fill(0.0f);
     pdp_initialized_ = false;
@@ -140,15 +144,14 @@ const char* SpCirSynchronizer::detailed_state_str() const noexcept {
     }
 }
 
-void SpCirSynchronizer::notify_frame_sync(int symbol_idx_in_frame, int ifo_bins) noexcept {
+void SpCirSynchronizer::notify_frame_sync(int sp_phase, int ifo_bins) noexcept {
     // No ISDB-T (ARIB STD-B31 / ABNT NBR 15601), o simbolo 0 do quadro TMCC corresponde
     // rigorosamente a fase 0 dos pilotos dispersos (l = 0). O simbolo s tem fase de SP = s mod 4.
-    int target_phase = symbol_idx_in_frame & 3;
+    int target_phase = sp_phase & 3;
     sp_phase_offset_ = (target_phase - (symbol_counter_ & 3)) & 3;
     ifo_bins_ = ifo_bins;
     sp_phase_locked_ = true;
     sp_tmcc_anchored_ = true;
-    sp_consecutive_drops_ = 0;
 }
 
 void SpCirSynchronizer::set_sp_cir_state(SpCirSyncState new_state) {
@@ -265,12 +268,13 @@ int SpCirSynchronizer::refine_timing_sp(const std::complex<float>* symbol_time, 
         // taxa mais que suficiente para rastrear multipercurso urbano com orcamento de CPU controlado
         if ((symbol_counter_ & 1) == 0 && fft_plan_ && ifft_cir_plan_) {
             const std::complex<float>* useful = symbol_time + gi_size_;
-            std::memcpy(fft_in_.data(), useful, 2048 * sizeof(std::complex<float>));
+            std::memcpy(fft_in_.data(), useful, kSpFftSize * sizeof(std::complex<float>));
             fftwf_execute(fft_plan_);
 
-            float norm = 1.0f / std::sqrt(2048.0f);
+            float norm = 1.0f / std::sqrt(static_cast<float>(kSpFftSize));
             auto get_centered_carrier = [&](int centered_idx) -> std::complex<float> {
-                int raw_idx = (centered_idx < 1024) ? (centered_idx + 1024) : (centered_idx - 1024);
+                constexpr int half = static_cast<int>(kSpFftSize / 2);
+                int raw_idx = (centered_idx < half) ? (centered_idx + half) : (centered_idx - half);
                 return std::complex<float>(fft_out_[raw_idx].real() * norm, fft_out_[raw_idx].imag() * norm);
             };
 
@@ -280,35 +284,32 @@ int SpCirSynchronizer::refine_timing_sp(const std::complex<float>* symbol_time, 
             std::fill(cir_in_.begin(), cir_in_.end(), std::complex<float>(0.0f, 0.0f));
             for (size_t p = 0; p < indices.size() && p < 36; ++p) {
                 int bin = indices[p] + ifo_bins_;
-                if (bin < 0 || bin >= 2048) continue;
+                if (bin < 0 || bin >= static_cast<int>(kSpFftSize)) continue;
                 std::complex<float> y = get_centered_carrier(bin);
                 cir_in_[p] = y * inv_prbs[p];
             }
             fftwf_execute(ifft_cir_plan_);
 
             if (!pdp_initialized_) {
-                for (size_t t = 0; t < 64; ++t) {
+                for (size_t t = 0; t < kCirSize; ++t) {
                     pdp_avg_[t] = std::norm(cir_out_[t]);
                 }
                 pdp_initialized_ = true;
             } else {
-                for (size_t t = 0; t < 64; ++t) {
+                for (size_t t = 0; t < kCirSize; ++t) {
                     pdp_avg_[t] = 0.85f * pdp_avg_[t] + 0.15f * std::norm(cir_out_[t]);
                     cir_out_[t] = std::complex<float>(std::sqrt(pdp_avg_[t]), 0.0f);
                 }
             }
 
             float cir_metric = 0.0f;
-            int cir_shift = detect_first_path(cir_out_.data(), 64, &cir_metric);
+            int cir_shift = detect_first_path(cir_out_.data(), kCirSize, &cir_metric);
 
             if (cir_metric >= 0.40f) {
-                sp_consecutive_drops_ = 0;
                 is_sp_active_ = true;
                 if (out_metric) *out_metric = cir_metric;
                 return std::clamp(cir_shift, -4, 4);
             }
-
-            sp_consecutive_drops_++;
         } else if (is_sp_active_) {
             // No simbolo intercalado, mantem o tracking de SP por inercia nominal (shift 0)
             if (out_metric) *out_metric = std::max(peak_correlation_, params_.min_correlation);

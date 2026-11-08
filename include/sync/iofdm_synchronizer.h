@@ -55,11 +55,12 @@ public:
 
     /**
      * @brief Notifica a deteccao confirmada de sincronismo de quadro TMCC (DIP).
-     * @param symbol_idx_in_frame Indice exato do simbolo dentro do quadro de 204 simbolos (0..203).
+     * @param sp_phase Fase dos pilotos dispersos (0..3) esperada para o PROXIMO simbolo a ser
+     *        processado pelo sincronizador, i.e. (indice_do_simbolo_no_quadro mod 4).
      * @param ifo_bins Desvio de frequencia inteiro (IFO) em subportadoras detectado pelo demodulador.
      */
-    virtual void notify_frame_sync(int symbol_idx_in_frame, int ifo_bins = 0) noexcept {
-        (void)symbol_idx_in_frame;
+    virtual void notify_frame_sync(int sp_phase, int ifo_bins = 0) noexcept {
+        (void)sp_phase;
         (void)ifo_bins;
     }
 

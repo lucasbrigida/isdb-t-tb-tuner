@@ -56,6 +56,10 @@ using RobustSyncState = SpCirSyncState;
  */
 class SpCirSynchronizer : public IOFDMSynchronizer {
 public:
+    // Dimensoes fixas do motor SP-CIR (Modo 3 / Segmento 0); fft_size diferente e rejeitado no construtor
+    static constexpr size_t kSpFftSize = 2048;
+    static constexpr size_t kCirSize = 64;
+
     explicit SpCirSynchronizer(const SyncParams& params = SyncParams{});
     ~SpCirSynchronizer() override;
 
@@ -80,7 +84,7 @@ public:
     size_t guard_interval_size() const noexcept { return gi_size_; }
 
     const char* detailed_state_str() const noexcept override;
-    void notify_frame_sync(int symbol_idx_in_frame, int ifo_bins = 0) noexcept override;
+    void notify_frame_sync(int sp_phase, int ifo_bins = 0) noexcept override;
     bool is_tmcc_anchored() const noexcept override { return sp_tmcc_anchored_; }
     bool is_sp_locked() const noexcept { return sp_phase_locked_; }
     bool is_sp_active() const noexcept { return is_sp_active_; }
@@ -104,11 +108,11 @@ private:
     std::vector<std::complex<float>> rot_vec_;
 
     // Estruturas de FFT e IFFT para calculo da CIR instantanea via Pilotos Dispersos (SP)
-    std::array<std::complex<float>, 2048> fft_in_{};
-    std::array<std::complex<float>, 2048> fft_out_{};
-    std::array<std::complex<float>, 64> cir_in_{};
-    std::array<std::complex<float>, 64> cir_out_{};
-    std::array<float, 64> pdp_avg_{};
+    std::array<std::complex<float>, kSpFftSize> fft_in_{};
+    std::array<std::complex<float>, kSpFftSize> fft_out_{};
+    std::array<std::complex<float>, kCirSize> cir_in_{};
+    std::array<std::complex<float>, kCirSize> cir_out_{};
+    std::array<float, kCirSize> pdp_avg_{};
     bool pdp_initialized_ = false;
 
     fftwf_plan fft_plan_ = nullptr;
@@ -126,7 +130,6 @@ private:
     bool sp_tmcc_anchored_ = false;
     bool is_sp_active_ = false;
     int sp_phase_offset_ = 0;
-    int sp_consecutive_drops_ = 0;
     int ifo_bins_ = 0;
 
     // Variaveis de rastreamento de fase e timing
