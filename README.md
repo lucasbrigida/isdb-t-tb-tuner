@@ -24,7 +24,7 @@ Vem tudo dentro: `isdbtb_rx.exe`, DLLs do RTL-SDR, `zadig.exe` (driver USB) e o 
 ## 2. O que você precisa
 - Dongle RTL-SDR (RTL2832U com sintonizador R820T, R828D ou E4000).
 - Antena UHF (de preferência perto da janela ou externa).
-- Windows 7, 8, 10 ou 11.
+- Windows 10 (1607+) ou 11. O MPV incluso não roda em Windows 7/8.
 
 ## 3. Primeiro uso
 1. **Instale o driver (só na primeira vez):** conecte o dongle, abra `zadig.exe` → **Options → List All Devices** → escolha **`Bulk-In, Interface (Interface 0)`** (ou `RTL2838UHIDIR`) → driver **WinUSB** → **Install/Replace Driver**.
@@ -82,7 +82,7 @@ Todas as opções: [Referência da CLI](docs/user/cli_reference.md).
 | MPV | `f` | Tela cheia |
 | MPV | `i` | Estatísticas do vídeo |
 | MPV | `m` / `9` / `0` | Mudo / volume − / volume + |
-| MPV | `d` | Liga/desliga o filtro anti-blocos |
+| MPV | `b` | Liga/desliga o filtro anti-blocos (deband) |
 
 Prefere VLC? Rode o `play` sem `--player` e abra **Mídia → Abrir Fluxo de Rede** → `udp://@127.0.0.1:1234`.
 
@@ -104,7 +104,7 @@ Mais detalhes: [Guia do Usuário](docs/USER_GUIDE.md).
 | <img src="docs/videos/demo_poster.png" alt="demo" width="100%" /><br>Recepção e reprodução contínuas | <img src="docs/images/probe.png" alt="probe" width="100%" /><br>Diagnóstico do dongle |
 
 ## 8. Para desenvolvedores
-Decodificador nativo em C++17, sem GNU Radio (FFTW3 + VOLK SIMD). Tem dois sincronizadores OFDM (Van de Beek e SP-CIR), equalização MMSE, Viterbi com ponderação CSI, Reed-Solomon com tabela GF(2^8) O(1), fila de captura SPSC lock-free e zero alocação no laço de DSP. Compila para x64 e x86.
+Decodificador nativo em C++17, sem GNU Radio e sem bibliotecas externas de DSP (FFT e SIMD próprios, com a API de FFTW3/VOLK). Tem dois sincronizadores OFDM (Van de Beek e SP-CIR), equalização MMSE, Viterbi com ponderação CSI, Reed-Solomon com tabela GF(2^8) O(1), fila de captura SPSC lock-free e zero alocação no laço de DSP. Compila para x64 e x86.
 
 - [Compilação, testes e release](docs/user/installation.md)
 - [Índice da documentação](docs/INDEX.md): DSP, mapa do código, testes

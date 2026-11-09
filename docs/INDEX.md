@@ -22,7 +22,7 @@ Mapa de navegação para devs e agentes de IA: leia só o necessário.
   - [guidelines.md](agents/guidelines.md): 21 proibições (regressões, remoção de logs, mudar taxa, GNU Radio...).
 - **`adr/`**: [README.md](adr/README.md) com os 28 ADRs (contexto, decisão, consequências) em arquivo único.
 - **`specs/`**
-  - [dsp_pipeline.md](specs/dsp_pipeline.md): cadeia 1-Seg (amostragem, Van de Beek vs SP-CIR, FFTW3, MMSE, demapeamento, CSI, Forney, RS).
+  - [dsp_pipeline.md](specs/dsp_pipeline.md): cadeia 1-Seg (amostragem, Van de Beek vs SP-CIR, FFT, MMSE, demapeamento, CSI, Forney, RS).
   - [code_map.md](specs/code_map.md): módulos C++ (`src/dsp/`, `src/sync/`, `src/mpegts/`, `src/streaming/`, `src/cli/`...).
   - [test_suite.md](specs/test_suite.md): testes unitários, bitstream sintético, I/Q real.
   - [blueprint_isdbt_decoder.md](blueprint_isdbt_decoder.md): blueprint histórico de engenharia/planejamento.

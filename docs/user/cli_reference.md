@@ -23,7 +23,7 @@ Sem opções.
 ```
 
 ## scan
-Varredura em dois passos: triagem rápida de RF (~35 ms/canal) e depois leitura do nome da emissora (tabela SDT). O resultado vai para `./channels.json`.
+Varredura em dois passos: triagem de RF (RSSI ≥ -26 dBFS e correlação de CP ≥ 0.35) e, nos canais aprovados, leitura do nome da emissora (tabela SDT). O resultado vai para `./channels.json` (substitui a lista anterior).
 
 | Opção | Padrão | Descrição |
 |---|---|---|

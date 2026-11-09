@@ -1,4 +1,4 @@
-# Runner de Testes Automatizados para todos os executáveis em build/
+﻿# Runner de Testes Automatizados para todos os executáveis em build/
 $ErrorActionPreference = "Continue"
 
 Write-Host "`n========================================================" -ForegroundColor Cyan

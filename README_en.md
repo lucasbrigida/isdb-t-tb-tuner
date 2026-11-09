@@ -24,7 +24,7 @@ Everything is inside: `isdbtb_rx.exe`, RTL-SDR DLLs, `zadig.exe` (USB driver) an
 ## 2. Requirements
 - RTL-SDR dongle (RTL2832U with R820T, R828D or E4000 tuner).
 - UHF antenna (ideally near a window or outdoors).
-- Windows 7, 8, 10 or 11.
+- Windows 10 (1607+) or 11. The bundled MPV does not run on Windows 7/8.
 
 ## 3. First run
 1. **Install the driver (first time only):** plug in the dongle, open `zadig.exe` → **Options → List All Devices** → pick **`Bulk-In, Interface (Interface 0)`** (or `RTL2838UHIDIR`) → driver **WinUSB** → **Install/Replace Driver**.
@@ -82,7 +82,7 @@ All options: [CLI Reference](docs/user/cli_reference.md) (Portuguese).
 | MPV | `f` | Fullscreen |
 | MPV | `i` | Video stats |
 | MPV | `m` / `9` / `0` | Mute / volume − / volume + |
-| MPV | `d` | Toggle deband filter |
+| MPV | `b` | Toggle deband filter |
 
 Prefer VLC? Run `play` without `--player` and open **Media → Open Network Stream** → `udp://@127.0.0.1:1234`.
 
@@ -104,7 +104,7 @@ More: [User Guide](docs/USER_GUIDE.md) (Portuguese).
 | <img src="docs/videos/demo_poster.png" alt="demo" width="100%" /><br>Continuous reception and playback | <img src="docs/images/probe.png" alt="probe" width="100%" /><br>Dongle diagnostics |
 
 ## 8. For developers
-Native C++17 decoder, no GNU Radio (FFTW3 + VOLK SIMD). It has two OFDM synchronizers (Van de Beek and SP-CIR), MMSE equalization, CSI-weighted Viterbi, Reed-Solomon with an O(1) GF(2^8) table, a lock-free SPSC capture queue and zero allocation in the DSP loop. Builds for x64 and x86.
+Native C++17 decoder, no GNU Radio and no external DSP libraries (built-in FFT and SIMD exposing the FFTW3/VOLK APIs). It has two OFDM synchronizers (Van de Beek and SP-CIR), MMSE equalization, CSI-weighted Viterbi, Reed-Solomon with an O(1) GF(2^8) table, a lock-free SPSC capture queue and zero allocation in the DSP loop. Builds for x64 and x86.
 
 - [Build, tests and release](docs/user/installation.md)
 - [Documentation index](docs/INDEX.md): DSP, code map, tests

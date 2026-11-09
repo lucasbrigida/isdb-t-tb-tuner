@@ -1,4 +1,4 @@
-param(
+﻿param(
     [int]$Port = 1234,
     [ValidateSet('auto', 'x64', 'x86', '64', '32')]
     [string]$Arch = 'auto'

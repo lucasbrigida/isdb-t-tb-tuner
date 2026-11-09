@@ -3,7 +3,7 @@ Para desenvolvedores. Para quem só quer usar o programa, basta a release pronta
 
 ## 1. Pré-requisitos
 - **Toolchain:** [w64devkit](https://github.com/skeeto/w64devkit) (GCC + Make) ou MSYS2 MinGW-w64 (`x86_64-w64-mingw32` / `i686-w64-mingw32`), CMake 3.20+. MSVC também é suportado (`-A x64` / `-A Win32`).
-- **Bibliotecas:** `librtlsdr`, `fftw3f` (float), VOLK e OpenSSL (Crypto). Binários RTL-SDR por arquitetura ficam em `tools/rtl-sdr/x64/` e `tools/rtl-sdr/x86/`.
+- **Bibliotecas:** nenhuma obrigatória no Windows. FFTW3 e VOLK vêm como shims header-only em `include/third_party/`, e o `librtlsdr.dll` é carregado em runtime (`LoadLibrary`) a partir de `tools/rtl-sdr/x64/` ou `tools/rtl-sdr/x86/`. Builds locais opcionais em `deps/` são separados por arquitetura: `deps/fftw3`/`deps/volk-install` (x64) e `deps/fftw3-x86`/`deps/volk-install-x86` (x86). No Linux é preciso OpenSSL (Crypto).
 - **Hardware/driver:** dongle RTL-SDR com WinUSB via Zadig (veja o [Guia do Usuário](../USER_GUIDE.md#1-hardware-e-driver)).
 
 ## 2. Compilar

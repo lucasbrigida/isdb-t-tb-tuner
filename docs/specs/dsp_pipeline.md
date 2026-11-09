@@ -6,6 +6,7 @@
   - Modo 1 `VanDeBeekSync` (baseline): autocorrelação de CP, FFO, FSM tripartite (`Acquisition`, `Tracking` ±4, `LostLock`).
   - Modo 2 `SpCirSynchronizer` (Speth & Meyr / gr-isdbt): 2 estágios — aquisição por CP + rastreio fino SP-CIR (IDFT 64 pts), First Arrival Path, CFO estável sem deriva em multipercurso urbano, FSM com histerese.
 - **Fila USB SPSC lock-free (`SpscCaptureQueue`):** ring estático 64 slots, acquire-release, drops atômicos, descontinuidades sinalizadas → reset coordenado de NCO.
+- **FFT e SIMD embutidos:** `include/third_party/fftw3.h` (FFT radix-2 com a API `fftwf_*`) e `include/third_party/volk/` (multiplicação complexa AVX2/SSE3/escalar escolhida por cpuid). Não há link com libfftw3/libvolk.
 - **Zero alocação no caminho crítico:** sem `std::deque`/`std::vector::erase` nos desentrelaçadores Forney/bits/tempo → `FixedDelayLine`, `DynamicDelayLine`, offset deslizante (`viterbi_stream_offset_`).
 - **Equalização MMSE regularizada adaptativa** (no lugar de ZF): $\sigma^2 = \max(10^{-5}, 0.05 \cdot P_{avg})$; evita amplificar ruído em vales de desvanecimento.
 - **CSI centrado em 128** com linhas de retardo de pesos paralelas aos dados (120 símbolos no MSB): preserva limiares 16QAM, **+2 a 3 dB de SNR** em Rayleigh.

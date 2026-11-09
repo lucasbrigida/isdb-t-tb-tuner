@@ -1,7 +1,7 @@
 # ISDB-T / ISDB-Tb Tuner Player (Windows)
 TV Digital aberta (ISDB-T / ISDB-Tb / SBTVD, sinal 1-Seg) no computador com dongle **RTL-SDR**. Programa portátil: tudo o que precisa está nesta pasta.
 
-**Conteúdo:** `isdbtb_rx.exe` (programa), DLLs do RTL-SDR, `zadig.exe` (driver USB), `tools\mpv\` (player), `LICENSE`.
+**Conteúdo:** `isdbtb_rx.exe` (programa), DLLs do RTL-SDR, `zadig.exe` (driver USB), `tools\mpv\` (player), `LICENSE`. Requer Windows 10 (1607+) ou 11.
 
 ## Primeiro uso
 1. Conecte o dongle RTL-SDR e a antena UHF.
@@ -61,10 +61,10 @@ Ajuda de qualquer comando: `.\isdbtb_rx.exe <comando> --help`. Os arquivos `chan
 | MPV | `f` | Tela cheia |
 | MPV | `i` | Estatísticas do vídeo |
 | MPV | `m` / `9` / `0` | Mudo / volume − / volume + |
-| MPV | `d` | Liga/desliga o filtro anti-blocos |
+| MPV | `b` | Liga/desliga o filtro anti-blocos (deband) |
 | MPV | `q` | Fecha o player |
 
-O MPV já vem configurado para melhorar a imagem do 1-Seg (320x240): ampliação nítida, filtro anti-blocos e movimento suave na taxa do seu monitor.
+O MPV já vem configurado para o 1-Seg (320x240): baixa latência, ampliação da imagem e filtro anti-blocos. A versão 64 bits usa ampliação de alta qualidade (EWA-Lanczos); a 32 bits usa um perfil leve para PCs antigos.
 
 ## Problemas comuns
 **`probe` diz "Nenhum dispositivo RTL-SDR encontrado" / `rtlsdr_open failed`**

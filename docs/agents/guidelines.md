@@ -13,7 +13,7 @@
 10. ❌ mudar frequência sem `rtlsdr_reset_buffer` + espera do PLL. `rtlsdr_set_center_freq` após leituras sem reset → `LIBUSB_ERROR_PIPE -9`, I2C do R820T trava.
 11. ❌ `std::deque` ou alocação dinâmica no loop de símbolos. Usar `FixedDelayLine`/`DynamicDelayLine` pré-alocadas.
 12. ❌ aplicar CSI antes do demapeador ou desvincular pesos das linhas de retardo de bits. CSI só sobre soft-bits centrados em 128; pesos com os mesmos atrasos (120 símbolos no MSB).
-13. ❌ trocar a fila SPSC lock-free por mutex ou ignorar gaps de sequência sem `reset_reception_stream` (descontinuidade de fase no NCO).
+13. ❌ trocar a fila SPSC lock-free por mutex ou ignorar gaps de sequência sem reset coordenado (`reset_play_reception_stream` / `reset_scan_reception`) (descontinuidade de fase no NCO).
 14. ❌ modificar o caminho de execução de `src/dsp/ofdm_sync.cpp` (`VanDeBeekSync`, baseline).
 15. ❌ rejeitar `--ofdm` fora de `play`; em `scan`/`probe` aceitar e descartar em silêncio.
 16. ❌ remover `reload_mpv_player(udp_port)` na troca de canal (MPV precisa de `loadfile replace` via IPC para rearmar demuxers/decoders na mesma janela).

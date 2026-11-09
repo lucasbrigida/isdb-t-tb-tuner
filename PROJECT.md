@@ -1,5 +1,5 @@
 # Project: isdb_t_isdb_tb_tuner_player (CLI Native)
-Native CLI decoder/player for ISDB-T/ISDB-Tb 1-Seg via RTL-SDR; SIMD VOLK + FFTW3; MPEG-TS over UDP to embedded MPV or VLC.
+Native CLI decoder/player for ISDB-T/ISDB-Tb 1-Seg via RTL-SDR; built-in header-only FFT/SIMD shims exposing the FFTW3/VOLK APIs (`include/third_party/`); MPEG-TS over UDP to embedded MPV or VLC.
 
 ## Architecture
 - **Language:** C++17; Windows x64/x86, Linux.
@@ -10,7 +10,7 @@ Native CLI decoder/player for ISDB-T/ISDB-Tb 1-Seg via RTL-SDR; SIMD VOLK + FFTW
   - Dual OFDM sync via `IOFDMSynchronizer`:
     - Mode 1 `VanDeBeekSync` (baseline): tripartite FSM (`Acquisition`, `Tracking` ±4 samples, `LostLock`), CP correlation + FFO via Van de Beek ML, SIMD VOLK.
     - Mode 2 `SpCirSynchronizer` (Speth & Meyr / gr-isdbt port): coarse CP acquisition, SP-CIR timing via 64-pt IDFT, First Arrival Path (≥ 25% $P_{\max}$), integer CFO via TMCC, fractional CFO with asymptotic IIR + ±0.5 Hz deadband (no drift under urban multipath), SCO loop, lock hysteresis.
-  - 2048-pt FFTW3 FFT, continuous fine symbol timing.
+  - 2048-pt FFT (built-in radix-2 shim with the FFTW3 API), continuous fine symbol timing.
   - IFO tracking; SP/CP pilot equalization ($X^{11} + X^2 + 1$).
   - Regularized MMSE equalization with adaptive noise floor.
   - TMCC DBPSK + BCH(273,191).
@@ -28,7 +28,7 @@ Native CLI decoder/player for ISDB-T/ISDB-Tb 1-Seg via RTL-SDR; SIMD VOLK + FFTW
 
 ## CLI
 - `probe`: detect/validate RTL-SDR and DSP environment.
-- `scan`: two-pass deep scan UHF 14–69 with SDT station naming.
+- `scan`: two-pass scan of UHF channels (default 14–45, `-s`/`-e` to change) with SDT station naming.
 - `list`: show `channels.json`.
 - `play`: tune by number or station name, stream UDP, optional MPV (`--player`).
   - `--ofdm 1` (default): Van de Beek baseline. `--ofdm 2`: robust SP-CIR for weak/multipath/Doppler.

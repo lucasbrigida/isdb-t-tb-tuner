@@ -3,7 +3,7 @@ Decodificador ISDB-T/ISDB-Tb. Consulte a doc detalhada só quando necessário (e
 
 ## 1. Visão geral
 - CLI C++17 de alta performance, TV Digital ISDB-T/ISDB-Tb 1-Seg (móvel).
-- Sem GNU Radio: DSP próprio com FFTW3 + SIMD.
+- Sem GNU Radio nem libs externas de DSP: FFT e SIMD próprios em shims header-only com a API de FFTW3/VOLK (`include/third_party/`).
 - Hardware: RTL-SDR (RTL2832U + R820T/R828D/E4000).
 - Saída: MPEG-TS via UDP (`udp://@127.0.0.1:1234`) para MPV/VLC.
 

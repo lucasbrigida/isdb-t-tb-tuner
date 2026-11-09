@@ -11,9 +11,10 @@ Obrigatórios para qualquer edição de código.
 - URL padrão de escuta: `udp://@127.0.0.1:1234`.
 - Nunca enviar pacotes de 188 B isolados (sobrecarga de interrupções, travamentos no player).
 
-### 3. Modo binário no Windows (`_setmode`)
-- Windows abre `stdout`/arquivos em modo texto (`0x0A` → `0x0D 0x0A`).
-- Ao redirecionar TS para `stdout`, manter `Platform::set_binary_stdout()` (`_setmode(_fileno(stdout), _O_BINARY)`).
+### 3. Saída binária no Windows
+- Windows abre `stdout`/arquivos em modo texto (`0x0A` → `0x0D 0x0A`), o que corrompe MPEG-TS.
+- Hoje o TS sai por UDP e por `--output-ts`, aberto com `std::ios::binary` (`cmd_play.cpp`). Não há saída de TS por `stdout`.
+- Qualquer nova saída binária (arquivo ou `stdout`) deve abrir em modo binário (`std::ios::binary`; para `stdout`, `_setmode(_fileno(stdout), _O_BINARY)`).
 
 ### 4. Persistência de canais estritamente local
 - `channels.json` fica **só** no diretório de execução (`./channels.json`).
@@ -22,7 +23,7 @@ Obrigatórios para qualquer edição de código.
 ### 5. Fila SPSC lock-free e resets coordenados de NCO
 - Leitura USB ↔ DSP **deve** usar `SpscCaptureQueue<64>` (ring estático pré-alocado).
 - A fila rastreia sequência monotônica e sinaliza lacunas (`discontinuity_before`).
-- Descontinuidade → `reset_reception_stream` (descarta `stream_iq_buf`, reinicia fases do NCO). Nunca correlacionar sobre saltos de amostras.
+- Descontinuidade → reset coordenado (`reset_play_reception_stream` em `cmd_play.cpp`, `reset_scan_reception` em `cmd_scan.cpp`): descarta `stream_iq_buf`, reinicia fases do NCO. Nunca correlacionar sobre saltos de amostras.
 
 ### 6. Zero alocação no heap no loop quente de DSP
 - Retardos: `FixedDelayLine<T, MaxCapacity>` (Forney $12 \times 187$ bytes, bits $4 \times 120$ floats) e `DynamicDelayLine<T>` (pré-alocação única no init; 384 ramos de tempo).

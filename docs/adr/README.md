@@ -1,5 +1,6 @@
 # ADRs (Architecture Decision Records)
 Todas as decisões de arquitetura/engenharia do projeto, em arquivo único.
+Os ADRs registram o contexto da época. Onde citam `src/main.cpp`, a lógica hoje está em `src/cli/cmd_play.cpp`, `cmd_scan.cpp`, `cmd_epg.cpp`, `src/radio/rtlsdr_device.cpp` e `src/platform/platform_utils.cpp` (`main.cpp` só faz o parse da CLI). Divergências conhecidas estão marcadas como **Estado atual**.
 
 | ADR | Título |
 |---|---|
@@ -55,6 +56,7 @@ Todas as decisões de arquitetura/engenharia do projeto, em arquivo único.
 **Contexto:** `gr-isdbt` é módulo out-of-tree do GNU Radio, que arrasta Python, Boost, log4cpp, Thrift, PyBind11, Qt5/6, UHD → deploy Windows volumoso e frágil.
 **Decisão:** núcleo C++17 puro com os algoritmos essenciais; únicas dependências de cálculo: FFTW3 e VOLK.
 **Consequências:** binário < 2 MB, partida rápida, sem interpretador Python no DSP; nativo em Windows (MinGW-w64, MSVC) e Linux.
+**Estado atual:** o build usa shims header-only com a API de FFTW3 e VOLK (`include/third_party/`); as libs reais em `deps/` não são referenciadas pelo executável. O binário Release hoje tem ~4,2 MB (x64) e ~3,4 MB (x86).
 
 <a id="adr-005"></a>
 ## ADR 005: Reed-Solomon RS(204,188,t=8) em GF(2^8)
@@ -108,6 +110,7 @@ $|\Gamma(d)|^2/\Phi(d)^2$ tem pico agudo na transição CP → símbolo útil. F
 1. `ShellExecuteA(NULL, "open", vlc_path, url, NULL, SW_SHOWNORMAL)`: lançamento assíncrono direto, sem `cmd.exe`.
 2. Documentar que o título sem `@` é estético e não afeta o binding.
 **Consequências:** VLC abre de forma confiável; argumentos UDP íntegros.
+**Estado atual:** o programa não lança mais o VLC (substituído pelo MPV embutido, ADR 014); o VLC é aberto manualmente em `udp://@127.0.0.1:1234`.
 
 <a id="adr-011"></a>
 ## ADR 011: Equalização ZF → MMSE regularizado
@@ -133,6 +136,7 @@ $$\hat{X}_k = Y_k \frac{H_k^*}{|H_k|^2 + \sigma^2}, \quad \sigma^2 = \max(10^{-5
 1. **Passo 1 (triagem RF, ~35 ms/canal):** `RSSI >= -13.0 dBFS` e pico CP `>= 0.60` (sinais reais > 0.90).
 2. **Passo 2 (nome via SDT):** só candidatos; `reader_thread` + OFDM/MPEG-TS; monitora SDT (PID `0x0011`), timeout 3.0 s, sai ao obter o nome (ex.: `BAND HD`, `GLOBO`, `SBT`, `RECORD`).
 **Consequências:** 55 canais em **< 15 s** (antes > 3 min); zero falsos positivos; `channels.json` com nomes oficiais da sinalização.
+**Estado atual (`src/cli/cmd_scan.cpp`):** o fluxo em dois passos continua, mas os parâmetros mudaram depois desta decisão (commit "melhorias nos critérios de scan"): Passo 1 usa `RSSI >= -26.0 dBFS` e CP `>= 0.35` sobre 65536 amostras; o timeout da SDT é configurável por `scan -t` (padrão 30 s); a faixa padrão é UHF 14–45 (`-s`/`-e`).
 
 <a id="adr-014"></a>
 ## ADR 014: VLC externo → MPV embutido com Job Object e shaders
@@ -143,6 +147,7 @@ $$\hat{X}_k = Y_k \frac{H_k^*}{|H_k|^2 + \sigma^2}, \quad \sigma^2 = \max(10^{-5
    - `sigmoid-upscaling=yes`: evita halos nas bordas.
    - `deband=yes`: dither adaptativo contra blocos/gradações de baixa taxa.
    - `video-sync=display-resample` + `interpolation=yes` + `tscale=oversample`: sincroniza quadros ao refresh do monitor (60/120/144/240 Hz), sem judder.
+   - ⚠ Estado atual: `tools/mpv/x64/mpv.conf` e `tools/mpv/x86/mpv.conf` usam `video-sync=audio` + `interpolation=no` (baixa latência). O x86 usa perfil leve (`profile=fast`, `scale=spline36`, `hwdec=no`, deband reduzido) desde o commit "fix mpv erro 32 bits".
 2. **Job Object:** MPV via `CreateProcessA`, vinculado a Job Object com `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`:
    ```cpp
    JOBOBJECT_EXTENDED_LIMIT_INFORMATION jeli{};
@@ -152,6 +157,7 @@ $$\hat{X}_k = Y_k \frac{H_k^*}{|H_k|^2 + \sigma^2}, \quad \sigma^2 = \max(10^{-5
    ```
    O kernel encerra o MPV se a CLI terminar (`Ctrl+C`, `signal_handler`, fechar terminal, crash), sem zumbis.
 **Consequências:** out-of-the-box: baixar zip, `isdbtb_rx.exe play -c 23 --player`, vídeo aprimorado abre sozinho; encerramento limpo.
+**Estado atual:** MPV por arquitetura em `tools/mpv/x64/` (snapshot `v0.41.0-1374-g48fca90e8`) e `tools/mpv/x86/` (0.41.0 estável), ADRs 025/027. Lançado por `launch_mpv` (`platform_utils.cpp`) com `--idle=yes` e IPC `\\.\pipe\isdbtb_mpv` (Erro 25).
 
 <a id="adr-015"></a>
 ## ADR 015: UDP sem flush prematuro, alinhado a 1316 B
@@ -192,6 +198,7 @@ $$\hat{X}_k = Y_k \frac{H_k^*}{|H_k|^2 + \sigma^2}, \quad \sigma^2 = \max(10^{-5
 2. **Índices atômicos:** `tail_` (escrita) e `head_` (leitura) com `memory_order_acquire`/`memory_order_release`, isolados em `alignas(64)` (sem false sharing entre thread USB e DSP).
 3. **Gaps e reset:** produtor sem espaço (`(tail - head) >= SlotCount`) incrementa `dropped_` e marca `pending_discontinuity = true` → próximo bloco com `discontinuity_before = true`. Consumidor (`src/main.cpp`): se `block->sequence != expected_sequence` ou `discontinuity_before`, chama `reset_reception_stream(...)`: limpa `stream_iq_buf`, reseta fase do NCO (`sync.reset()`) e o demodulador (`demod.reset()`).
 **Consequências:** zero `malloc`/`new` na captura; aquisição/publicação < 15 ns (atômicos puros); lacunas USB não corrompem Forney/Viterbi.
+**Estado atual:** o reset coordenado chama-se `reset_play_reception_stream` (`cmd_play.cpp`) e `reset_scan_reception` (`cmd_scan.cpp`); `cmd_epg.cpp` usa a mesma fila.
 
 <a id="adr-019"></a>
 ## ADR 019: Zero alocação no loop quente; `FixedDelayLine`/`DynamicDelayLine`
@@ -311,6 +318,7 @@ inline uint8_t ReedSolomon::gf_mul(uint8_t a, uint8_t b) const noexcept {
 4. **Release (`scripts/build_release.ps1`):** `-Arch all` (padrão), `x64` ou `x86`; CTest nas duas arquiteturas; staging isolado; zips `yyyymmdd_v1.0.0_win64.zip` e `yyyymmdd_v1.0.0_win32.zip`; `objdump -f` confere `pei-x86-64`/`pei-i386`.
 5. **MPV i686 estável + smoke test:** só a release oficial `mpv-0.41.0-i686` (não snapshots `git`, que regrediram com `OpenSSL internal error: assertion failed: lock != NULL`); smoke test `mpv.exe --version` com saída 0 e sem erro OpenSSL antes de empacotar.
 **Consequências:** Windows 7/8/10/11 em x64 e x86; pacotes autocontidos e portáteis; compila e passa 100% dos testes determinísticos em 32 e 64 bits.
+**Estado atual:** o MPV 0.41 embutido exige Windows 10 1607+ (requisito oficial do MPV), então a release com `--player` vale para Windows 10/11. O suporte a 7/8 se limitaria ao receptor (`_WIN32_WINNT=0x0600`) com outro player, e não foi validado.
 
 <a id="adr-026"></a>
 ## ADR 026: Persistência local portátil (`channels.json`)
@@ -362,6 +370,7 @@ inline uint8_t ReedSolomon::gf_mul(uint8_t a, uint8_t b) const noexcept {
      ```
      Converge suavemente os 117.2 Hz até -229.1 Hz (recupera os **2 pacotes TS válidos** no Canal 24); com $|ffo\_res| < 0.5$ Hz, `ffo_res` = 0 → **NCO congelado em regime**, sem integrar $\theta_{bias}$; SNR estável em 9.5 dB no Canal 28.
    - **CIR instantânea + First Arrival Path:** remove a média IIR `pdp_avg_`; CIR instantânea com coerência PAPR ≥ 12.0; em $\tau \in [-16 \dots +16]$ escolhe o 1º caminho ≥ 25% de $P_{\max}$ (evita centro de gravidade de reflexões, blinda contra ISI).
+     ⚠ **Estado atual — divergência não resolvida:** `src/sync/sp_cir_sync.cpp` ainda aplica a média IIR (`pdp_avg_ = 0.85·pdp_avg_ + 0.15·|cir|²`) antes de `detect_first_path`, desde o mesmo commit que introduziu este ADR. Remover exige revalidar `test_regression_ofdm2` e o golden file.
 4. **Nome canônico `SpCirSynchronizer`:** substitui `RobustGRISDBTSync` (`include/sync/sp_cir_sync.h`, `src/sync/sp_cir_sync.cpp`); alias de retrocompatibilidade `using RobustGRISDBTSync = SpCirSynchronizer`.
 
 **Consequências:**

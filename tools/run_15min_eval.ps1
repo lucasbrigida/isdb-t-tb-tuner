@@ -1,4 +1,4 @@
-# Script de orquestração do teste headless de 15 minutos (900s)
+﻿# Script de orquestração do teste headless de 15 minutos (900s)
 Write-Host "[1/4] Disparando MPV headless de telemetria..."
 $mpv = Start-Process -FilePath "tools/mpv/x64/mpv.exe" `
   -ArgumentList "udp://@127.0.0.1:1234", "--vo=null", "--ao=null", "--no-terminal", `

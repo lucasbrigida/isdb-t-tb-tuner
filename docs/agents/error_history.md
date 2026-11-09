@@ -1,5 +1,5 @@
 # Histórico de Erros Corrigidos (gr-isdbt)
-29 erros críticos corrigidos (contra git-artes/gr-isdbt e sinal do ar). **Nunca reintroduzir.** ❌ = errado, ✅ = correto.
+29 erros críticos corrigidos (contra git-artes/gr-isdbt e sinal do ar). **Nunca reintroduzir.** ❌ = errado, ✅ = correto. Os ❌ citam arquivos da época (ex.: `main.cpp`, hoje só faz o parse da CLI); os ✅ indicam onde a regra vive hoje.
 
 ### Erro 1: Tap invertido no LFSR PRBS dos pilotos (`X^11 + X^2 + 1`)
 ❌ PRBS 11 bits (`reg = 0x7FF`) deslocava à direita (`reg >> 1`) mas fazia XOR com `reg >> 9` (pensando em $1 + X^9 + X^{11}$) → polaridade invertida em ~50% dos SP, estimativa de canal destruída.
@@ -28,26 +28,26 @@ Modo 3: PRBS avança pelas 5617 portadoras ativas; Segmento 0 (físico 6) começ
 
 ### Erro 5: Descarte de amostras e reset de fase entre leituras USB (`main.cpp`, `ofdm_sync.cpp`)
 ❌ 1. `find_symbol_boundary` retornava `best_d` em qualquer posição do buffer de 32768 amostras (pulando símbolos); `main.cpp` descartava as amostras finais que não completavam `2176` a cada `rtlsdr_read_sync`. 2. `correct_frequency_offset` zerava a fase do NCO a cada bloco de 32768. 3. `main.cpp` injetava blocos `standby` sintéticos (PAT/PMT falsas em PID `0x0000`) quando um bloco não gerava TS, sobrescrevendo a PAT real no VLC.
-✅ 1. `first_d = best_d % total_symbol_len` (sempre o 1º símbolo do buffer). 2. `OfdmSync::correct_frequency_offset` acumula `current_phase_` entre blocos. 3. `cmd_play` acumula em `stream_iq_buf` preservando residuais, aplica `fine_symbol_sync` e **não** injeta `standby` sobre o fluxo real.
+✅ (`ofdm_sync.cpp`, `cmd_play.cpp`) 1. `first_d = best_d % total_symbol_len` (sempre o 1º símbolo do buffer). 2. `OfdmSync::correct_frequency_offset` acumula `current_phase_` entre blocos. 3. `cmd_play` acumula em `stream_iq_buf` preservando residuais, aplica `fine_symbol_sync` e **não** injeta `standby` sobre o fluxo real.
 
 ### Erro 6: Permutação em frequência e atraso do bit interleaver
-✅ `FREQ_PERM_MODE3[384]` (`src/dsp/oneseg_demodulator.cpp`) é bijeção exata de `0..383` idêntica a `d_random_perm_mode3` (`gr-isdbt/lib/frequency_deinterleaver_impl.cc`). Nunca trocar por fórmula modular aproximada. QPSK: MSB ($Re < 0$) atrasa `120` símbolos no receptor (`bit_deint_fifos_[1]`); LSB ($Im < 0$) atraso `0`.
+✅ `FREQ_PERM_MODE3[384]` (`src/dsp/oneseg_demodulator.cpp`) é bijeção exata de `0..383` idêntica a `d_random_perm_mode3` (`gr-isdbt/lib/frequency_deinterleaver_impl.cc`). Nunca trocar por fórmula modular aproximada. QPSK: MSB ($Re < 0$) atrasa `120` símbolos no receptor (`bit_delay_lines_[1]`); LSB ($Im < 0$) atraso `0`.
 
 ### Erro 7: Standby sintético (`TsGenerator`) → tela verde no VLC
 ❌ `cmd_play` enviava `TsGenerator` por padrão antes/durante a recepção com `decoded_pkts` vazio (imagem verde; PAT → PMT `0x1000`, vídeo PID `0x0100`). O demuxer do VLC travava nesses PIDs e ignorava os reais (ex.: BAND HD vídeo `0x0111`, áudio `0x0112`).
-✅ (`main.cpp`) Standby sintético só com `--test-pattern` explícito.
+✅ (`cmd_play.cpp`) Standby sintético só com `--test-pattern` explícito.
 
 ### Erro 8: Reset prematuro do demodulador em quedas transientes de correlação
 ❌ `unlock_counter > 10` chamava `demod.reset()` após 10 leituras de 32768 (~160 ms) sem pico de CP. Mas o desentrelaçador de tempo ($I=4$, 384 símbolos ≈ 435 ms) + Forney (187 pacotes ≈ 675 ms) precisam de ~1,1 s contínuo até o 1º pacote → qualquer flutuação de 160 ms zerava as FIFOs.
-✅ (`main.cpp`) `unlock_counter > 200` (~3,2 s contínuos sem portadora antes de resetar).
+✅ (`cmd_play.cpp`) `unlock_counter > 200` (~3,2 s contínuos sem portadora antes de resetar).
 
 ### Erro 9: Ausência de PAT (PID 0x0000) no 1-Seg ISDB-Tb
 ❌ ABNT NBR 15603: Segmento 0 (1-Seg) transmite a PMT direto no PID `0x1FC8`, sem PAT em `0x0000` (que vai nos segmentos Full-Seg 1–12). VLC e players genéricos exigem PAT.
-✅ (`psi_parser.cpp`/`main.cpp`) `PsiParser::build_pat_packet` sintetiza PAT válida com CRC32 (~10×/s) → PMT `0x1FC8`; VLC mapeia H.264 (`0x0111`) e AAC (`0x0112`).
+✅ (`psi_parser.cpp`/`cmd_play.cpp`) `PsiParser::build_pat_packet` sintetiza PAT válida com CRC32 (~10×/s) → PMT `0x1FC8`; VLC mapeia H.264 (`0x0111`) e AAC (`0x0112`).
 
 ### Erro 10: Estabilização do PLL do R820T
 ❌ `rtlsdr_set_center_freq` seguido de leitura/ajuste de ganho imediato → `[R82XX] PLL not locked!`.
-✅ (`main.cpp`) `std::this_thread::sleep_for(std::chrono::milliseconds(100))` logo após sintonizar.
+✅ (`rtlsdr_device.cpp`: `safe_set_freq`) `std::this_thread::sleep_for(std::chrono::milliseconds(100))` logo após sintonizar.
 
 ### Erro 11: Lock prematuro de IFO em lóbulos laterais (limiar 0.35)
 ❌ `max_coh > 0.35f` aceitava lóbulos espúrios de SP (pico ~0.36) como portadora central (`ifo_locked_ = true`), restringindo a busca a `[ifo_bins_, ifo_bins_]`. Preso a 2 portadoras do real (ex.: IFO=-25 vs -27), as 4 portadoras TMCC (101, 131, 286, 349) liam lixo em vez de DBPSK → BCH(273,191) falhava → `TMCC: SYNC` e `TS do Ar: 0 pkts` indefinidamente.
@@ -55,11 +55,11 @@ Modo 3: PRBS avança pelas 5617 portadoras ativas; Segmento 0 (físico 6) começ
 
 ### Erro 12: Captura USB no mesmo thread do DSP (dropouts)
 ❌ `rtlsdr_read_sync` síncrono no loop de FFTW/deinterleave/Viterbi/RS. Nos ~15–20 ms de processamento + UDP, o buffer USB de 64 KB no kernel transbordava → perda de amostras → quebra da sequência de 204 símbolos do TMCC → sem `TMCC: LOCK`.
-✅ (`main.cpp`) `reader_thread` dedicado de alta prioridade enche fila thread-safe (`std::queue<std::vector<uint8_t>>` + `std::mutex` + `std::condition_variable`, limite 64 blocos); thread principal consome sem bloquear o RTL-SDR. (Substituído depois por SPSC, ver Erro 20.)
+✅ (`cmd_play.cpp`, `cmd_scan.cpp`, `cmd_epg.cpp`) `reader_thread` dedicado de alta prioridade enche fila thread-safe (`std::queue<std::vector<uint8_t>>` + `std::mutex` + `std::condition_variable`, limite 64 blocos); thread principal consome sem bloquear o RTL-SDR. (Substituído depois por SPSC, ver Erro 20.)
 
 ### Erro 13: VLC via shell vs ShellExecute; título da janela do VLC
 ❌ 1. `cmd.exe /c start` com aspas aninhadas e espaços (`Program Files`) falhava silenciosamente. 2. Confusão: VLC usa o `@` de `udp://@127.0.0.1:1234` para `bind()` local, mas a UI Qt remove o `@` do título (`udp://127.0.0.1:1234 - VLC media player`). Comportamento nativo; o `@` **não** foi perdido.
-✅ (`main.cpp`) `ShellExecuteA(NULL, "open", vlc_bin, streamer.url().c_str(), NULL, SW_SHOWNORMAL)` com `udp://@127.0.0.1:1234`, sem `cmd.exe`.
+✅ Na época: `ShellExecuteA(NULL, "open", vlc_bin, streamer.url().c_str(), NULL, SW_SHOWNORMAL)` com `udp://@127.0.0.1:1234`, sem `cmd.exe`. Hoje o VLC não é lançado pelo programa; `--player` abre o MPV via `CreateProcessA` (`platform_utils.cpp`, ADR 014). Regra que permanece: nunca lançar players via `cmd.exe /c start`.
 
 ### Erro 14: Colisão de endpoints USB (-9 / `LIBUSB_ERROR_PIPE`) e `play` encerrando sem drenar
 ❌
@@ -67,13 +67,13 @@ Modo 3: PRBS avança pelas 5617 portadoras ativas; Segmento 0 (físico 6) começ
 2. `cmd_play`: após `reader_thread` terminar, `rtlsdr_close(dev)` imediato sem resetar/drenar o bulk `0x81` → `r82xx_standby` (`reg=06`) falhava: `rtlsdr_demod_write_reg failed with -9`, `r82xx_write: i2c wr failed=-9 reg=06 len=1`.
 3. `cmd_play` sintonizava antes de calibrar ganho/AGC e com delay de PLL de 80 ms (vs 100) → `[R82XX] PLL not locked!`.
 4. Scan permissivo (`RSSI >= -18.0 dBFS`, CP `>= 0.35`): ruído térmico UHF fica em `-17.0`..`-17.9 dBFS` e ruído gaussiano atinge 0.35 → canais vazios 14–44 marcados "SINAL LOCK".
-✅ (`main.cpp`)
+✅ (`rtlsdr_device.cpp`, `cmd_play.cpp`, `cmd_scan.cpp`)
 1. `safe_set_freq(dev, freq_hz)`: `rtlsdr_reset_buffer(dev)` antes e depois de `rtlsdr_set_center_freq`, pausa 100 ms (Regra 8).
 2. `cmd_play`: antes de sintonizar, configurar sample rate, ganho fixo calibrado e AGC desligado.
 3. Encerramento: após `reader_thread.join()`, `rtlsdr_reset_buffer(dev)` + 50 ms, depois `rtlsdr_close(dev)` → tuner entra em standby OK.
 4. Scan em dois passos:
-   - Passo 1 (triagem RF, ~35 ms/canal): `RSSI >= -13.0 dBFS` e pico CP `>= 0.60`; ruído descartado em ~35 ms.
-   - Passo 2 (nome via SDT): só candidatos; `reader_thread` + OFDM/MPEG-TS; monitora SDT (PID `0x0011`), timeout 3,0 s, sai ao obter o nome.
+   - Passo 1 (triagem RF): originalmente `RSSI >= -13.0 dBFS` e pico CP `>= 0.60`. **Atual** (`cmd_scan.cpp`, commit "melhorias nos critérios de scan"): `RSSI >= -26.0 dBFS` e CP `>= 0.35`, lendo 65536 amostras por canal. ⚠ Ao mexer nesses limiares, valide falsos positivos em canais vazios (o problema do item 4).
+   - Passo 2 (nome via SDT): só candidatos; `reader_thread` + OFDM/MPEG-TS; monitora SDT (PID `0x0011`) e sai ao obter o nome. Timeout configurável por `scan -t` (padrão 30 s; originalmente 3,0 s).
 
 ### Erro 15: Alocações no loop quente e `std::deque` nos desentrelaçadores
 ❌ Tempo (384 ramos), bits (4) e Forney (12) em `std::deque` (alocação por push/pop); `process_symbol` alocava vetores locais (`equalized_`, `data_carriers_`, `freq_deint_`, `time_deint_`) por chamada → dezenas de milhares de `malloc`/`free`/s, fragmentação, poluição L1/L2, picos de latência.
@@ -111,10 +111,10 @@ inline uint8_t gf_mul(uint8_t a, uint8_t b) const noexcept {
 
 ### Erro 20: Fila bloqueante (`std::mutex`) sem sequência nem reset coordenado
 ❌ `reader_thread` com `std::mutex` + `std::condition_variable` + `std::queue<std::vector<uint8_t>>`: contenção e alocação de 64 KB por bloco. Overflow descartava blocos sem sinalizar → sincronizador correlacionava dados descontínuos.
-✅ (`spsc_capture_queue.hpp`/`main.cpp`)
+✅ (`spsc_capture_queue.hpp`/`cmd_play.cpp`)
 1. `SpscCaptureQueue<64>` lock-free SPSC, ring estático de 64 blocos × 65536 bytes.
 2. Cada bloco: `sequence` atômico 64 bits + flag `discontinuity_before`.
-3. Gap/descontinuidade → `reset_reception_stream` limpa residuais e reinicia fases do NCO.
+3. Gap/descontinuidade → reset coordenado (`reset_play_reception_stream` em `cmd_play.cpp`, `reset_scan_reception` em `cmd_scan.cpp`) limpa residuais e reinicia fases do NCO.
 
 ### Erro 21: Remoção do reload IPC do player na troca de canal (`reload_mpv_player`)
 ❌ Agente removeu `reload_mpv_player(udp_port)` em `cmd_play.cpp` ("manter player anexado"). Emissoras 1-Seg têm PCR/PTS/DTS, resolução e PIDs não coordenados → demuxers FFmpeg do MPV travam/congelam no último quadro.
@@ -128,7 +128,7 @@ inline uint8_t gf_mul(uint8_t a, uint8_t b) const noexcept {
 3. PAT sintetizada pelo `PsiParser` enviada assim que a PMT do novo canal existir, antes da mídia.
 
 ### Erro 23: Mutilação do `RobustGRISDBTSync` e adulteração de documentação
-❌ Ao ligar `--ofdm 2` em `cmd_play.cpp`, agente apagou tabelas de SP (`sp_indices_`, `init_sp_tables()`, `fft_in_scratch_`), renomeou `refine_timing_sp` → `refine_timing_cp` e alterou a doc para esconder.
+❌ Ao ligar `--ofdm 2` em `cmd_play.cpp`, agente apagou tabelas de SP (`sp_indices_`, `init_sp_tables()`, `fft_in_`), renomeou `refine_timing_sp` → `refine_timing_cp` e alterou a doc para esconder.
 ✅ Plugar via `make_synchronizer` preservando estruturas SP, `refine_timing_sp` e a doc oficial do port gr-isdbt. **Nunca** alterar doc para justificar remoções/simplificações.
 
 ### Erro 24: Testes de rede com bind local no CTest

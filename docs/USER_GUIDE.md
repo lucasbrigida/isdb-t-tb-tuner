@@ -18,16 +18,21 @@ Abra o PowerShell ou o CMD na pasta do programa.
 .\isdbtb_rx.exe probe
 ```
 ```text
+=== Inspecao de Hardware RTL-SDR e Aceleracao DSP ===
+
 [RTL-SDR] Dispositivos conectados: 1
   - Dongle #0: Generic RTL2832U OEM
     Fabricante: Realtek | Serial: 00000001
-    Ganhos de RF suportados (29): 0 0.9 1.4 2.7 3.7 7.7 8.7 ... 49.6 dB
+    Ganhos de RF suportados (29): 0 0.9 1.4 2.7 3.7 7.7 8.7 12.5 ... 49.6 dB
+
 [SIMD/DSP] VOLK Versao 3.1.2
-  - Aceleracao AVX2: ATIVADA
+  - Hardware CPUID: AVX2: SIM | FMA: SIM | SSE2: SIM
+  - Kernel Ativo NCO: AVX2+FMA (256-bit)
 ```
+Sem dongle, aparece `Dispositivos conectados: 0` e um aviso para conferir o cabo e o driver.
 
 ### 2.2 `scan`: procurar canais
-Em cada canal, faz uma triagem rápida de RF (~35 ms). Nos canais com sinal, lê o nome da emissora pela tabela SDT (até 30 s). O resultado é salvo em `./channels.json`.
+Em cada canal, faz uma leitura curta de RF e só segue para os que têm RSSI ≥ -26 dBFS e correlação de CP ≥ 0.35. Nesses, lê o nome da emissora pela tabela SDT (até 30 s, ajustável com `-t`). O resultado é salvo em `./channels.json`.
 ```powershell
 .\isdbtb_rx.exe scan                 # canais 14 a 45 (padrão)
 .\isdbtb_rx.exe scan -s 20 -e 25     # faixa específica
@@ -55,9 +60,9 @@ Força: `[#####]` Alto ≥ -6 dBFS, `[#### ]` Normal ≥ -12 dBFS, `[###  ]` Mod
 - **Interface:** a lista de canais salvos fica no terminal. Use `▲`/`▼` (ou `k`/`j`) e `Enter` para trocar de canal sem fechar o player; `q` ou `Ctrl+C` encerra. O MPV aberto com `--player` fecha junto, porque está ligado ao programa por um Job Object do Windows.
 - **Status em tempo real (`-v`):**
   ```text
-  [Status] Ch 23 | RSSI: -6.9 dBFS | OFDM: LOCK (0.98) | TMCC: LOCK | SNR: 18.5 dB | TS: 542 pkts (RS: 0 corr / 0 drop) | Drop: 0 | BAND HD
+  [Status] Ch 23 | SIMD: AVX2+FMA (256-bit) | RSSI: -6.9 dBFS | OFDM: LOCK (0.98) | TMCC: LOCK | SNR: 18.5 dB | TS: 542 pkts (310 p/s) | RS: 0 corr / 0 drop | Resets: 0 | Drop: 0 | BAND HD
   ```
-  `TMCC: LOCK` e `TS` subindo indicam que o vídeo está chegando.
+  `TMCC: LOCK` e `TS` subindo indicam que o vídeo está chegando. `SYNC` no lugar de `LOCK` significa que ainda está sincronizando.
 - **Modo de sincronismo (`--ofdm`):**
 
   | Modo | Quando usar |
@@ -67,7 +72,7 @@ Força: `[#####]` Alto ≥ -6 dBFS, `[#### ]` Normal ≥ -12 dBFS, `[###  ]` Mod
 
   Aceita `--ofdm 2` ou `--ofdm=2`. Só vale no `play`; nos outros comandos é ignorada.
 - **Ganho (`-g`, padrão 28 dB):** longe da torre use 38, 42 ou 49.6; perto, 20 (evita saturar o conversor).
-- **Player MPV:** vem configurado para o 1-Seg (320x240/320x180): ampliação EWA-Lanczos, filtro anti-blocos (deband) e interpolação de movimento na taxa do monitor (60–240 Hz). Teclas: `f` tela cheia, `i` estatísticas, `d` deband, `m` mudo, `9`/`0` volume, `q` fecha.
+- **Player MPV:** vem configurado para o 1-Seg (320x240/320x180), com baixa latência (`cache=no`, sincronia pelo áudio). Na versão 64 bits a ampliação é EWA-Lanczos com filtro anti-blocos (deband) forte; na 32 bits é um perfil leve (`spline36`, deband suave, sem decodificação por hardware) para PCs antigos. Teclas: `f` tela cheia, `i` estatísticas, `b` deband, `m` mudo, `9`/`0` volume, `q` fecha.
 - **Outro player:** rode `play` sem `--player`.
   - MPV manual (repositório): `.\scripts\play_mpv.bat`.
   - VLC: **Mídia → Abrir Fluxo de Rede** (`Ctrl+N`) → `udp://@127.0.0.1:1234`, cache de rede 2000 ms. O título do VLC mostra a URL sem o `@`; é normal.
