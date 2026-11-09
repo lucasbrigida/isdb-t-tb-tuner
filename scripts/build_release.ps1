@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Script de automação para compilação, empacotamento e validação de releases do ISDB-T/ISDB-Tb Tuner Player.
 

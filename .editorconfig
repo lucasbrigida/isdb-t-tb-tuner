@@ -1,0 +1,3 @@
+# Windows PowerShell 5.1 lê .ps1 sem BOM como ANSI (Windows-1252); emojis/acentos UTF-8 quebram o parse.
+[*.ps1]
+charset = utf-8-bom

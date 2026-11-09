@@ -1,184 +1,90 @@
-# 📺 ISDB-T / ISDB-Tb One-Seg Receiver & Real-Time Player (Windows x64 / x86)
+# ISDB-T / ISDB-Tb Tuner Player (Windows)
+TV Digital aberta (ISDB-T / ISDB-Tb / SBTVD, sinal 1-Seg) no computador com dongle **RTL-SDR**. Programa portátil: tudo o que precisa está nesta pasta.
 
-Receptor de TV Digital aberta (**ISDB-T / ISDB-Tb / SBTVD**) para dongles **RTL-SDR** (RTL2832U com tuners R820T/R828D/E4000) com player **MPV embutido** e **interpolação de resolução e movimento em tempo real**.
+**Conteúdo:** `isdbtb_rx.exe` (programa), DLLs do RTL-SDR, `zadig.exe` (driver USB), `tools\mpv\` (player), `LICENSE`. Requer Windows 10 (1607+) ou 11.
 
----
-
-## 🚀 Guia de Início Rápido (3 Passos)
-
-1. **Conecte** seu dongle RTL-SDR e a antena UHF a uma porta USB do computador.
-2. **Execute o `zadig.exe`** para instalar o driver WinUSB (apenas na primeira vez — instruções abaixo).
-3. **Abra o terminal (PowerShell ou CMD)** na pasta descompactada e execute:
+## Primeiro uso
+1. Conecte o dongle RTL-SDR e a antena UHF.
+2. **Driver (só na primeira vez):** abra `zadig.exe` (aceite o pedido de Administrador) → **Options → List All Devices** → escolha **`Bulk-In, Interface (Interface 0)`** (ou `RTL2832U` / `RTL2838UHIDIR`) → driver **WinUSB** → **Install Driver** (ou **Replace Driver**) → espere *"The driver was installed successfully"*.
+   > ⚠ Se aparecerem Interface 0 e Interface 1, use sempre a **Interface 0** (a 1 é só o controle remoto infravermelho).
+3. Abra o PowerShell nesta pasta (Shift + botão direito → *Abrir janela do PowerShell aqui*) e rode:
    ```powershell
-   # 1. Verificar se o dongle foi reconhecido:
-   .\isdbtb_rx.exe probe
-
-   # 2. Varrer os canais do ar (UHF 14 a 69):
    .\isdbtb_rx.exe scan
-
-   # 3. Assistir a um canal com o player MPV integrado:
    .\isdbtb_rx.exe play -c 23 --player
    ```
+   Troque `23` por um canal encontrado no `scan` (veja com `.\isdbtb_rx.exe list`).
 
----
+## Comandos
+| Comando | Para que serve |
+|---|---|
+| `probe` | Verifica se o dongle foi reconhecido |
+| `scan` | Procura emissoras (UHF 14–45) e salva em `channels.json` |
+| `list` | Mostra os canais salvos e a força do sinal |
+| `play` | Sintoniza um canal e abre o vídeo |
+| `epg` | Mostra a programação das emissoras |
 
-## 🔌 Instalação do Driver USB (Zadig)
-
-Para que o decodificador se comunique diretamente com o hardware do RTL-SDR, é necessário o driver nativo **WinUSB**:
-
-1. Dê um duplo clique no arquivo **`zadig.exe`** presente nesta pasta (conceda permissão de Administrador quando solicitado).
-2. No menu superior do Zadig, clique em **Options** e marque a opção **List All Devices**.
-3. Na caixa de seleção principal, procure e selecione:
-   - `Bulk-In, Interface (Interface 0)`
-   - *(ou `RTL2832U`, `RTL2838UHIDIR`)*
-   > ⚠️ **IMPORTANTE:** Se o seu dongle listar `Interface 0` e `Interface 1`, selecione **obrigatoriamente a `Interface 0`**. A Interface 0 é o barramento de alta velocidade do sinal de RF; a Interface 1 é apenas o receptor infravermelho de controle remoto.
-4. No campo do driver de destino (à direita da seta verde `➔`), certifique-se de que está selecionado **`WinUSB`** (ex: `WinUSB (v6.1.7600.16385)`).
-5. Clique no botão **`Install Driver`** (ou **`Replace Driver`**).
-6. Aguarde alguns segundos até a mensagem **`The driver was installed successfully`**. Pronto! O driver está configurado.
-
----
-
-## 💻 Manual de Uso da CLI (`isdbtb_rx.exe`)
-
-### 1. Diagnóstico do Dongle (`probe`)
-Identifica o dongle conectado, tipo de sintonizador e lista de ganhos suportados:
 ```powershell
-.\isdbtb_rx.exe probe
+.\isdbtb_rx.exe probe                          # o dongle está funcionando?
+.\isdbtb_rx.exe scan                           # procurar canais
+.\isdbtb_rx.exe scan -s 14 -e 69               # procurar em outra faixa
+.\isdbtb_rx.exe list                           # ver canais salvos
+.\isdbtb_rx.exe play -c 23 --player            # assistir ao canal 23
+.\isdbtb_rx.exe play -n GLOBO --player         # assistir pelo nome
+.\isdbtb_rx.exe play -c 23 --ofdm 2 --player   # sinal fraco, reflexos ou em movimento
+.\isdbtb_rx.exe play -c 23 -g 42 --player      # mais ganho (longe da torre)
+.\isdbtb_rx.exe play -c 23 --player -v         # mostrar qualidade do sinal
+.\isdbtb_rx.exe epg                            # programação de todos os canais
+.\isdbtb_rx.exe epg -c 23                      # programação de um canal
+.\isdbtb_rx.exe epg --view                     # programação salva, sem usar o rádio
+.\isdbtb_rx.exe epg --view --json              # exportar em JSON
 ```
 
-### 2. Varredura Automática de Canais (`scan`)
-Realiza a varredura inteligente em dois passos nos canais UHF (14 a 69):
-- **Passo 1 (Triagem Rápida):** Mede a potência de RF (RSSI) e a correlação de prefixo cíclico em ~35ms por canal, descartando ruído.
-- **Passo 2 (Identificação):** Decodifica a tabela SDT (PID `0x0011`) para identificar o nome oficial da emissora (ex: `BAND HD`, `GLOBO`, `SBT`, `RECORD`).
-```powershell
-.\isdbtb_rx.exe scan
-```
-> Os canais encontrados são salvos automaticamente no arquivo local `channels.json` (aplicação 100% autocontida e portátil).
+Opções do `play`:
 
-### 3. Listar Canais Salvos (`list`)
-Exibe a lista de emissoras salvas na varredura:
-```powershell
-.\isdbtb_rx.exe list
-```
+| Opção | Padrão | Efeito |
+|---|---|---|
+| `-c <n>` / `-n <nome>` | 1º canal salvo | Canal por número ou nome |
+| `--player` | desligado | Abre o MPV integrado |
+| `--ofdm 1\|2` | 1 | `2` = modo reforçado (mais CPU). Aceita `--ofdm=2` |
+| `-g <dB>` | 28 | Ganho: longe da torre 38–49.6; perto 20 |
+| `-v` | desligado | Mostra RSSI, OFDM, TMCC, SNR e pacotes em tempo real |
+| `-p <porta>` | 1234 | Porta UDP |
+| `-d <n>` | 0 | Qual dongle, se houver mais de um |
 
-### 4. Reproduzir Canal com MPV Integrado (`play`)
-Sintoniza o canal e abre **automaticamente** a janela do player MPV embutido com interpolação de resolução e movimento ativada:
-```powershell
-# Reproduzir canal 23 com abertura automática do MPV (Modo padrão, leve):
-.\isdbtb_rx.exe play -c 23 --player
+Ajuda de qualquer comando: `.\isdbtb_rx.exe <comando> --help`. Os arquivos `channels.json` e `epg.json` são criados nesta pasta.
 
-# Reproduzir com modo de sincronismo reforçado (--ofdm 2) para sinais fracos ou com reflexos:
-.\isdbtb_rx.exe play -c 23 --ofdm 2 --player
+## Teclas
+| Onde | Tecla | Ação |
+|---|---|---|
+| Terminal (`play`) | `▲`/`▼`, `Enter` | Escolher e sintonizar outro canal salvo |
+| Terminal | `q` ou `Ctrl+C` | Sair (o MPV fecha junto) |
+| MPV | `f` | Tela cheia |
+| MPV | `i` | Estatísticas do vídeo |
+| MPV | `m` / `9` / `0` | Mudo / volume − / volume + |
+| MPV | `b` | Liga/desliga o filtro anti-blocos (deband) |
+| MPV | `q` | Fecha o player |
 
-# Ajustar ganho manual (se estiver muito próximo à antena de transmissão):
-.\isdbtb_rx.exe play -c 23 -g 28.0 --player
+O MPV já vem configurado para o 1-Seg (320x240): baixa latência, ampliação da imagem e filtro anti-blocos. A versão 64 bits usa ampliação de alta qualidade (EWA-Lanczos); a 32 bits usa um perfil leve para PCs antigos.
 
-# Utilizar porta UDP customizada:
-.\isdbtb_rx.exe play -c 23 -p 1234 --player
+## Problemas comuns
+**`probe` diz "Nenhum dispositivo RTL-SDR encontrado" / `rtlsdr_open failed`**
+Reconecte o dongle. Refaça o Zadig (Interface 0 + WinUSB). Evite hub ou porta frontal; use uma porta USB traseira da placa-mãe.
 
-# Exibir status de telemetria em tempo real (RSSI, SNR, erros RS):
-.\isdbtb_rx.exe play -c 23 --player -v
-```
+**`[R82XX] PLL not locked!`**
+Ligue o dongle direto na placa-mãe (queda de tensão na USB) e confira se o cabo da antena não está em curto.
 
-> 📶 **Opções de Sincronismo OFDM (`--ofdm`):**
-> - `--ofdm 1` *(Padrão)*: Modo leve e econômico. Mais suave na CPU.
-> - `--ofdm 2`: Modo reforçado. Mantém a imagem estável com sinal fraco, muito reflexo ou em movimento. Usa mais processamento.
-> - *Aceita tanto sintaxe com espaço (`--ofdm 1` / `--ofdm 2`) quanto com sinal de igual (`--ofdm=1` / `--ofdm=2`).*
-> - *A flag `--ofdm` é exclusiva de `play` e é ignorada nos demais comandos.*
+**`scan` não acha canais**
+Antena perto da janela ou externa (no chão ela perde muito sinal). Haste telescópica com cerca de 12–15 cm. Tente `scan -e 69`. Se souber o canal, teste direto: `play -c <canal> -g 38 --player`. Longe da torre use `-g 42` ou `-g 49.6`; perto, `-g 20`.
 
-> 💡 **Fechamento Automático:** O processo do MPV está vinculado a um *Job Object* do Windows. Ao fechar a CLI (pressionando `Ctrl+C` ou fechando a janela do console), o player MPV fecha instantaneamente sem deixar processos órfãos em segundo plano.
+**MPV abre com imagem preta ou travada**
+Aguarde `TMCC: LOCK` no terminal; a imagem leva 1–2 s para aparecer. Use `-v` para ver o sinal. Com muitos reflexos, tente `--ofdm 2`.
 
-### 5. Guia Eletrônico de Programação (`epg`)
-Captura e exibe a grade de programação transmitida pelas emissoras (tabelas EIT Present/Following e Schedule) com suporte nativo a ARIB STD-B24 / UTF-8 / Latin-1 e persistência local (`epg.json`):
-```powershell
-# Varrer e capturar a programação de todos os canais salvos:
-.\isdbtb_rx.exe epg
+**Quero usar o VLC**
+Rode `.\isdbtb_rx.exe play -c 23` (sem `--player`). No VLC: **Mídia → Abrir Fluxo de Rede** (`Ctrl+N`) → `udp://@127.0.0.1:1234`. Em "Exibir mais opções", ponha o cache de rede em 2000 ms. O título da janela do VLC mostra a URL sem o `@`; isso é normal.
 
-# Capturar programação de um canal específico (ex: Canal 23):
-.\isdbtb_rx.exe epg -c 23
+## Mais informações
+- Projeto e novas versões: https://github.com/lucasbrigida/isdb_t_isdb_tb_tuner_player
+- Todas as opções: https://github.com/lucasbrigida/isdb_t_isdb_tb_tuner_player/blob/main/docs/user/cli_reference.md
 
-# Visualizar instantaneamente a grade salva em cache sem sintonizar o rádio:
-.\isdbtb_rx.exe epg --view
-
-# Visualizar a grade salva de um canal específico:
-.\isdbtb_rx.exe epg -c 23 --view
-
-# Exportar a programação completa no formato JSON estruturado:
-.\isdbtb_rx.exe epg --view --json
-```
-
----
-
-## 🎬 Recursos e Teclas do Player MPV Integrado
-
-O MPV embutido nesta release foi pré-configurado especificamente para aprimorar a qualidade do sinal móvel 1-Seg (originalmente 320x240 / 320x180):
-- **Super Resolução (Upscale):** Algoritmo `ewa_lanczossharp` com `sigmoid-upscaling` para bordas nítidas sem halos.
-- **Filtro Anti-Blocos (Deband):** Remove gradações e artefatos de compressão típicos do H.264 em baixa taxa de bits.
-- **Interpolação de Movimento (Display-Resample):** Sincroniza os quadros do vídeo à taxa de atualização do seu monitor (60Hz / 120Hz / 144Hz / 240Hz) eliminando trepidação (*judder*).
-
-### Teclas de Atalho Úteis no MPV:
-| Tecla | Função |
-|:---:|---|
-| **`f`** | Alternar modo **Tela Cheia** (*Full Screen*) |
-| **`i`** | Exibir painel OSD com estatísticas em tempo real, resolução e FPS |
-| **`d`** | Ligar / Desligar o filtro de deband |
-| **`m`** | Ativar / Desativar mudo (*Mute*) |
-| **`9` / `0`** | Diminuir / Aumentar volume |
-| **`[` / `]`** | Ajustar velocidade de reprodução |
-| **`q`** | Fechar o player |
-
----
-
-## ❓ Perguntas Frequentes & Solução de Problemas (FAQ)
-
-### P1: O comando `probe` retorna *"Nenhum dispositivo RTL-SDR encontrado"* ou *"rtlsdr_open failed"*.
-- **Solução:**
-  1. Desconecte e reconecte o dongle RTL-SDR.
-  2. Abra o `zadig.exe`, marque `Options` -> `List All Devices`.
-  3. Certifique-se de que selecionou **`Bulk-In, Interface (Interface 0)`** e instalou o driver **`WinUSB`**.
-  4. Se estiver usando uma porta USB dianteira do gabinete ou um hub USB sem fonte externa, troque para uma **porta USB traseira direta da placa-mãe**.
-
-### P2: Aparece o erro `[R82XX] PLL not locked!` no terminal.
-- **Causa:** O oscilador local do sintonizador Rafael Micro R820T não conseguiu travar a frequência de RF.
-- **Solução:**
-  1. Verifique se o conector da antena não está em curto-circuito físico.
-  2. Quedas de voltagem na porta USB podem causar instabilidade no tuner. Conecte diretamente na porta USB 3.0/2.0 da placa-mãe.
-  3. A aplicação já inclui compensação automática de 100 ms para acomodação do PLL.
-
-### P3: A varredura (`scan`) não encontra nenhum canal ou apenas canais vazios.
-- **Causa:** Antena mal posicionada, sinal de RF UHF fraco ou ganho inadequado.
-- **Solução:**
-  1. Posicione a antena UHF próxima a uma janela ou em local aberto. Antenas internas no chão recebem atenuação severa de paredes de concreto.
-  2. Ajuste o ganho manual no comando `play` caso saiba o canal da sua cidade:
-     ```powershell
-     .\isdbtb_rx.exe play -c 23 -g 38.0 --player
-     ```
-  3. Em áreas distantes dos transmissores, utilize ganho mais alto (`-g 42.0` ou `-g 49.6`). Em locais próximos a antenas, use ganho moderado (`-g 28.0` ou `-g 20.0`) para evitar saturação do conversor analógico-digital (ADC).
-
-### P4: O player MPV abre mas a imagem fica travada ou preta.
-- **Causa:** O sinal de RF está com taxa de erro elevada (BER) antes do sincronismo TMCC travar.
-- **Solução:**
-  1. Observe o console da CLI: aguarde a indicação `TMCC: LOCK` e `TS do Ar: > 0 pkts`. O desentrelaçador de tempo convolucional do ISDB-T requer cerca de 1 a 2 segundos de sinal contínuo para reconstruir os primeiros quadros válidos de vídeo.
-  2. Pressione a tecla `i` no MPV para verificar o fluxo de entrada.
-  3. Caso o sinal tenha muitos reflexos ou desvanecimento, experimente o modo reforçado: `.\isdbtb_rx.exe play -c <canal> --ofdm 2 --player`.
-
-### P5: Posso reproduzir o fluxo no VLC Media Player em vez do MPV?
-- **Sim!** O decodificador transmite o fluxo MPEG-TS padrão via UDP no formato de 1316 bytes (7 pacotes TS de 188B):
-  1. Inicie a transmissão:
-     ```powershell
-     .\isdbtb_rx.exe play -c 23
-     ```
-  2. Abra o VLC Media Player.
-  3. Vá em **Mídia** -> **Abrir Fluxo de Rede...** (`Ctrl+N`).
-  4. Digite a URL: `udp://@127.0.0.1:1234`
-  5. Marque "Exibir mais opções" e defina o **Cache de Rede** para `2000 ms`.
-  *(Nota: Recomendamos o MPV integrado pelo suporte nativo a interpolação e ausência de problemas com resolução 1-Seg).*
-
----
-
-## 📜 Licença e Componentes
-
-- **ISDB-T / ISDB-Tb Tuner Player:** Licenciado sob a licença de software livre **GNU General Public License v3.0 (GPL-3.0-or-later)**. Veja o arquivo `LICENSE` para os termos completos.
-- **librtlsdr / libusb:** Drivers de código aberto para dispositivos baseados em RTL2832U (GNU GPLv2+ / LGPLv2.1+).
-- **MPV:** Player multimídia de alta precisão (GNU GPLv2+).
-- **Zadig:** Utilitário para instalação de drivers USB no Windows (GNU GPLv3).
+## Licença
+GPL-3.0-or-later (veja `LICENSE`). Componentes: librtlsdr/libusb (GPLv2+/LGPLv2.1+), MPV (GPLv2+), Zadig (GPLv3).

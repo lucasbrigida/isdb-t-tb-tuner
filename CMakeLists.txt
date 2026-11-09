@@ -98,8 +98,17 @@ endif()
 set(DEPS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps")
 set(SETUP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tools/rtl-sdr")
 set(RTLSDR_ROOT "${DEPS_DIR}/rtlsdr")
-set(FFTW3_ROOT "${DEPS_DIR}/fftw3")
-set(VOLK_ROOT "${DEPS_DIR}/volk-install")
+# deps/fftw3 e deps/volk-install sao builds x64; x86 usa diretorios proprios (-x86) ou,
+# se ausentes, os shims header-only de include/third_party (sem linkar libs incompativeis).
+if(IS_32BIT)
+    set(DEPS_ARCH "x86")
+    set(FFTW3_ROOT "${DEPS_DIR}/fftw3-x86")
+    set(VOLK_ROOT "${DEPS_DIR}/volk-install-x86")
+else()
+    set(DEPS_ARCH "x64")
+    set(FFTW3_ROOT "${DEPS_DIR}/fftw3")
+    set(VOLK_ROOT "${DEPS_DIR}/volk-install")
+endif()
 
 # Include directories
 include_directories(
@@ -113,7 +122,7 @@ include_directories(
 # Link directories
 link_directories(
     "${SETUP_DIR}"
-    "${RTLSDR_ROOT}/x64"
+    "${RTLSDR_ROOT}/${DEPS_ARCH}"
     "${FFTW3_ROOT}"
     "${VOLK_ROOT}/lib"
 )
